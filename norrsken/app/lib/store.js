@@ -16,7 +16,8 @@ const DEFAULT_CONFIG = {
     hideAdult: true,
     cleanNames: true,
     liveFormat: 'hls', // hls | ts
-    audioMode: 'auto', // auto | aac | copy
+    audioMode: 'auto', // auto | eac3 | ac3 | aac | copy
+    maxRes: 'orig', // orig | 1080 (only when the picture must be converted)
     previews: 'sound', // sound | muted | off
     directPlay: 'auto', // auto: TV fetches from provider directly, falls back to proxy | off: always via server
     userAgent: '',

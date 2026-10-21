@@ -16,7 +16,9 @@ Adresserna gäller så länge Home Assistant har IP-adressen 192.168.85.51. Ge d
 ## Om något inte fungerar
 
 - **Buffrar eller hackar:** välj *Uppspelning: Direkt från leverantören* i inställningarna. Byt format för live-tv till MPEG-TS om kanaler fortfarande hackar.
-- **Inget ljud i filmer:** välj *Gör alltid om till AAC* under Avancerat.
+- **4K:** filmer i HEVC/H.264 spelas i full 4K utan konvertering. Bara format som tv:n inte kan visa konverteras, i 4K om inget annat väljs under *Bild som måste konverteras*.
+- **Surroundljud:** Dolby Digital och Dolby Digital Plus spelas orört. DTS, DTS-HD och TrueHD görs om till Dolby Digital Plus 5.1 med alla kanaler, som tv:n skickar vidare till soundbaren via eARC. Ändra under *Ljud i filmer och serier*.
+- **Inget ljud i filmer:** välj *Alltid stereo (AAC)* under Avancerat.
 - **Sidan öppnas inte:** kontrollera att tillägget kör och att du är på hemmanätverket.
 
 Inställningar, listor och historik sparas i tilläggets data och följer med i Home Assistants säkerhetskopior.

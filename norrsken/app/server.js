@@ -28,6 +28,12 @@ const proxy = new Proxy();
 
 /* ------------------------------------------------------------------ helpers */
 
+function parseCaps(s) {
+  const caps = {};
+  for (const c of String(s || '').split(',')) if (/^\w+$/.test(c)) caps[c] = true;
+  return caps;
+}
+
 /** Path prefix when opened through Home Assistant's ingress (the 'Open web UI' button). */
 function ingressBase(req) {
   const p = String(req.headers['x-ingress-path'] || '');
@@ -488,7 +494,17 @@ route('GET', '/api/stream/:type/:id', async (req, res, q, p) => {
     sources.push(files[files.length - 1]);
   }
   if (nativeOk && ff.has()) sources.push(remux);
-  ok(res, { live: false, sources, t: ff.has() ? t : '', ext });
+  // Look inside the file: if its sound (DTS, TrueHD…) or picture can't be played on this screen as it is,
+  // start with the converter instead of letting the screen play silent video or fail.
+  let order = sources;
+  let info = null;
+  if (ff.has()) {
+    const caps = parseCaps(q.get('caps'));
+    try { info = await Promise.race([ff.probe(src.primary, catalog.ua()), new Promise((_, no) => setTimeout(() => no(new Error('t')), 7000))]); } catch (_) { /* unknown: keep order */ }
+    const o = store.config.options;
+    if (info && !ff.playsAsIs(info, caps, { audioMode: o.audioMode, maxRes: o.maxRes })) order = [remux, ...sources.filter(x => x !== remux)];
+  }
+  ok(res, { live: false, sources: order, t: ff.has() ? t : '', ext, media: info ? { h: info.height, v: info.video, a: (info.audio[0] || {}).codec, ch: (info.audio[0] || {}).ch } : null });
 });
 
 route('GET', '/api/probe', async (req, res, q) => {
@@ -502,9 +518,8 @@ route('GET', '/remux', (req, res, q) => {
   if (!ff.has()) return bad(res, 'ffmpeg saknas', 501);
   const url = proxy.untoken(q.get('t'));
   if (!proxy.isAllowed(url)) return bad(res, 'forbidden', 403);
-  const caps = {};
-  for (const c of String(q.get('caps') || '').split(',')) if (c) caps[c] = true;
-  ff.remux(req, res, url, { ss: Math.max(0, +q.get('ss') || 0), a: +q.get('a') || 0, ua: catalog.ua(), audioMode: store.config.options.audioMode, caps });
+  const o = store.config.options;
+  ff.remux(req, res, url, { ss: Math.max(0, +q.get('ss') || 0), a: +q.get('a') || 0, ua: catalog.ua(), audioMode: o.audioMode, maxRes: o.maxRes, caps: parseCaps(q.get('caps')) });
 });
 
 route('GET', '/subs', (req, res, q) => {
@@ -557,7 +572,8 @@ route('POST', '/api/setup', async (req, res) => {
     if (typeof o.appName === 'string') opt.appName = o.appName.trim().slice(0, 24) || 'Norrsken';
     for (const k of ['hideAdult', 'cleanNames']) if (k in o) opt[k] = !!o[k];
     if (['hls', 'ts'].includes(o.liveFormat)) opt.liveFormat = o.liveFormat;
-    if (['auto', 'aac', 'copy'].includes(o.audioMode)) opt.audioMode = o.audioMode;
+    if (['auto', 'eac3', 'ac3', 'aac', 'copy'].includes(o.audioMode)) opt.audioMode = o.audioMode;
+    if (['orig', '1080'].includes(o.maxRes)) opt.maxRes = o.maxRes;
     if (['sound', 'muted', 'off'].includes(o.previews)) opt.previews = o.previews;
     if (['auto', 'off'].includes(o.directPlay)) opt.directPlay = o.directPlay;
     for (const k of ['userAgent', 'epgUrl', 'kidsPattern']) if (typeof o[k] === 'string') opt[k] = o[k].trim().slice(0, 500);

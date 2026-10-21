@@ -149,7 +149,7 @@
     item: function (type, id) { return NS.api.get('api/item/' + type + '/' + encodeURIComponent(id)); },
     search: function (s) { return NS.api.get('api/search?q=' + encodeURIComponent(s)); },
     cats: function (type) { return NS.api.get('api/cats/' + type); },
-    stream: function (type, id, ext) { return NS.api.get('api/stream/' + type + '/' + encodeURIComponent(id) + (ext ? '?ext=' + ext : '')); },
+    stream: function (type, id, ext) { return NS.api.get('api/stream/' + type + '/' + encodeURIComponent(id) + '?caps=' + NS.caps + (ext ? '&ext=' + ext : ''), 20000); },
     probe: function (t) { return req('GET', 'api/probe?t=' + t, null, 30000); },
     guide: function (id, h) { return NS.api.get('api/epg/channel/' + encodeURIComponent(id) + '?hours=' + (h || 6)); },
     state: function () { return req('GET', 'api/state/' + NS.profile.id); },
@@ -176,6 +176,8 @@
       if (ok('audio/mp4; codecs="ec-3"')) out.push('eac3');
       if (ok('audio/mp4; codecs="opus"')) out.push('opus');
       if (ok('video/mp4; codecs="hvc1.1.6.L120.90"') || ok('video/mp4; codecs="hev1.1.6.L120.90"')) out.push('hevc');
+      if (ok('video/mp4; codecs="hvc1.2.4.L153.90"') || ok('video/mp4; codecs="hev1.2.4.L153.90"')) out.push('hevc10');
+      if (ok('audio/mp4; codecs="flac"')) out.push('flac');
       if (ok('video/mp4; codecs="vp09.00.10.08"')) out.push('vp9');
       if (ok('video/mp4; codecs="av01.0.05M.08"')) out.push('av1');
     } catch (e) { /* assume basics */ }

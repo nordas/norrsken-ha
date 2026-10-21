@@ -55,6 +55,7 @@ function probe(url, ua) {
           dur: parseFloat(j.format && j.format.duration) || 0,
           video: (streams.find(s => s.codec_type === 'video') || {}).codec_name || '',
           height: (streams.find(s => s.codec_type === 'video') || {}).height || 0,
+          pix: (streams.find(s => s.codec_type === 'video') || {}).pix_fmt || '',
           audio: [],
           subs: [],
         };
@@ -80,42 +81,74 @@ function killOnClose(res, p) {
   p.on('error', () => { if (!res.headersSent) res.writeHead(500); res.end(); });
 }
 
-/** Remux to fragmented MP4 starting at `ss` seconds, picking audio track `a`. */
 /**
- * caps: what the viewing browser can decode, e.g. { ac3: true, eac3: false, hevc: true }.
- * Audio and video the browser cannot play are converted (AAC stereo / H.264); everything else is copied untouched.
+ * Decide what has to be converted for this screen.
+ * caps: what the viewing device decodes, e.g. { ac3: true, eac3: true, hevc: true, hevc10: true }.
+ * opts.audioMode:
+ *   auto  – keep the original sound when the screen can play it; DTS / TrueHD / FLAC / PCM become
+ *           Dolby Digital Plus 5.1 (or Dolby Digital 5.1, or AAC) depending on what the screen supports
+ *   eac3  – always Dolby Digital Plus 5.1      ac3 – always Dolby Digital 5.1
+ *   aac   – always AAC stereo                  copy – never touch the sound
+ * opts.maxRes: 'orig' keeps 4K when the picture has to be converted, '1080' scales down (lighter on the server).
  */
-async function remux(req, res, url, { ss = 0, a = 0, ua, audioMode = 'auto', caps = {} } = {}) {
+function plan(info, caps = {}, { a = 0, audioMode = 'auto', maxRes = 'orig' } = {}) {
+  const audio = info && info.audio[a];
+  const ac = audio ? audio.codec : '';
+  const ch = audio ? audio.ch || 2 : 2;
+  const plays = (c) => c === 'aac' || c === 'mp3' || (c === 'ac3' && caps.ac3) || (c === 'eac3' && caps.eac3) || (c === 'opus' && caps.opus) || (c === 'flac' && caps.flac);
+  let aout;
+  if (!audio || audioMode === 'copy') aout = { copy: true };
+  else if (audioMode === 'aac') aout = ac === 'aac' && ch <= 2 ? { copy: true } : { codec: 'aac', ch: 2, br: '192k' };
+  else if (audioMode === 'eac3') aout = ac === 'eac3' ? { copy: true } : { codec: 'eac3', ch: Math.min(ch, 6), br: ch > 2 ? '768k' : '256k' };
+  else if (audioMode === 'ac3') aout = ac === 'ac3' ? { copy: true } : { codec: 'ac3', ch: Math.min(ch, 6), br: ch > 2 ? '640k' : '256k' };
+  else if (plays(ac)) aout = { copy: true };
+  else if (caps.eac3) aout = { codec: 'eac3', ch: Math.min(ch, 6), br: ch > 2 ? '768k' : '256k' };
+  else if (caps.ac3) aout = { codec: 'ac3', ch: Math.min(ch, 6), br: ch > 2 ? '640k' : '256k' };
+  else aout = { codec: 'aac', ch: 2, br: '192k' };
+
+  const vc = info ? info.video : '';
+  const tenBit = info && /10/.test(info.pix || '');
+  const hevcOk = caps.hevc && (!tenBit || caps.hevc10);
+  const vcopy = !info || vc === 'h264' || ((vc === 'hevc' || vc === 'h265') && hevcOk) || (vc === 'vp9' && caps.vp9) || (vc === 'av1' && caps.av1);
+  const big = info && info.height > 1100;
+  return { audio: aout, videoCopy: vcopy, scale: !vcopy && big && maxRes === '1080', big, vcodec: vc };
+}
+
+/** True when the file can be played as it is (no conversion at all). */
+function playsAsIs(info, caps, opts) {
+  const p = plan(info, caps, opts);
+  return p.videoCopy && p.audio.copy;
+}
+
+/** Remux to fragmented MP4 starting at `ss` seconds, picking audio track `a`; converts only what the screen can't play. */
+async function remux(req, res, url, { ss = 0, a = 0, ua, audioMode = 'auto', maxRes = 'orig', caps = {} } = {}) {
   let info = null;
   try { info = await probe(url, ua); } catch (_) { /* go blind */ }
-  const audio = info && info.audio[a];
-  const acodec = audio ? audio.codec : '';
-  const audioOk = acodec === 'aac' || acodec === 'mp3' || (acodec === 'ac3' && caps.ac3) || (acodec === 'eac3' && caps.eac3) || (acodec === 'opus' && caps.opus);
-  const copyAudio = audioMode === 'copy' || (audioMode !== 'aac' && audio && audioOk);
-  const vcodec = info ? info.video : '';
-  const videoOk = !info || vcodec === 'h264' || ((vcodec === 'hevc' || vcodec === 'h265') && caps.hevc) || (vcodec === 'vp9' && caps.vp9) || (vcodec === 'av1' && caps.av1);
+  const p = plan(info, caps, { a, audioMode, maxRes });
   const args = ['-hide_banner', '-loglevel', 'error', '-user_agent', ua || DEFAULT_UA,
     '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5'];
   if (ss > 0) args.push('-ss', String(ss));
   args.push('-i', url, '-map', '0:v:0', '-map', '0:a:' + (a | 0) + '?');
-  if (videoOk) args.push('-c:v', 'copy');
-  else {
-    // converting 4K in real time is heavy: always go down to at most 1080p and use the fastest presets for big sources
-    const big = (info && info.height) > 1100;
-    args.push('-c:v', 'libx264', '-preset', big ? 'ultrafast' : 'veryfast', '-tune', 'zerolatency', '-crf', big ? '23' : '21',
-      '-maxrate', '12M', '-bufsize', '24M', '-pix_fmt', 'yuv420p', '-threads', '0', '-vf', "scale='min(1920,iw)':-2");
+  if (p.videoCopy) {
+    args.push('-c:v', 'copy');
+    if (/hevc|h265/.test(p.vcodec)) args.push('-tag:v', 'hvc1');
+  } else {
+    // picture in a format the screen can't decode: H.264, in 4K unless "max 1080p" is chosen
+    const vf = p.scale ? "scale='min(1920,iw)':-2" : "scale='min(3840,iw)':-2";
+    args.push('-c:v', 'libx264', '-preset', p.big ? 'superfast' : 'veryfast', '-crf', p.big ? '22' : '20',
+      '-maxrate', p.big && !p.scale ? '40M' : '12M', '-bufsize', p.big && !p.scale ? '80M' : '24M',
+      '-pix_fmt', 'yuv420p', '-threads', '0', '-vf', vf);
   }
-  if (copyAudio) args.push('-c:a', 'copy');
-  else args.push('-c:a', 'aac', '-b:a', '192k', '-ac', '2');
-  if (videoOk && /hevc|h265/.test(vcodec)) args.push('-tag:v', 'hvc1');
-  args.push('-sn', '-dn', '-f', 'mp4', '-movflags', 'frag_keyframe+empty_moov+default_base_moof', '-frag_duration', '3000000', 'pipe:1');
-  const p = spawn(FF, args);
-  killOnClose(res, p);
+  if (p.audio.copy) args.push('-c:a', 'copy');
+  else args.push('-c:a', p.audio.codec, '-b:a', p.audio.br, '-ac', String(p.audio.ch));
+  args.push('-sn', '-dn', '-f', 'mp4', '-movflags', 'frag_keyframe+empty_moov+delay_moov+default_base_moof', '-frag_duration', '3000000', 'pipe:1');
+  const proc = spawn(FF, args);
+  killOnClose(res, proc);
   let err = '';
-  p.stderr.on('data', d => { if (err.length < 2000) err += d; });
-  p.on('close', (code) => { if (code && code !== 255) console.error('[remux] ffmpeg exit', code, err.split('\n').slice(-3).join(' ')); });
+  proc.stderr.on('data', d => { if (err.length < 2000) err += d; });
+  proc.on('close', (code) => { if (code && code !== 255) console.error('[remux] ffmpeg exit', code, err.split('\n').slice(-3).join(' ')); });
   res.writeHead(200, { 'Content-Type': 'video/mp4', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' });
-  p.stdout.pipe(res);
+  proc.stdout.pipe(res);
 }
 
 /** Extract embedded text subtitle `s` as WebVTT, with absolute timestamps, starting near `ss`. */
@@ -130,4 +163,4 @@ function subs(req, res, url, { s = 0, ss = 0, ua } = {}) {
   p.stdout.pipe(res);
 }
 
-module.exports = { has, probe, remux, subs, langName };
+module.exports = { has, probe, remux, subs, langName, plan, playsAsIs };
