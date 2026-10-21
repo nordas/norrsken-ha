@@ -1,6 +1,6 @@
 {
   "name": "norrsken-tv",
-  "version": "1.0.0",
+  "version": "1.5.0",
   "description": "IPTV-app med streamingkänsla för Titan OS (Philips) och andra smart-TV-webbläsare. Xtream Codes eller M3U, EPG, filmer, serier.",
   "main": "server.js",
   "private": true,
