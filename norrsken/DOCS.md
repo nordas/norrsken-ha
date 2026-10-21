@@ -1,7 +1,22 @@
 # Norrsken IPTV
 
-1. Starta tillägget.
-2. Öppna `http://<home-assistant-ip>:8787/setup` i mobilen och fyll i uppgifterna från din IPTV-leverantör.
-3. Öppna `http://<home-assistant-ip>:8787/` på tv:n (via DevView på Titan OS).
+## Adresser
+
+- **Tv-appen:** http://192.168.85.51:8787/
+- **Inställningar (mobilen):** http://192.168.85.51:8787/setup
+
+Adresserna gäller så länge Home Assistant har IP-adressen 192.168.85.51. Ge den gärna en fast adress i routern.
+
+## Kom igång
+
+1. Öppna inställningarna i mobilen och fyll i uppgifterna från din IPTV-leverantör (Xtream Codes eller M3U-länk). Tryck *Testa anslutningen* och sedan *Spara och hämta utbudet*.
+2. Bocka ur kategorier du inte vill se och lägg upp profiler.
+3. Lägg in tv-appens adress i Titan OS Partner Portal (DevView → Sandbox), para tv:n med koden i DevView-appen och starta Norrsken.
+
+## Om något inte fungerar
+
+- **Buffrar eller hackar:** välj *Uppspelning: Direkt från leverantören* i inställningarna. Byt format för live-tv till MPEG-TS om kanaler fortfarande hackar.
+- **Inget ljud i filmer:** välj *Gör alltid om till AAC* under Avancerat.
+- **Sidan öppnas inte:** kontrollera att tillägget kör och att du är på hemmanätverket.
 
 Inställningar, listor och historik sparas i tilläggets data och följer med i Home Assistants säkerhetskopior.
