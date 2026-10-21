@@ -255,11 +255,13 @@
       if (kind === 'top10') c.insertBefore(h('div', { class: 'num', text: String(idx + 1) }), f);
       var xbg = h('div', { class: 'xbg', style: 'background:' + NS.fallbackBg(item.n) });
       f.appendChild(xbg);
-      f.appendChild(h('div', { class: 'fb', style: 'background:' + NS.fallbackBg(item.n), text: item.n }));
+      var title0 = item.t === 'episode' ? item.sn || item.n : item.n;
+      f.appendChild(h('div', { class: 'fb', style: 'background:' + NS.fallbackBg(title0), text: title0 }));
       if (item.img) f.appendChild(NS.pic(item.img, kind === 'top10' ? 'cover' : 'pimg'));
       if (kind === 'poster') {
         f.appendChild(h('div', { class: 'xshade' }));
-        f.appendChild(h('div', { class: 'xt' }, [h('small', {}, [NS.icon('aurora'), NS.kindLabel(item)]), h('b', { text: item.n })]));
+        var ep = item.t === 'episode';
+        f.appendChild(h('div', { class: 'xt' }, [h('small', {}, [NS.icon('aurora'), ep ? NS.epCode(item) + ' ' + item.n : NS.kindLabel(item)]), h('b', { text: ep ? item.sn || item.n : item.n })]));
         if (item.r > 0) f.appendChild(h('div', { class: 'badge' }, [NS.icon('star'), (Math.round(item.r * 10) / 10).toFixed(1)]));
         if (item.add && Date.now() / 1000 - item.add < 10 * 86400) c.appendChild(h('div', { class: 'nbadge', text: item.t === 'series' ? 'Nytt' : 'Ny' }));
         NS.itemColor(item).then(function (col) {
@@ -268,7 +270,8 @@
         if (item.bd) setBd(c, item.bd);
       }
       var pr = NS.state.progress[item.k];
-      if (pr && pr.dur && pr.pos > 0) f.appendChild(NS.progEl(pr.pos / pr.dur * 100));
+      var pos = item.pos || (pr && pr.pos) || 0, dur = item.dur || (pr && pr.dur) || 0;
+      if (dur && pos > 0) f.appendChild(NS.progEl(pos / dur * 100));
       return c;
     }
     if (kind === 'continue') {
@@ -476,8 +479,8 @@
         return;
       }
       el.appendChild(NS.metaEl(d, { kind: true }));
-      if (d.p) el.appendChild(h('div', { class: 'desc', text: d.p }));
-      else if (d.pos && d.dur) el.appendChild(h('div', { class: 'desc', style: 'color:var(--text-2)', text: NS.left(d.pos, d.dur) }));
+      if (d.pos && d.dur) el.appendChild(h('div', { class: 'desc', style: 'color:var(--text-2)', text: NS.left(d.pos, d.dur) }));
+      else if (d.p) el.appendChild(h('div', { class: 'desc', text: d.p }));
     };
     if (this._infoK === (d && d.k)) { build(); return; }
     this._infoK = d && d.k;

@@ -82,7 +82,15 @@ function continueItems(st) {
     .filter(p => p && p.item && (p.upnext || (p.dur > 0 && p.pos > 15 && p.pos / p.dur < 0.95)))
     .sort((a, b) => b.ts - a.ts)
     .slice(0, 30)
-    .map(p => ({ ...p.item, pos: p.pos, dur: p.dur || p.item.dur || 0, upnext: !!p.upnext }));
+    .map(p => {
+      const it = { ...p.item, pos: p.pos, dur: p.dur || p.item.dur || 0, upnext: !!p.upnext };
+      // episodes show the series' poster and backdrop, like the other rows
+      if (it.t === 'episode' && it.sid) {
+        const s = catalog.get('series', it.sid);
+        if (s) { it.still = it.img; it.img = s.img || it.img; it.bd = it.bd || s.bd; it.sn = it.sn || s.n; it.r = it.r || s.r; it.y = it.y || s.y; it.g = it.g || s.g; }
+      }
+      return it;
+    });
 }
 
 function catRow(type, cat, prof, title, loadItems = true) {
@@ -94,7 +102,7 @@ function catRow(type, cat, prof, title, loadItems = true) {
 function homePage(prof, st) {
   const rows = [];
   const cw = continueItems(st);
-  if (cw.length) rows.push(row('cw', 'Fortsätt titta', 'continue', cw, { limit: 30 }));
+  if (cw.length) rows.push(row('cw', 'Fortsätt titta', 'poster', cw, { limit: 30 }));
   const ml = st.myList.map(m => m.item).filter(Boolean);
   const mlv = ml.filter(i => i.t !== 'live');
   if (mlv.length) rows.push(row('ml', 'Min lista', 'poster', mlv, { limit: 60 }));

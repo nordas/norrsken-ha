@@ -214,7 +214,7 @@
     if (!R || !card || this.mode !== 'rows') return;
     var f = card.querySelector('.frame');
     var kind = R.def.kind;
-    if (kind === 'poster') NS.preview.start(it, f, { delay: 2400, before: f.querySelector('.xshade') });
+    if (kind === 'poster') NS.preview.start(it.t === 'episode' ? Object.assign({}, it, { bd: it.bd }) : it, f, { delay: 2400, before: f.querySelector('.xshade') });
     else if (kind === 'live') NS.preview.start(it, f, { delay: 1800, before: f.querySelector('.ltag') });
     else if (kind === 'continue') NS.preview.start(it, f, { delay: 2200, before: f.querySelector('.shade') });
   };
