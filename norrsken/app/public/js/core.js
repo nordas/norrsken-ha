@@ -262,7 +262,8 @@
       case 'MediaRewind': case 'MediaTrackPrevious': return 'rw';
       case 'GoBack': case 'BrowserBack': return 'back';
     }
-    if (key && key.length === 1 && /[a-zåäö]/i.test(key)) return 'char:' + key.toLowerCase();
+    if (key && key.length === 1 && /[a-zåäöéü]/i.test(key)) return 'char:' + key.toLowerCase();
+    if (key && key.length === 1 && /[\-:&']/.test(key)) return 'char:' + key;
     return null;
   };
 

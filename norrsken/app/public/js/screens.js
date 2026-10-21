@@ -655,13 +655,19 @@
     NS.router.push(new Detail(it));
   };
   Search.prototype.destroy = function () { this.rows.destroy(); };
-  Search.prototype.onKey = function (a) {
+  Search.prototype.onKey = function (a, e) {
+    var key = e && e.key;
+    // Esc (computer keyboard) always leaves search
+    if (key === 'Escape') { NS.router.pop(); return; }
+    // Backspace / the remote's Back: erase one letter, like a keyboard; with nothing left it leaves search
     if (a === 'back') {
       if (this.zone === 'rows') { this.setZone('kb'); return; }
-      if (this.q) { this.type('clear'); return; }
+      if (this.q) { this.type('del'); return; }
       NS.router.pop();
       return;
     }
+    if (key === ' ' && this.zone === 'kb') { this.type(' '); return; }
+    if (key && key.length === 1 && /[0-9a-zåäöéü\-:&']/i.test(key) && a.indexOf('char:') !== 0 && a.indexOf('num') !== 0 && a !== 'left' && a !== 'right') { this.type(key.toLowerCase()); return; }
     if (a.indexOf('num') === 0) { this.type(a.slice(3)); return; }
     if (a.indexOf('char:') === 0) { this.type(a.slice(5)); return; }
     if (this.zone === 'rows') { this.rows.onKey(a); return; }
