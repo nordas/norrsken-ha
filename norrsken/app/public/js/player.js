@@ -126,7 +126,7 @@
     this.clk = NS.clock(this.clockEl);
     if (!first) return;
     this.play(this.item, this.start);
-    this.every(5000, function () { self.watchdog(); });
+    this.every(3000, function () { self.watchdog(); });
     this.every(15000, function () { self.saveProgress(); });
     if (this.live) this.every(30000, function () { NS.needEpg([self.item.id]); });
   };
@@ -214,6 +214,7 @@
     this.netRetry = 0;
     this.mediaRetry = 0;
     this.played = false;
+    this.srcStart = Date.now();
     this.lastMove = Date.now();
     this.pendingSeek = 0;
     at = at || 0;
@@ -266,8 +267,36 @@
   };
 
   Player.prototype.playPromise = function () {
-    var p = this.video.play();
-    if (p && p.catch) p.catch(function () { /* autoplay blocked; user presses OK */ });
+    var self = this, v = this.video;
+    var p = v.play();
+    if (!p || !p.catch) return;
+    p.catch(function (e) {
+      if (!e || e.name !== 'NotAllowedError') return;
+      // phones and some browsers refuse to start with sound unless you tapped right before: start muted instead
+      v.muted = true;
+      var p2 = v.play();
+      if (p2 && p2.catch) p2.catch(function () { self.tapToPlay(); });
+      self.unmuteHint();
+    });
+  };
+
+  /** Shown when playback started muted: one tap turns the sound on. */
+  Player.prototype.unmuteHint = function () {
+    var self = this;
+    if (this.unmuteEl) return;
+    var b = this.unmuteEl = h('button', { class: 'btn focus unmute' }, [NS.icon('sub'), 'Tryck för ljud']);
+    b.addEventListener('click', function (e) { e.stopPropagation(); self.video.muted = false; self.video.play(); b.remove(); self.unmuteEl = null; });
+    this.el.appendChild(b);
+  };
+
+  /** The browser wouldn't start the video at all: show a big play button. */
+  Player.prototype.tapToPlay = function () {
+    var self = this;
+    this.buffering(false);
+    if (this.tapEl) return;
+    var b = this.tapEl = h('button', { class: 'tap-play' }, NS.icon('play'));
+    b.addEventListener('click', function (e) { e.stopPropagation(); self.video.muted = false; self.video.play(); b.remove(); self.tapEl = null; });
+    this.el.appendChild(b);
   };
 
   Player.prototype.onHlsError = function (d) {
@@ -309,7 +338,15 @@
 
   Player.prototype.watchdog = function () {
     var v = this.video;
-    if (this.errShown || v.paused || !this.sources) return;
+    if (this.errShown || !this.sources || this.tapEl) return;
+    // never got going on this source: try the next one instead of spinning forever
+    if (!this.played && Date.now() - (this.srcStart || 0) > (this.kind === 'remux' ? 30000 : 15000)) {
+      console.log('[norrsken] source', this.si, this.kind, 'did not start, trying next');
+      this.srcStart = Date.now();
+      this.next('Strömmen startade inte');
+      return;
+    }
+    if (v.paused) return;
     if (Date.now() - (this.lastMove || 0) > 25000) {
       // stuck: reload the current source once, then fall back
       if (!this.reloaded) { this.reloaded = true; this.startSource(this.live ? 0 : this.cur()); }
