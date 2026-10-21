@@ -372,7 +372,7 @@ svg.i.fill { fill: currentColor; stroke: none; }
 .nextup .cd i { position: absolute; left: 0; bottom: 0; height: .6rem; background: var(--red); }
 .perror { position: absolute; inset: 0; z-index: 12; background: rgba(0,0,0,.88); display: none; align-items: center; justify-content: center; }
 .perror.on { display: flex; }
-.perror .box { width: 92rem; }
+.perror .box { width: 92rem; max-width: calc(100% - 16rem); }
 .perror h2 { font-size: 4.6rem; font-weight: 800; }
 .perror p { margin-top: 1.6rem; color: var(--text-2); font-size: 2.5rem; }
 .perror .btns { margin-top: 4rem; }

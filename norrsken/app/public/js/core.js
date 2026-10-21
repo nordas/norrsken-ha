@@ -165,6 +165,24 @@
     return location.origin;
   };
 
+  /** Codecs this TV/browser can decode; the server converts anything else when remuxing. */
+  NS.caps = (function () {
+    var out = [];
+    try {
+      var v = document.createElement('video');
+      var ms = window.MediaSource;
+      var ok = function (t) { return !!(v.canPlayType(t) || (ms && ms.isTypeSupported && ms.isTypeSupported(t))); };
+      if (ok('audio/mp4; codecs="ac-3"')) out.push('ac3');
+      if (ok('audio/mp4; codecs="ec-3"')) out.push('eac3');
+      if (ok('audio/mp4; codecs="opus"')) out.push('opus');
+      if (ok('video/mp4; codecs="hvc1.1.6.L120.90"') || ok('video/mp4; codecs="hev1.1.6.L120.90"')) out.push('hevc');
+      if (ok('video/mp4; codecs="vp09.00.10.08"')) out.push('vp9');
+      if (ok('video/mp4; codecs="av01.0.05M.08"')) out.push('av1');
+    } catch (e) { /* assume basics */ }
+    return out.join(',');
+  })();
+  NS.remuxUrl = function (base, at, a) { return base + '&ss=' + Math.floor(at || 0) + '&a=' + (a || 0) + '&caps=' + NS.caps; };
+
   /* ---------------------------------------------------------------- direct playback */
   /** Kinds of direct (TV → provider) playback that failed this session; those go via the server instead. */
   NS.directBad = {};

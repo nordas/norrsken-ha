@@ -98,9 +98,15 @@
     on('error', function () {
       if (self.kind === 'hls' && self.hls) return; // hls.js reports its own errors
       var cs = self.sources && self.sources[self.si];
-      if (cs && cs.direct && !self.played && cs.kind === 'file') NS.directBad.file = true;
       var err = v.error;
-      self.fail(err ? 'Mediafel ' + err.code : 'Mediafel');
+      if (cs && cs.direct && !self.played && cs.kind === 'file' && err && err.code === 2) NS.directBad.file = true;
+      // the file itself can't be decoded here (code 4): skip the other copies of the same file and go to the converter
+      if (cs && cs.kind === 'file' && err && err.code === 4 && self.sources) {
+        var ri = -1;
+        for (var k = self.si + 1; k < self.sources.length; k++) if (self.sources[k].kind === 'remux') { ri = k; break; }
+        if (ri > 0) { var at = self.played ? self.cur() : self.start; self.si = ri; self.startSource(at); return; }
+      }
+      self.fail(err ? (err.code === 4 ? 'Formatet stöds inte av den här skärmen' : 'Mediafel ' + err.code) : 'Mediafel');
     });
 
     this._epg = function () { if (self.live) { self.renderChan(); if (self.panel === 'channels') self.paintChannels(); } };
@@ -238,7 +244,7 @@
     }
     if (src.kind === 'remux') {
       this.offset = at;
-      v.src = src.url + '&ss=' + Math.floor(at) + '&a=' + this.audioIdx;
+      v.src = NS.remuxUrl(src.url, at, this.audioIdx);
       this.playPromise();
       if (this.sub && this.sub.kind === 'ff') this.startSubs(this.sub.i, at);
       return;
@@ -314,7 +320,7 @@
     if (this.kind === 'remux') {
       this.offset = t;
       this.buffering(true);
-      this.video.src = this.sources[this.si].url + '&ss=' + Math.floor(t) + '&a=' + this.audioIdx;
+      this.video.src = NS.remuxUrl(this.sources[this.si].url, t, this.audioIdx);
       this.playPromise();
       if (this.sub && this.sub.kind === 'ff') this.rebaseSubs(t);
     } else {

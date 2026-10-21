@@ -502,7 +502,9 @@ route('GET', '/remux', (req, res, q) => {
   if (!ff.has()) return bad(res, 'ffmpeg saknas', 501);
   const url = proxy.untoken(q.get('t'));
   if (!proxy.isAllowed(url)) return bad(res, 'forbidden', 403);
-  ff.remux(req, res, url, { ss: Math.max(0, +q.get('ss') || 0), a: +q.get('a') || 0, ua: catalog.ua(), audioMode: store.config.options.audioMode });
+  const caps = {};
+  for (const c of String(q.get('caps') || '').split(',')) if (c) caps[c] = true;
+  ff.remux(req, res, url, { ss: Math.max(0, +q.get('ss') || 0), a: +q.get('a') || 0, ua: catalog.ua(), audioMode: store.config.options.audioMode, caps });
 });
 
 route('GET', '/subs', (req, res, q) => {

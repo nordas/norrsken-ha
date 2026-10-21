@@ -22,7 +22,7 @@
       mp.attachMediaElement(v);
       mp.load();
     } else if (src.kind === 'remux') {
-      v.src = src.url + '&ss=' + Math.floor(at || 0) + '&a=0';
+      v.src = NS.remuxUrl(src.url, at, 0);
     } else {
       v.src = src.url;
       if (at > 0) v.addEventListener('loadedmetadata', function once() { v.removeEventListener('loadedmetadata', once); try { v.currentTime = at; } catch (e) { /* ignore */ } });

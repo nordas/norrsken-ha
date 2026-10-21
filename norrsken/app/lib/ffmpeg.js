@@ -80,18 +80,28 @@ function killOnClose(res, p) {
 }
 
 /** Remux to fragmented MP4 starting at `ss` seconds, picking audio track `a`. */
-async function remux(req, res, url, { ss = 0, a = 0, ua, audioMode = 'auto' } = {}) {
+/**
+ * caps: what the viewing browser can decode, e.g. { ac3: true, eac3: false, hevc: true }.
+ * Audio and video the browser cannot play are converted (AAC stereo / H.264); everything else is copied untouched.
+ */
+async function remux(req, res, url, { ss = 0, a = 0, ua, audioMode = 'auto', caps = {} } = {}) {
   let info = null;
   try { info = await probe(url, ua); } catch (_) { /* go blind */ }
   const audio = info && info.audio[a];
-  const copyAudio = audioMode === 'copy' || (audioMode !== 'aac' && audio && BROWSER_AUDIO.has(audio.codec));
+  const acodec = audio ? audio.codec : '';
+  const audioOk = acodec === 'aac' || acodec === 'mp3' || (acodec === 'ac3' && caps.ac3) || (acodec === 'eac3' && caps.eac3) || (acodec === 'opus' && caps.opus);
+  const copyAudio = audioMode === 'copy' || (audioMode !== 'aac' && audio && audioOk);
+  const vcodec = info ? info.video : '';
+  const videoOk = !info || vcodec === 'h264' || ((vcodec === 'hevc' || vcodec === 'h265') && caps.hevc) || (vcodec === 'vp9' && caps.vp9) || (vcodec === 'av1' && caps.av1);
   const args = ['-hide_banner', '-loglevel', 'error', '-user_agent', ua || DEFAULT_UA,
     '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5'];
   if (ss > 0) args.push('-ss', String(ss));
-  args.push('-i', url, '-map', '0:v:0', '-map', '0:a:' + (a | 0) + '?', '-c:v', 'copy');
+  args.push('-i', url, '-map', '0:v:0', '-map', '0:a:' + (a | 0) + '?');
+  if (videoOk) args.push('-c:v', 'copy');
+  else args.push('-c:v', 'libx264', '-preset', 'veryfast', '-crf', '21', '-maxrate', '10M', '-bufsize', '20M', '-pix_fmt', 'yuv420p', '-vf', "scale='min(1920,iw)':-2");
   if (copyAudio) args.push('-c:a', 'copy');
   else args.push('-c:a', 'aac', '-b:a', '192k', '-ac', '2');
-  if (info && /hevc|h265/.test(info.video)) args.push('-tag:v', 'hvc1');
+  if (videoOk && /hevc|h265/.test(vcodec)) args.push('-tag:v', 'hvc1');
   args.push('-sn', '-dn', '-f', 'mp4', '-movflags', 'frag_keyframe+empty_moov+default_base_moof', '-frag_duration', '3000000', 'pipe:1');
   const p = spawn(FF, args);
   killOnClose(res, p);
