@@ -597,7 +597,7 @@ route('POST', '/api/setup', async (req, res) => {
     if (typeof o.appName === 'string') opt.appName = o.appName.trim().slice(0, 24) || 'Norrsken';
     for (const k of ['hideAdult', 'cleanNames']) if (k in o) opt[k] = !!o[k];
     if (['hls', 'ts'].includes(o.liveFormat)) opt.liveFormat = o.liveFormat;
-    if (['auto', 'eac3', 'ac3', 'aac', 'copy'].includes(o.audioMode)) opt.audioMode = o.audioMode;
+    if (['auto', 'lossless', 'eac3', 'ac3', 'aac', 'copy'].includes(o.audioMode)) opt.audioMode = o.audioMode;
     if (['orig', '1080'].includes(o.maxRes)) opt.maxRes = o.maxRes;
     if (['sound', 'muted', 'off'].includes(o.previews)) opt.previews = o.previews;
     if (['auto', 'off'].includes(o.directPlay)) opt.directPlay = o.directPlay;

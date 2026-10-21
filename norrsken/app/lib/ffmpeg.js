@@ -106,8 +106,13 @@ function plan(info, caps = {}, { a = 0, audioMode = 'auto', maxRes = 'orig' } = 
   const ac = audio ? audio.codec : '';
   const ch = audio ? audio.ch || 2 : 2;
   const plays = (c) => c === 'aac' || c === 'mp3' || (c === 'ac3' && caps.ac3) || (c === 'eac3' && caps.eac3) || (c === 'opus' && caps.opus) || (c === 'flac' && caps.flac);
+  // lossless multichannel: FLAC keeps every channel (up to 7.1) and every bit of TrueHD / DTS-HD MA / PCM
+  const lossless = { codec: 'flac', ch: Math.min(ch, 8), br: '' };
+  const hiRes = /truehd|mlp|dts|pcm|flac|alac/.test(ac);
   let aout;
   if (!audio || audioMode === 'copy') aout = { copy: true };
+  else if (audioMode === 'lossless') aout = plays(ac) && !hiRes ? { copy: true } : (ac === 'flac' && caps.flac ? { copy: true } : lossless);
+  else if (audioMode === 'auto' && hiRes && caps.flac && !plays(ac)) aout = lossless;
   else if (audioMode === 'aac') aout = ac === 'aac' && ch <= 2 ? { copy: true } : { codec: 'aac', ch: 2, br: '192k' };
   else if (audioMode === 'eac3') aout = ac === 'eac3' ? { copy: true } : { codec: 'eac3', ch: Math.min(ch, 6), br: ch > 2 ? '768k' : '256k' };
   else if (audioMode === 'ac3') aout = ac === 'ac3' ? { copy: true } : { codec: 'ac3', ch: Math.min(ch, 6), br: ch > 2 ? '640k' : '256k' };
@@ -151,6 +156,7 @@ async function remux(req, res, url, { ss = 0, a = 0, ua, audioMode = 'auto', max
       '-pix_fmt', 'yuv420p', '-threads', '0', '-vf', vf);
   }
   if (p.audio.copy) args.push('-c:a', 'copy');
+  else if (p.audio.codec === 'flac') args.push('-c:a', 'flac', '-compression_level', '2', '-ac', String(p.audio.ch), '-strict', '-2');
   else args.push('-c:a', p.audio.codec, '-b:a', p.audio.br, '-ac', String(p.audio.ch));
   args.push('-sn', '-dn', '-f', 'mp4', '-movflags', 'frag_keyframe+empty_moov+delay_moov+default_base_moof', '-frag_duration', '3000000', 'pipe:1');
   const proc = spawn(FF, args);
@@ -198,6 +204,7 @@ function argsFor(info, p, url, ss, a, ua, dir) {
       '-pix_fmt', 'yuv420p', '-threads', '0', '-vf', vf);
   }
   if (p.audio.copy) args.push('-c:a', 'copy');
+  else if (p.audio.codec === 'flac') args.push('-c:a', 'flac', '-compression_level', '2', '-ac', String(p.audio.ch), '-strict', '-2');
   else args.push('-c:a', p.audio.codec, '-b:a', p.audio.br, '-ac', String(p.audio.ch));
   args.push('-sn', '-dn', '-avoid_negative_ts', 'make_zero', '-max_muxing_queue_size', '2048',
     '-f', 'hls', '-hls_time', '4', '-hls_list_size', '0', '-hls_playlist_type', 'event', '-hls_segment_type', 'fmp4',

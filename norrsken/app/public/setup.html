@@ -161,13 +161,14 @@ summary { cursor: pointer; font-weight: 650; color: #c9d3df; padding: 10px 0; }
       <input type="url" id="epgUrl" placeholder="Lämna tomt för leverantörens guide" autocapitalize="off" spellcheck="false">
       <label for="audioMode">Ljud i filmer och serier</label>
       <select id="audioMode">
-        <option value="auto">Automatiskt – originalljud när tv:n klarar det, annars Dolby Digital Plus 5.1</option>
+        <option value="auto">Automatiskt – originalljud när tv:n klarar det, annars förlustfritt flerkanaligt</option>
+        <option value="lossless">Alltid förlustfritt flerkanaligt (FLAC, upp till 7.1)</option>
         <option value="eac3">Alltid Dolby Digital Plus 5.1 (E-AC3)</option>
         <option value="ac3">Alltid Dolby Digital 5.1 (AC3)</option>
         <option value="aac">Alltid stereo (AAC)</option>
         <option value="copy">Skicka orört (kan bli tyst om tv:n inte klarar formatet)</option>
       </select>
-      <p class="help">DTS, DTS-HD och Dolby TrueHD kan inte spelas av tv:ns webbläsare. De görs om till Dolby Digital Plus 5.1 med alla kanaler kvar, som tv:n kan skicka vidare till en soundbar via HDMI eARC. Välj stereo om filmer saknar ljud.</p>
+      <p class="help">DTS, DTS-HD MA och Dolby TrueHD kan inte spelas av tv:ns webbläsare. De packas om förlustfritt till FLAC med alla kanaler (upp till 7.1) – inget av ljudet går förlorat – och tv:n skickar det som flerkanaligt PCM till soundbaren via HDMI eARC. Klarar skärmen inte FLAC blir det Dolby Digital Plus 5.1. Välj stereo om filmer saknar ljud.</p>
       <label for="maxRes">Bild som måste konverteras</label>
       <select id="maxRes"><option value="orig">Behåll originalupplösning (4K)</option><option value="1080">Skala ner till 1080p (lättare för servern)</option></select>
       <p class="help">Gäller bara filmer i format som skärmen inte kan visa. 4K i format som tv:n klarar (HEVC/H.264) spelas alltid orört.</p>

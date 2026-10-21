@@ -17,7 +17,7 @@ Adresserna gäller så länge Home Assistant har IP-adressen 192.168.85.51. Ge d
 
 - **Buffrar eller hackar:** välj *Uppspelning: Direkt från leverantören* i inställningarna. Byt format för live-tv till MPEG-TS om kanaler fortfarande hackar.
 - **4K:** filmer i HEVC/H.264 spelas i full 4K utan konvertering. Bara format som tv:n inte kan visa konverteras, i 4K om inget annat väljs under *Bild som måste konverteras*.
-- **Surroundljud:** Dolby Digital och Dolby Digital Plus spelas orört. DTS, DTS-HD och TrueHD görs om till Dolby Digital Plus 5.1 med alla kanaler, som tv:n skickar vidare till soundbaren via eARC. Ändra under *Ljud i filmer och serier*.
+- **Surroundljud:** Dolby Digital och Dolby Digital Plus spelas orört. DTS, DTS-HD MA och TrueHD packas om förlustfritt till FLAC med alla kanaler (upp till 7.1), som tv:n skickar som flerkanaligt PCM till soundbaren via eARC. Ändra under *Ljud i filmer och serier*.
 - **Inget ljud i filmer:** välj *Alltid stereo (AAC)* under Avancerat.
 - **Sidan öppnas inte:** kontrollera att tillägget kör och att du är på hemmanätverket.
 
