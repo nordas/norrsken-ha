@@ -1,8 +1,7 @@
 name: Norrsken IPTV
-version: "1.1.3"
+version: "1.2.0"
 slug: norrsken
 description: Egen IPTV-app med streamingkänsla för Philips-tv:n. Tv-appen finns på http://192.168.85.51:8787/ och inställningarna på http://192.168.85.51:8787/setup
-url: http://192.168.85.51:8787/setup
 arch:
   - amd64
   - aarch64
@@ -10,11 +9,12 @@ startup: application
 boot: auto
 init: false
 hassio_api: true
-ports:
-  8787/tcp: 8787
-ports_description:
-  8787/tcp: Tv-appen och inställningssidan
-webui: http://[HOST]:[PORT:8787]/setup
+host_network: true
+ingress: true
+ingress_port: 8787
+ingress_entry: setup
+panel_icon: mdi:television-play
+panel_title: Norrsken
 options:
   setup_pin: ""
 schema:

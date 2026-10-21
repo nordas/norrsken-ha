@@ -30,26 +30,26 @@ class Proxy {
   }
 
   /** Public path for a provider url; `name` is cosmetic (players sometimes look at extensions). */
-  path(u) {
+  path(u, base = '') {
     this.allow(u);
     let name = 'x';
     try { name = decodeURIComponent(new URL(u).pathname.split('/').pop() || 'x').replace(/[^\w.\-]/g, '_').slice(-60) || 'x'; } catch (_) { /* ignore */ }
-    return '/px/' + this.token(u) + '/' + name;
+    return base + '/px/' + this.token(u) + '/' + name;
   }
 
-  rewritePlaylist(text, base) {
+  rewritePlaylist(text, base, prefix = '') {
     const abs = (u) => { try { return new URL(u, base).toString(); } catch (_) { return u; } };
     return text.split(/\r?\n/).map((line) => {
       const l = line.trim();
       if (!l) return line;
       if (l[0] === '#') {
-        return line.replace(/URI="([^"]+)"/g, (m, u) => 'URI="' + this.path(abs(u)) + '"');
+        return line.replace(/URI="([^"]+)"/g, (m, u) => 'URI="' + this.path(abs(u), prefix) + '"');
       }
-      return this.path(abs(l));
+      return this.path(abs(l), prefix);
     }).join('\n');
   }
 
-  async handle(req, res, token, ua) {
+  async handle(req, res, token, ua, prefix = '') {
     const target = this.untoken(token);
     if (!this.isAllowed(target)) {
       res.writeHead(403, { 'Content-Type': 'text/plain', 'Access-Control-Allow-Origin': '*' });
@@ -104,7 +104,7 @@ class Proxy {
         }
       } catch (_) { /* partial */ }
       const text = Buffer.concat(chunks).toString('utf8');
-      const out = this.rewritePlaylist(text, final);
+      const out = this.rewritePlaylist(text, final, prefix);
       res.writeHead(200, { 'Content-Type': 'application/vnd.apple.mpegurl', 'Cache-Control': 'no-store', ...cors });
       return res.end(out);
     }

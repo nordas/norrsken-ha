@@ -9,7 +9,7 @@
   NS.imgSrc = function (u) {
     if (!u) return '';
     if (u.charAt(0) === '/' || u.indexOf('data:') === 0 || NS.mock) return u;
-    return '/img?u=' + encodeURIComponent(u);
+    return 'img?u=' + encodeURIComponent(u);
   };
   NS.pic = function (u, cls, onerr, onload) {
     var im = NS.img(NS.imgSrc(u), cls, onerr);

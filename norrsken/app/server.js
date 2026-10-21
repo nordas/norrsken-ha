@@ -28,6 +28,12 @@ const proxy = new Proxy();
 
 /* ------------------------------------------------------------------ helpers */
 
+/** Path prefix when opened through Home Assistant's ingress (the 'Open web UI' button). */
+function ingressBase(req) {
+  const p = String(req.headers['x-ingress-path'] || '');
+  return /^\/api\/hassio_ingress\/[\w-]+$/.test(p) ? p : '';
+}
+
 const JSON_REPLACER = (k, v) => (k && k[0] === '_' ? undefined : v);
 
 function send(res, status, body, type = 'application/json; charset=utf-8', extra = {}) {
@@ -441,7 +447,8 @@ route('GET', '/api/stream/:type/:id', async (req, res, q, p) => {
   const src = catalog.streamUrl(type, id, q.get('ext'));
   if (!src || !src.primary) return bad(res, 'Kunde inte hitta strömmen', 404);
   const tok = (u) => { proxy.allow(u); return proxy.token(u); };
-  const pathOf = (u) => proxy.path(u);
+  const ing = ingressBase(req);
+  const pathOf = (u) => proxy.path(u, ing);
   const kindOf = (u) => (/\.m3u8?(\?|$)/i.test(u) ? 'hls' : /\.(mp4|m4v|mov|webm|mkv|avi|wmv|flv|mpg|mpeg)(\?|$)/i.test(u) ? 'file' : 'ts');
   // Direct = the TV fetches from the provider itself (fastest, no detour via this server).
   // Proxied = via this server (works even when the provider blocks browsers). The player tries them in order.
@@ -464,7 +471,7 @@ route('GET', '/api/stream/:type/:id', async (req, res, q, p) => {
   const t = tok(src.primary);
   const sources = [];
   const files = both('file', src.primary);
-  const remux = { kind: 'remux', url: '/remux?t=' + t };
+  const remux = { kind: 'remux', url: ing + '/remux?t=' + t };
   if (nativeOk) sources.push(...files);
   else {
     // MKV/AVI: let the TV try the file itself if it says it can play the container, otherwise remux on the server
@@ -626,7 +633,7 @@ const server = http.createServer(async (req, res) => {
       return res.end();
     }
     const px = /^\/px\/([A-Za-z0-9_-]+)(?:\/.*)?$/.exec(pathname);
-    if (px && (req.method === 'GET' || req.method === 'HEAD')) return await proxy.handle(req, res, px[1], catalog.ua());
+    if (px && (req.method === 'GET' || req.method === 'HEAD')) return await proxy.handle(req, res, px[1], catalog.ua(), ingressBase(req));
     for (const r of routes) {
       if (r.method !== req.method && !(r.method === 'GET' && req.method === 'HEAD')) continue;
       const m = r.re.exec(pathname);

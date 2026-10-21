@@ -30,14 +30,14 @@
     this.render();
   }
   Welcome.prototype.render = function () {
-    var url = location.origin + '/setup';
+    var url = NS.lanUrl() + '/setup';
     this.statusEl = h('div', { class: 'status' });
     this.errEl = h('div', { class: 'err' });
     this.titleEl = h('h1', { text: 'Välkommen till din nya tv-app' });
     this.textEl = h('p', { text: 'Skanna koden med mobilen, eller öppna adressen nedan, för att lägga in uppgifterna från din IPTV-leverantör. Tv:n startar av sig själv när allt är klart.' });
     this.el.appendChild(h('div', { class: 'txt' }, [h('div', { class: 'mark' }, NS.icon('aurora')), this.titleEl, this.textEl,
       h('div', { class: 'url' }, h('span', { text: url.replace(/^https?:\/\//, '') })), this.statusEl, this.errEl]));
-    this.el.appendChild(h('div', { class: 'qr' }, NS.img('/api/qr.svg?text=' + encodeURIComponent(url))));
+    this.el.appendChild(h('div', { class: 'qr' }, NS.img('api/qr.svg?text=' + encodeURIComponent(url))));
     if (this.firstErr) this.errEl.textContent = this.firstErr;
   };
   Welcome.prototype.activate = function () {
@@ -82,7 +82,7 @@
       ]);
     });
     this.el.appendChild(h('div', { class: 'plist' }, this.els));
-    this.el.appendChild(h('div', { class: 'foot', text: 'Profiler ändrar du i mobilen: ' + location.host + '/setup' }));
+    this.el.appendChild(h('div', { class: 'foot', text: 'Profiler ändrar du i mobilen: ' + NS.lanUrl().replace(/^https?:\/\//, '') + '/setup' }));
     this.paint();
   }
   Profiles.prototype.paint = function () { var i = this.i; this.els.forEach(function (e, j) { e.classList.toggle('focus', i === j); }); };
@@ -723,11 +723,11 @@
       p.appendChild(h('p', { text: 'Hämtar kanaler, filmer, serier och tv-guide från leverantören på nytt. Det sker också automatiskt två gånger per dygn.' }));
       if (this.refreshing) p.appendChild(h('p', {}, [h('span', { class: 'spinner', style: 'display:inline-block;vertical-align:middle;margin-right:1.6rem' }), this.refreshing]));
     } else if (it.id === 'phone') {
-      var url = location.origin + '/setup';
+      var url = NS.lanUrl() + '/setup';
       p.appendChild(h('h2', { text: 'Ändra inställningar i mobilen' }));
       p.appendChild(h('p', { text: 'Där byter du leverantör, lägger till profiler och väljer vilka kategorier som ska synas.' }));
       p.appendChild(h('p', { text: url }));
-      p.appendChild(h('div', { class: 'qr' }, NS.img('/api/qr.svg?text=' + encodeURIComponent(url))));
+      p.appendChild(h('div', { class: 'qr' }, NS.img('api/qr.svg?text=' + encodeURIComponent(url))));
     } else if (it.id === 'about') {
       p.appendChild(h('h2', { text: (st.appName || 'Norrsken') + ' ' + (st.version || '') }));
       var c = st.counts || {};
@@ -739,7 +739,7 @@
       row('Tv-guide', st.epg && st.epg.count ? st.epg.count + ' program' : st.epg && st.epg.loading ? 'laddas…' : 'saknas');
       row('Senast uppdaterat', st.at ? new Date(st.at).toLocaleString('sv-SE') : '–');
       row('MKV och undertexter', st.ffmpeg ? 'Ja' : 'Nej (ffmpeg saknas på servern)');
-      row('Server', location.host);
+      row('Server', NS.lanUrl().replace(/^https?:\/\//, ''));
       p.appendChild(dl);
     } else if (it.id === 'exit') {
       p.appendChild(h('h2', { text: 'Avsluta appen' }));
@@ -754,7 +754,7 @@
     else if (it.id === 'refresh' && !this.refreshing) {
       this.refreshing = 'Startar…';
       this.paint();
-      NS.api.post('/api/refresh', {}).then(function () {
+      NS.api.post('api/refresh', {}).then(function () {
         var poll = function () {
           NS.api.status().then(function (st) {
             NS.status = st;

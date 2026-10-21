@@ -311,7 +311,7 @@ summary { cursor: pointer; font-weight: 650; color: #c9d3df; padding: 10px 0; }
   $('testBtn').onclick = function () {
     var b = $('testBtn');
     b.disabled = true; b.textContent = 'Testar…';
-    api('POST', '/api/setup/test', body()).then(function (r) {
+    api('POST', 'api/setup/test', body()).then(function (r) {
       if (r.error) return result($('testRes'), false, r.error);
       if (r.entries) return result($('testRes'), true, 'Det fungerar. Spellistan innehåller ' + r.entries.toLocaleString('sv-SE') + ' poster.');
       var t = 'Det fungerar. Kontot är ' + (r.status === 'Active' ? 'aktivt' : (r.status || 'okänt').toLowerCase());
@@ -331,7 +331,7 @@ summary { cursor: pointer; font-weight: 650; color: #c9d3df; padding: 10px 0; }
     }
     if (data.source === 'm3u' && !data.m3u.url) return result($('testRes'), false, 'Klistra in länken till spellistan.');
     b.disabled = true; b.textContent = 'Sparar…';
-    api('POST', '/api/setup', data).then(function (r) {
+    api('POST', 'api/setup', data).then(function (r) {
       cfg = r.config;
       $('xPass').value = '';
       fill();
@@ -345,7 +345,7 @@ summary { cursor: pointer; font-weight: 650; color: #c9d3df; padding: 10px 0; }
   var pollT = null;
   function poll(fresh) {
     clearTimeout(pollT);
-    fetch('/api/status', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (st) {
+    fetch('api/status', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (st) {
       var chip = $('chip');
       if (st.loading) { chip.className = 'chip'; chip.innerHTML = '<span class="spin"></span>' + (st.stage || 'Hämtar…'); pollT = setTimeout(poll, 1200); return; }
       if (st.error) { chip.className = 'chip err'; chip.textContent = 'Fel'; result($('testRes'), false, st.error); return; }
@@ -360,7 +360,7 @@ summary { cursor: pointer; font-weight: 650; color: #c9d3df; padding: 10px 0; }
   /* categories */
   var TYPES = [['live', 'Live-tv'], ['movie', 'Filmer'], ['series', 'Serier']];
   function loadCats() {
-    api('GET', '/api/setup/categories').then(function (c) {
+    api('GET', 'api/setup/categories').then(function (c) {
       cats = c;
       TYPES.forEach(function (t) { hidden[t[0]] = {}; (c[t[0]] || []).forEach(function (x) { if (x.hidden) hidden[t[0]][x.id] = true; }); });
       $('catSec').classList.remove('hidden');
@@ -414,7 +414,7 @@ summary { cursor: pointer; font-weight: 650; color: #c9d3df; padding: 10px 0; }
   $('saveCats').onclick = function () {
     var out = {};
     TYPES.forEach(function (t) { out[t[0]] = Object.keys(hidden[t[0]]); });
-    api('POST', '/api/setup/categories', out).then(function () { result($('catRes'), true, 'Sparat. Tv:n visar det nya urvalet nästa gång du byter sida.'); })
+    api('POST', 'api/setup/categories', out).then(function () { result($('catRes'), true, 'Sparat. Tv:n visar det nya urvalet nästa gång du byter sida.'); })
       .catch(function (e) { result($('catRes'), false, e.message); });
   };
 
@@ -445,7 +445,11 @@ summary { cursor: pointer; font-weight: 650; color: #c9d3df; padding: 10px 0; }
 
   function load() {
     $('tvAddr').textContent = location.origin + '/';
-    api('GET', '/api/setup').then(function (c) { cfg = c; fill(); poll(); }).catch(function () { /* pin dialog or offline */ });
+    fetch('api/status', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (st) {
+      var u = (st.urls || [])[0];
+      if (u && !/\/\/(172\.(1[6-9]|2\d|3[01])|127\.)/.test(u)) $('tvAddr').textContent = u.replace(/\/$/, '') + '/';
+    }).catch(function () {});
+    api('GET', 'api/setup').then(function (c) { cfg = c; fill(); poll(); }).catch(function () { /* pin dialog or offline */ });
   }
   load();
 })();

@@ -142,20 +142,27 @@
   NS.api = {
     get: function (p, t) { return req('GET', q(p), null, t); },
     post: function (p, b) { return req('POST', p, b); },
-    status: function () { return req('GET', '/api/status'); },
-    page: function (p) { return NS.api.get('/api/page/' + p); },
-    list: function (type, cat, offset, limit) { return NS.api.get('/api/list?type=' + type + '&cat=' + encodeURIComponent(cat) + '&offset=' + (offset || 0) + '&limit=' + (limit || 40)); },
-    info: function (type, id) { return NS.api.get('/api/info/' + type + '/' + encodeURIComponent(id)); },
-    item: function (type, id) { return NS.api.get('/api/item/' + type + '/' + encodeURIComponent(id)); },
-    search: function (s) { return NS.api.get('/api/search?q=' + encodeURIComponent(s)); },
-    cats: function (type) { return NS.api.get('/api/cats/' + type); },
-    stream: function (type, id, ext) { return NS.api.get('/api/stream/' + type + '/' + encodeURIComponent(id) + (ext ? '?ext=' + ext : '')); },
-    probe: function (t) { return req('GET', '/api/probe?t=' + t, null, 30000); },
-    guide: function (id, h) { return NS.api.get('/api/epg/channel/' + encodeURIComponent(id) + '?hours=' + (h || 6)); },
-    state: function () { return req('GET', '/api/state/' + NS.profile.id); },
-    myList: function (item, on) { return req('POST', '/api/state/' + NS.profile.id + '/mylist', { item: item, on: on }); },
-    progress: function (item, pos, dur) { return req('POST', '/api/state/' + NS.profile.id + '/progress', { item: item, pos: pos, dur: dur }); },
-    recent: function (item) { return req('POST', '/api/state/' + NS.profile.id + '/recent', { item: item }); }
+    status: function () { return req('GET', 'api/status'); },
+    page: function (p) { return NS.api.get('api/page/' + p); },
+    list: function (type, cat, offset, limit) { return NS.api.get('api/list?type=' + type + '&cat=' + encodeURIComponent(cat) + '&offset=' + (offset || 0) + '&limit=' + (limit || 40)); },
+    info: function (type, id) { return NS.api.get('api/info/' + type + '/' + encodeURIComponent(id)); },
+    item: function (type, id) { return NS.api.get('api/item/' + type + '/' + encodeURIComponent(id)); },
+    search: function (s) { return NS.api.get('api/search?q=' + encodeURIComponent(s)); },
+    cats: function (type) { return NS.api.get('api/cats/' + type); },
+    stream: function (type, id, ext) { return NS.api.get('api/stream/' + type + '/' + encodeURIComponent(id) + (ext ? '?ext=' + ext : '')); },
+    probe: function (t) { return req('GET', 'api/probe?t=' + t, null, 30000); },
+    guide: function (id, h) { return NS.api.get('api/epg/channel/' + encodeURIComponent(id) + '?hours=' + (h || 6)); },
+    state: function () { return req('GET', 'api/state/' + NS.profile.id); },
+    myList: function (item, on) { return req('POST', 'api/state/' + NS.profile.id + '/mylist', { item: item, on: on }); },
+    progress: function (item, pos, dur) { return req('POST', 'api/state/' + NS.profile.id + '/progress', { item: item, pos: pos, dur: dur }); },
+    recent: function (item) { return req('POST', 'api/state/' + NS.profile.id + '/recent', { item: item }); }
+  };
+
+  /** The address other devices on the network use (not the Home Assistant ingress address). */
+  NS.lanUrl = function () {
+    var u = NS.status && NS.status.urls && NS.status.urls[0];
+    if (u && !/\/\/(172\.(1[6-9]|2\d|3[01])|127\.)/.test(u)) return u.replace(/\/$/, '');
+    return location.origin;
   };
 
   /* ---------------------------------------------------------------- direct playback */
@@ -217,7 +224,7 @@
     epgTimer = null;
     var ids = epgQueue.splice(0, 60);
     if (!ids.length) return;
-    NS.api.get('/api/epg/now?ids=' + ids.join(','), 15000).then(function (res) {
+    NS.api.get('api/epg/now?ids=' + ids.join(','), 15000).then(function (res) {
       var now = Date.now();
       ids.forEach(function (id) { epg[id] = { at: now, data: res[id] || null }; delete epgWaiting[id]; });
       var ev;

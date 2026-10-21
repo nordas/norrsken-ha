@@ -702,7 +702,7 @@
       if (e > self.subLast) self.subLast = e;
       self.addCue(c);
     };
-    fetch('/subs?t=' + this.tok + '&s=' + si + '&ss=' + from, { signal: ctl.signal }).then(function (r) {
+    fetch('subs?t=' + this.tok + '&s=' + si + '&ss=' + from, { signal: ctl.signal }).then(function (r) {
       var rd = r.body.getReader();
       var pump = function () {
         return rd.read().then(function (x) {
