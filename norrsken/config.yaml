@@ -1,5 +1,5 @@
 name: Norrsken IPTV
-version: "1.5.0"
+version: "1.5.1"
 slug: norrsken
 description: Egen IPTV-app med streamingkänsla för Philips-tv:n. Tv-appen finns på http://192.168.85.51:8787/ och inställningarna på http://192.168.85.51:8787/setup
 arch:

@@ -157,13 +157,26 @@
     this.el.appendChild(this.body);
     this.tabs = h('div');
     this.el.appendChild(this.tabs);
-    this._onScroll = function () { if (NS.router.top() === self) self.head.classList.toggle('solid', (window.scrollY || 0) > 8); };
+    // like the phone apps: the top bar slides away while scrolling down and comes back as soon as you scroll up
+    var lastY = 0, acc = 0;
+    this._onScroll = function () {
+      if (NS.router.top() !== self) return;
+      var y = Math.max(0, window.scrollY || 0);
+      var dy = y - lastY;
+      lastY = y;
+      acc = (dy > 0) === (acc > 0) ? acc + dy : dy;
+      self.head.classList.toggle('solid', y > 8);
+      if (y < 60) self.head.classList.remove('away');
+      else if (acc > 24) self.head.classList.add('away');
+      else if (acc < -12) self.head.classList.remove('away');
+    };
     window.addEventListener('scroll', this._onScroll, { passive: true });
     this.load(this.page);
   }
 
   MBrowse.prototype.paintHead = function () {
     var self = this;
+    this.head.classList.remove('away');
     var page = this.page;
     this.title.textContent = TITLES[page] || 'Hem';
     this.pillsEl.innerHTML = '';

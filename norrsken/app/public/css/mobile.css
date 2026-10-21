@@ -225,3 +225,7 @@ html.m .m-prof { flex-direction: row; gap: 10px; padding: 6px 14px 6px 6px; bord
 html.m .m-prof .m-prof-av { width: 34px; height: 34px; font-size: 16px; border-radius: 17px; }
 .m-info { padding: 24px 16px; }
 .m-search .m-head .m-bar { gap: 6px; }
+
+/* top bar hides while scrolling down */
+.m-head { transition: transform 260ms cubic-bezier(.2,.7,.2,1), background 200ms; will-change: transform; }
+.m-head.away { transform: translateY(-100%); }
