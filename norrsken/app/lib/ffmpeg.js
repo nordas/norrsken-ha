@@ -54,6 +54,7 @@ function probe(url, ua) {
         const res = {
           dur: parseFloat(j.format && j.format.duration) || 0,
           video: (streams.find(s => s.codec_type === 'video') || {}).codec_name || '',
+          height: (streams.find(s => s.codec_type === 'video') || {}).height || 0,
           audio: [],
           subs: [],
         };
@@ -98,7 +99,12 @@ async function remux(req, res, url, { ss = 0, a = 0, ua, audioMode = 'auto', cap
   if (ss > 0) args.push('-ss', String(ss));
   args.push('-i', url, '-map', '0:v:0', '-map', '0:a:' + (a | 0) + '?');
   if (videoOk) args.push('-c:v', 'copy');
-  else args.push('-c:v', 'libx264', '-preset', 'veryfast', '-crf', '21', '-maxrate', '10M', '-bufsize', '20M', '-pix_fmt', 'yuv420p', '-vf', "scale='min(1920,iw)':-2");
+  else {
+    // converting 4K in real time is heavy: always go down to at most 1080p and use the fastest presets for big sources
+    const big = (info && info.height) > 1100;
+    args.push('-c:v', 'libx264', '-preset', big ? 'ultrafast' : 'veryfast', '-tune', 'zerolatency', '-crf', big ? '23' : '21',
+      '-maxrate', '12M', '-bufsize', '24M', '-pix_fmt', 'yuv420p', '-threads', '0', '-vf', "scale='min(1920,iw)':-2");
+  }
   if (copyAudio) args.push('-c:a', 'copy');
   else args.push('-c:a', 'aac', '-b:a', '192k', '-ac', '2');
   if (videoOk && /hevc|h265/.test(vcodec)) args.push('-tag:v', 'hvc1');
