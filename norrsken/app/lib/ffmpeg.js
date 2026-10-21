@@ -1,0 +1,117 @@
+'use strict';
+const { spawn, spawnSync } = require('child_process');
+const { DEFAULT_UA, LRU } = require('./util');
+
+/**
+ * Optional ffmpeg helpers. With ffmpeg installed on the server the app can:
+ *  - remux MKV/AVI to fragmented MP4 on the fly (no re-encoding of video)
+ *  - switch audio language
+ *  - pull embedded text subtitles out as WebVTT
+ */
+const FF = process.env.FFMPEG_PATH || 'ffmpeg';
+const FP = process.env.FFPROBE_PATH || 'ffprobe';
+let available = null;
+const probes = new LRU(300, 3600e3);
+const BROWSER_AUDIO = new Set(['aac', 'mp3', 'ac3', 'eac3']);
+const TEXT_SUBS = new Set(['subrip', 'srt', 'ass', 'ssa', 'webvtt', 'mov_text', 'text', 'microdvd', 'subviewer', 'subviewer1', 'sami', 'realtext', 'jacosub', 'mpl2', 'pjs', 'stl', 'vplayer']);
+
+function has() {
+  if (available === null) {
+    try {
+      available = spawnSync(FF, ['-version'], { timeout: 5000 }).status === 0 && spawnSync(FP, ['-version'], { timeout: 5000 }).status === 0;
+    } catch (_) { available = false; }
+  }
+  return available;
+}
+
+const LANGS = {
+  swe: 'Svenska', sv: 'Svenska', eng: 'Engelska', en: 'Engelska', nor: 'Norska', nob: 'Norska', no: 'Norska', dan: 'Danska', da: 'Danska',
+  fin: 'Finska', fi: 'Finska', ger: 'Tyska', deu: 'Tyska', de: 'Tyska', fre: 'Franska', fra: 'Franska', fr: 'Franska', spa: 'Spanska',
+  es: 'Spanska', ita: 'Italienska', it: 'Italienska', jpn: 'Japanska', ja: 'Japanska', kor: 'Koreanska', ara: 'Arabiska', tur: 'Turkiska',
+  pol: 'Polska', rus: 'Ryska', dut: 'Nederländska', nld: 'Nederländska', por: 'Portugisiska', ice: 'Isländska', isl: 'Isländska',
+  chi: 'Kinesiska', zho: 'Kinesiska', hin: 'Hindi', und: '',
+};
+function langName(code) { return LANGS[String(code || '').toLowerCase()] ?? String(code || '').toUpperCase(); }
+
+function probe(url, ua) {
+  const c = probes.get(url);
+  if (c) return Promise.resolve(c);
+  return new Promise((resolve, reject) => {
+    const args = ['-v', 'error', '-print_format', 'json', '-show_streams', '-show_format', '-user_agent', ua || DEFAULT_UA, '-rw_timeout', '15000000', url];
+    const p = spawn(FP, args);
+    let out = '';
+    p.stdout.on('data', d => { out += d; });
+    p.stderr.on('data', () => {});
+    const t = setTimeout(() => p.kill('SIGKILL'), 25000);
+    p.on('error', e => { clearTimeout(t); reject(e); });
+    p.on('close', () => {
+      clearTimeout(t);
+      try {
+        const j = JSON.parse(out);
+        const streams = j.streams || [];
+        let ai = 0;
+        let si = 0;
+        const res = {
+          dur: parseFloat(j.format && j.format.duration) || 0,
+          video: (streams.find(s => s.codec_type === 'video') || {}).codec_name || '',
+          audio: [],
+          subs: [],
+        };
+        for (const s of streams) {
+          const tags = s.tags || {};
+          if (s.codec_type === 'audio') {
+            res.audio.push({ i: ai++, codec: s.codec_name, lang: tags.language || '', label: langName(tags.language) || 'Ljud ' + ai, title: tags.title || '', ch: s.channels || 0, def: !!(s.disposition && s.disposition.default) });
+          } else if (s.codec_type === 'subtitle') {
+            const text = TEXT_SUBS.has(s.codec_name);
+            res.subs.push({ i: si++, codec: s.codec_name, lang: tags.language || '', label: langName(tags.language) || 'Undertext ' + si, title: tags.title || '', text, forced: !!(s.disposition && s.disposition.forced) });
+          }
+        }
+        probes.set(url, res);
+        resolve(res);
+      } catch (e) { reject(new Error('Kunde inte läsa filen')); }
+    });
+  });
+}
+
+function killOnClose(res, p) {
+  const kill = () => { try { p.kill('SIGKILL'); } catch (_) { /* gone */ } };
+  res.on('close', kill);
+  p.on('error', () => { if (!res.headersSent) res.writeHead(500); res.end(); });
+}
+
+/** Remux to fragmented MP4 starting at `ss` seconds, picking audio track `a`. */
+async function remux(req, res, url, { ss = 0, a = 0, ua, audioMode = 'auto' } = {}) {
+  let info = null;
+  try { info = await probe(url, ua); } catch (_) { /* go blind */ }
+  const audio = info && info.audio[a];
+  const copyAudio = audioMode === 'copy' || (audioMode !== 'aac' && audio && BROWSER_AUDIO.has(audio.codec));
+  const args = ['-hide_banner', '-loglevel', 'error', '-user_agent', ua || DEFAULT_UA,
+    '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5'];
+  if (ss > 0) args.push('-ss', String(ss));
+  args.push('-i', url, '-map', '0:v:0', '-map', '0:a:' + (a | 0) + '?', '-c:v', 'copy');
+  if (copyAudio) args.push('-c:a', 'copy');
+  else args.push('-c:a', 'aac', '-b:a', '192k', '-ac', '2');
+  if (info && /hevc|h265/.test(info.video)) args.push('-tag:v', 'hvc1');
+  args.push('-sn', '-dn', '-f', 'mp4', '-movflags', 'frag_keyframe+empty_moov+default_base_moof', '-frag_duration', '3000000', 'pipe:1');
+  const p = spawn(FF, args);
+  killOnClose(res, p);
+  let err = '';
+  p.stderr.on('data', d => { if (err.length < 2000) err += d; });
+  p.on('close', (code) => { if (code && code !== 255) console.error('[remux] ffmpeg exit', code, err.split('\n').slice(-3).join(' ')); });
+  res.writeHead(200, { 'Content-Type': 'video/mp4', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' });
+  p.stdout.pipe(res);
+}
+
+/** Extract embedded text subtitle `s` as WebVTT, with absolute timestamps, starting near `ss`. */
+function subs(req, res, url, { s = 0, ss = 0, ua } = {}) {
+  const args = ['-hide_banner', '-loglevel', 'error', '-user_agent', ua || DEFAULT_UA, '-reconnect', '1', '-reconnect_streamed', '1'];
+  if (ss > 0) args.push('-ss', String(Math.max(0, ss - 5)), '-copyts');
+  args.push('-i', url, '-map', '0:s:' + (s | 0), '-vn', '-an', '-c:s', 'webvtt', '-f', 'webvtt', 'pipe:1');
+  const p = spawn(FF, args);
+  killOnClose(res, p);
+  p.stderr.on('data', () => {});
+  res.writeHead(200, { 'Content-Type': 'text/vtt; charset=utf-8', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' });
+  p.stdout.pipe(res);
+}
+
+module.exports = { has, probe, remux, subs, langName };

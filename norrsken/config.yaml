@@ -1,0 +1,20 @@
+name: Norrsken IPTV
+version: "1.0.0"
+slug: norrsken
+description: Egen IPTV-app med Netflix-känsla för Philips-tv (Titan OS). Öppna http://<home-assistant-ip>:8787/ på tv:n.
+url: https://github.com/nordas/norrsken-ha
+arch:
+  - amd64
+  - aarch64
+startup: application
+boot: auto
+init: false
+ports:
+  8787/tcp: 8787
+ports_description:
+  8787/tcp: Tv-appen och inställningssidan
+webui: http://[HOST]:[PORT:8787]/setup
+options:
+  setup_pin: ""
+schema:
+  setup_pin: str?

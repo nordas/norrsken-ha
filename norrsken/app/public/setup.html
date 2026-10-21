@@ -1,0 +1,450 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0c111c">
+<title>Inställningar</title>
+<link rel="preload" href="fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+<style>
+@font-face { font-family: 'Inter'; src: url('fonts/inter-latin-wght-normal.woff2') format('woff2'); font-weight: 100 900; font-display: swap; }
+@font-face { font-family: 'Inter'; src: url('fonts/inter-latin-ext-wght-normal.woff2') format('woff2'); font-weight: 100 900; font-display: swap; unicode-range: U+0100-02AF, U+1E00-1EFF; }
+:root {
+  --natt: #0c111c; --skymning: #172031; --skymning-2: #222d42; --is: #eef3f8; --frost: #93a1b5; --frost-dim: #64728a;
+  --gron: #4ff0b4; --violett: #8f7bff; --fel: #ff8a96; --aurora: linear-gradient(90deg, var(--gron), var(--violett));
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--natt); color: var(--is); font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; font-size: 16px; line-height: 1.5; -webkit-font-smoothing: antialiased; padding: 0 16px calc(110px + env(safe-area-inset-bottom)); }
+main { max-width: 640px; margin: 0 auto; }
+header { display: flex; align-items: center; gap: 12px; padding: 28px 0 8px; }
+header svg { width: 34px; height: 34px; flex: none; }
+header h1 { font-size: 22px; font-weight: 800; letter-spacing: -0.01em; flex: 1; }
+.chip { font-size: 13px; font-weight: 600; padding: 4px 10px; border-radius: 999px; background: var(--skymning); color: var(--frost); white-space: nowrap; }
+.chip.ok { color: var(--gron); }
+.chip.err { color: var(--fel); }
+.lead { color: var(--frost); margin: 4px 0 20px; }
+section { background: var(--skymning); border-radius: 18px; padding: 20px; margin-top: 16px; }
+section h2 { font-size: 18px; font-weight: 750; letter-spacing: -0.01em; }
+section > p.sub { color: var(--frost); font-size: 14px; margin-top: 2px; }
+label { display: block; font-size: 14px; font-weight: 600; color: #c9d3df; margin: 16px 0 6px; }
+.help { font-size: 13px; color: var(--frost); margin-top: 6px; }
+input[type=text], input[type=password], input[type=url], input[type=search], select {
+  width: 100%; height: 48px; border-radius: 12px; border: 1.5px solid var(--skymning-2); background: var(--natt); color: var(--is);
+  font: inherit; padding: 0 14px; outline: none; transition: border-color .15s; -webkit-appearance: none; appearance: none;
+}
+select { background-image: linear-gradient(45deg, transparent 50%, var(--frost) 50%), linear-gradient(135deg, var(--frost) 50%, transparent 50%); background-position: calc(100% - 20px) 21px, calc(100% - 15px) 21px; background-size: 5px 5px; background-repeat: no-repeat; padding-right: 36px; }
+input:focus, select:focus { border-color: var(--violett); }
+.seg { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; border-radius: 14px; background: var(--natt); margin-top: 14px; }
+.seg button { height: 42px; border: 0; border-radius: 10px; background: transparent; color: var(--frost); font: inherit; font-weight: 650; }
+.seg button.on { background: var(--is); color: var(--natt); }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 48px; padding: 0 20px; border: 0; border-radius: 999px; font: inherit; font-weight: 700; cursor: pointer; background: var(--skymning-2); color: var(--is); }
+.btn.primary { background: var(--is); color: var(--natt); }
+.btn:disabled { opacity: .5; }
+.btn.small { height: 38px; padding: 0 14px; font-size: 14px; }
+.row { display: flex; gap: 10px; align-items: center; }
+.result { margin-top: 12px; font-size: 14px; padding: 12px 14px; border-radius: 12px; background: var(--natt); display: none; }
+.result.on { display: block; }
+.result.ok { color: var(--gron); }
+.result.err { color: var(--fel); }
+.notice { margin-top: 12px; font-size: 14px; padding: 12px 14px; border-radius: 12px; border: 1.5px dashed var(--violett); color: #d6d0ff; display: none; }
+.notice.on { display: block; }
+.notice button { margin-top: 10px; }
+.toggle { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 0; border-bottom: 1px solid var(--skymning-2); }
+.toggle:last-child { border-bottom: 0; }
+.toggle span { font-weight: 600; }
+.toggle small { display: block; font-weight: 400; color: var(--frost); font-size: 13px; }
+.sw { position: relative; width: 50px; height: 30px; flex: none; }
+.sw input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; z-index: 1; }
+.sw i { position: absolute; inset: 0; border-radius: 999px; background: var(--skymning-2); transition: background .15s; }
+.sw i::after { content: ''; position: absolute; left: 3px; top: 3px; width: 24px; height: 24px; border-radius: 50%; background: var(--frost); transition: transform .15s, background .15s; }
+.sw input:checked + i { background: var(--gron); }
+.sw input:checked + i::after { transform: translateX(20px); background: var(--natt); }
+.prof { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+.prof .av { width: 48px; height: 48px; border-radius: 12px; border: 0; flex: none; font: inherit; font-weight: 800; font-size: 20px; color: var(--natt); cursor: pointer; }
+.prof input[type=text] { flex: 1; min-width: 0; }
+.prof .kid { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 11px; color: var(--frost); }
+.prof .rm { width: 40px; height: 40px; border-radius: 50%; border: 0; background: transparent; color: var(--frost); font-size: 22px; cursor: pointer; flex: none; }
+details { margin-top: 12px; }
+summary { cursor: pointer; font-weight: 650; color: #c9d3df; padding: 10px 0; }
+.tabs { display: flex; gap: 6px; margin-top: 14px; overflow-x: auto; }
+.tabs button { height: 38px; padding: 0 14px; border-radius: 999px; border: 1.5px solid var(--skymning-2); background: transparent; color: var(--frost); font: inherit; font-weight: 650; font-size: 14px; white-space: nowrap; }
+.tabs button.on { border-color: var(--is); color: var(--is); }
+.cats { margin-top: 10px; max-height: 52vh; overflow-y: auto; border-radius: 12px; background: var(--natt); }
+.cat { display: flex; align-items: center; gap: 12px; padding: 11px 14px; border-bottom: 1px solid var(--skymning); cursor: pointer; }
+.cat input { width: 20px; height: 20px; accent-color: var(--gron); flex: none; }
+.cat .n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cat .c { color: var(--frost-dim); font-size: 13px; font-variant-numeric: tabular-nums; }
+.cat .flag { font-size: 11px; color: var(--fel); border: 1px solid currentColor; border-radius: 4px; padding: 0 4px; }
+.cat.off .n { color: var(--frost-dim); }
+.bulk { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.count-line { font-size: 13px; color: var(--frost); margin-top: 10px; }
+.steps { margin-top: 10px; padding-left: 20px; color: #c9d3df; }
+.steps li { margin-top: 8px; }
+.steps code, .addr { font-family: inherit; font-weight: 700; color: var(--is); background: var(--natt); padding: 2px 8px; border-radius: 6px; word-break: break-all; }
+.addr { display: block; padding: 12px 14px; margin-top: 10px; font-size: 17px; border: 1.5px solid var(--skymning-2); }
+.savebar { position: fixed; left: 0; right: 0; bottom: 0; padding: 14px 16px calc(14px + env(safe-area-inset-bottom)); background: linear-gradient(0deg, var(--natt) 70%, rgba(12,17,28,0)); display: flex; justify-content: center; }
+.savebar .inner { width: 100%; max-width: 640px; display: flex; gap: 12px; align-items: center; }
+.savebar .btn { flex: 1; height: 54px; font-size: 17px; }
+.status { font-size: 14px; color: var(--frost); min-height: 20px; margin-top: 8px; }
+.spin { display: inline-block; width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--skymning-2); border-top-color: var(--gron); animation: s .8s linear infinite; vertical-align: -2px; margin-right: 8px; }
+@keyframes s { to { transform: rotate(360deg); } }
+.hidden { display: none !important; }
+.pin { position: fixed; inset: 0; background: rgba(6,9,15,.92); display: flex; align-items: center; justify-content: center; padding: 24px; z-index: 10; }
+.pin .box { width: 100%; max-width: 360px; background: var(--skymning); border-radius: 18px; padding: 24px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <svg viewBox="0 0 24 24" fill="none" stroke-linecap="round"><path d="M3 17c3-8 6-11 9-11s6 3 9 11" stroke="#4ff0b4" stroke-width="2.4"/><path d="M6 19c2-5 4-7 6-7s4 2 6 7" stroke="#8f7bff" stroke-width="1.6"/></svg>
+    <h1 id="appTitle">Norrsken</h1>
+    <span class="chip" id="chip">Ansluter…</span>
+  </header>
+  <p class="lead">Här kopplar du appen till din IPTV-leverantör och bestämmer vad som ska synas på tv:n.</p>
+
+  <section id="srcSec">
+    <h2>Leverantör</h2>
+    <p class="sub">Uppgifterna finns i mejlet eller på kontosidan från din leverantör.</p>
+    <div class="seg" role="tablist">
+      <button type="button" id="segX" class="on">Xtream Codes</button>
+      <button type="button" id="segM">M3U-länk</button>
+    </div>
+    <div id="xFields">
+      <label for="xServer">Serveradress</label>
+      <input type="url" id="xServer" placeholder="http://exempel.tv:8080" autocomplete="off" autocapitalize="off" spellcheck="false">
+      <label for="xUser">Användarnamn</label>
+      <input type="text" id="xUser" autocomplete="off" autocapitalize="off" spellcheck="false">
+      <label for="xPass">Lösenord</label>
+      <input type="password" id="xPass" autocomplete="off">
+      <p class="help" id="passHelp"></p>
+    </div>
+    <div id="mFields" class="hidden">
+      <label for="mUrl">Länk till spellistan</label>
+      <input type="url" id="mUrl" placeholder="http://exempel.tv/get.php?username=…" autocomplete="off" autocapitalize="off" spellcheck="false">
+      <div class="notice" id="xtNotice">Det här är en Xtream-länk. Med Xtream får du affischer, beskrivningar och avsnittslistor.
+        <div><button type="button" class="btn small primary" id="useXt">Använd Xtream i stället</button></div>
+      </div>
+      <label for="mEpg">Länk till tv-guide (valfritt)</label>
+      <input type="url" id="mEpg" placeholder="Hämtas från spellistan om den finns där" autocomplete="off" autocapitalize="off" spellcheck="false">
+    </div>
+    <div class="row" style="margin-top:16px"><button type="button" class="btn" id="testBtn">Testa anslutningen</button></div>
+    <div class="result" id="testRes"></div>
+  </section>
+
+  <section>
+    <h2>Profiler</h2>
+    <p class="sub">Varje profil får egen lista och egen historik. Barnprofiler visar bara barnkategorier.</p>
+    <div id="profList"></div>
+    <div class="row" style="margin-top:14px"><button type="button" class="btn small" id="addProf">Lägg till profil</button></div>
+  </section>
+
+  <section>
+    <h2>Visning</h2>
+    <label for="appName">Appens namn</label>
+    <input type="text" id="appName" maxlength="24">
+    <div style="margin-top:10px">
+      <div class="toggle"><span>Dölj vuxeninnehåll<small>Kategorier som ser ut att vara för vuxna visas inte.</small></span><label class="sw"><input type="checkbox" id="hideAdult"><i></i></label></div>
+      <div class="toggle"><span>Snygga till namn<small>Tar bort landsprefix som ”SE|” och versaler i kategorinamn.</small></span><label class="sw"><input type="checkbox" id="cleanNames"><i></i></label></div>
+    </div>
+    <label for="previews">Förhandsvisningar</label>
+    <select id="previews"><option value="sound">Spela automatiskt med ljud</option><option value="muted">Spela automatiskt utan ljud</option><option value="off">Av</option></select>
+    <p class="help">Billboarden och kortet du står på börjar spela efter ett par sekunder. Varje förhandsvisning använder en av kontots samtidiga strömmar medan den spelar.</p>
+    <label for="liveFormat">Format för live-tv</label>
+    <select id="liveFormat"><option value="hls">HLS (rekommenderas)</option><option value="ts">MPEG-TS</option></select>
+    <p class="help">Byt till MPEG-TS om kanaler hackar eller inte startar. Appen provar det andra formatet automatiskt om det första inte fungerar.</p>
+    <details>
+      <summary>Avancerat</summary>
+      <label for="epgUrl">Egen tv-guide (XMLTV-länk)</label>
+      <input type="url" id="epgUrl" placeholder="Lämna tomt för leverantörens guide" autocapitalize="off" spellcheck="false">
+      <label for="audioMode">Ljud i MKV-filer</label>
+      <select id="audioMode"><option value="auto">Automatiskt</option><option value="aac">Gör alltid om till AAC (säkrast)</option><option value="copy">Skicka orört</option></select>
+      <p class="help">Välj AAC om filmer saknar ljud på tv:n.</p>
+      <label for="ua">User-Agent</label>
+      <input type="text" id="ua" placeholder="VLC/3.0.21 LibVLC/3.0.21" autocapitalize="off" spellcheck="false">
+      <p class="help">Vissa leverantörer kräver en viss spelare. Ändra bara om leverantören säger det.</p>
+      <label for="kidsPattern">Ord som räknas som barnkategorier</label>
+      <input type="text" id="kidsPattern" placeholder="kid|barn|disney|tecknat" autocapitalize="off" spellcheck="false">
+    </details>
+  </section>
+
+  <section id="catSec" class="hidden">
+    <h2>Kategorier</h2>
+    <p class="sub">Bocka ur det du inte vill se. Leverantörer har ofta hundratals kategorier från hela världen.</p>
+    <div class="tabs" id="catTabs"></div>
+    <input type="search" id="catFilter" placeholder="Filtrera, t.ex. SE eller sport" style="margin-top:12px" autocapitalize="off">
+    <div class="bulk">
+      <button type="button" class="btn small" id="showMatch">Visa alla som matchar</button>
+      <button type="button" class="btn small" id="hideMatch">Dölj alla som matchar</button>
+    </div>
+    <div class="count-line" id="catCount"></div>
+    <div class="cats" id="catList"></div>
+    <div class="row" style="margin-top:14px"><button type="button" class="btn primary" id="saveCats">Spara urvalet</button></div>
+    <div class="result" id="catRes"></div>
+  </section>
+
+  <section>
+    <h2>Öppna appen på tv:n</h2>
+    <p class="sub">Philips-tv med Titan OS kör appen via utvecklarverktyget DevView.</p>
+    <span class="addr" id="tvAddr"></span>
+    <ol class="steps">
+      <li>Logga in på Titan OS Partner Portal på datorn och lägg till en app i din Sandbox med adressen ovan.</li>
+      <li>Öppna appen <b>DevView</b> på tv:n och para den med koden som visas.</li>
+      <li>Starta appen från DevView. Fungerar den i en vanlig webbläsare på datorn fungerar den på tv:n.</li>
+    </ol>
+    <p class="help">Andra smart-tv:ar och datorer kan öppna adressen direkt i webbläsaren.</p>
+  </section>
+</main>
+
+<div class="savebar">
+  <div class="inner">
+    <button type="button" class="btn primary" id="saveBtn">Spara och hämta utbudet</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  var COLORS = ['#4ff0b4', '#8f7bff', '#f5b942', '#ff7a8a', '#5cc8ff', '#c48bff', '#ffd166', '#7ee081'];
+  var pin = '';
+  try { pin = sessionStorage.getItem('nsk.pin') || ''; } catch (e) { /* no storage */ }
+  var cfg = null, source = 'xtream', profiles = [], cats = null, catType = 'live', hidden = { live: {}, movie: {}, series: {} };
+
+  function api(method, path, body) {
+    var headers = { 'Content-Type': 'application/json' };
+    if (pin) headers['X-Pin'] = pin;
+    return fetch(path, { method: method, headers: headers, body: body ? JSON.stringify(body) : undefined, cache: 'no-store' })
+      .then(function (r) { return r.json().then(function (j) { if (r.status === 401) { askPin(); throw new Error(j.error); } if (!r.ok) throw new Error(j.error || 'Fel ' + r.status); return j; }); });
+  }
+
+  function askPin() {
+    if (document.querySelector('.pin')) return;
+    var d = document.createElement('div');
+    d.className = 'pin';
+    d.innerHTML = '<div class="box"><h2 style="font-size:20px">Ange PIN-kod</h2><p class="help">Servern är skyddad med en PIN-kod.</p><input type="password" inputmode="numeric" id="pinIn" style="margin-top:14px"><div class="row" style="margin-top:14px"><button class="btn primary" id="pinOk">Fortsätt</button></div></div>';
+    document.body.appendChild(d);
+    $('pinOk').onclick = function () { pin = $('pinIn').value; try { sessionStorage.setItem('nsk.pin', pin); } catch (e) {} d.remove(); load(); };
+  }
+
+  function setSource(s) {
+    source = s;
+    $('segX').classList.toggle('on', s === 'xtream');
+    $('segM').classList.toggle('on', s === 'm3u');
+    $('xFields').classList.toggle('hidden', s !== 'xtream');
+    $('mFields').classList.toggle('hidden', s !== 'm3u');
+    $('testRes').className = 'result';
+    checkXtLink();
+  }
+  $('segX').onclick = function () { setSource('xtream'); };
+  $('segM').onclick = function () { setSource('m3u'); };
+
+  function xtFromUrl(u) {
+    try {
+      var url = new URL(u);
+      var user = url.searchParams.get('username'), pass = url.searchParams.get('password');
+      if (user && pass && /get\.php$/i.test(url.pathname)) return { server: url.origin + url.pathname.replace(/\/get\.php$/i, ''), username: user, password: pass };
+    } catch (e) { /* not a url */ }
+    return null;
+  }
+  function checkXtLink() { $('xtNotice').classList.toggle('on', source === 'm3u' && !!xtFromUrl($('mUrl').value.trim())); }
+  $('mUrl').addEventListener('input', checkXtLink);
+  $('useXt').onclick = function () {
+    var x = xtFromUrl($('mUrl').value.trim());
+    if (!x) return;
+    $('xServer').value = x.server; $('xUser').value = x.username; $('xPass').value = x.password;
+    setSource('xtream');
+  };
+
+  /* profiles */
+  function renderProfiles() {
+    var box = $('profList');
+    box.innerHTML = '';
+    profiles.forEach(function (p, i) {
+      var row = document.createElement('div');
+      row.className = 'prof';
+      var av = document.createElement('button');
+      av.type = 'button'; av.className = 'av'; av.style.background = p.color; av.textContent = (p.name || '?').charAt(0).toUpperCase();
+      av.title = 'Byt färg';
+      av.onclick = function () { p.color = COLORS[(COLORS.indexOf(p.color) + 1) % COLORS.length]; renderProfiles(); };
+      var name = document.createElement('input');
+      name.type = 'text'; name.value = p.name; name.maxLength = 24; name.placeholder = 'Namn';
+      name.oninput = function () { p.name = name.value; av.textContent = (p.name || '?').charAt(0).toUpperCase(); };
+      var kid = document.createElement('label');
+      kid.className = 'kid';
+      kid.innerHTML = '<span class="sw"><input type="checkbox"' + (p.kids ? ' checked' : '') + '><i></i></span>Barn';
+      kid.querySelector('input').onchange = function (e) { p.kids = e.target.checked; };
+      var rm = document.createElement('button');
+      rm.type = 'button'; rm.className = 'rm'; rm.textContent = '×'; rm.title = 'Ta bort profil';
+      rm.disabled = profiles.length < 2;
+      rm.onclick = function () { profiles.splice(i, 1); renderProfiles(); };
+      row.appendChild(av); row.appendChild(name); row.appendChild(kid); row.appendChild(rm);
+      box.appendChild(row);
+    });
+    $('addProf').disabled = profiles.length >= 8;
+  }
+  $('addProf').onclick = function () {
+    profiles.push({ id: 'p' + Date.now().toString(36), name: '', color: COLORS[profiles.length % COLORS.length], kids: false });
+    renderProfiles();
+    var ins = $('profList').querySelectorAll('input[type=text]');
+    ins[ins.length - 1].focus();
+  };
+
+  function body() {
+    return {
+      source: source,
+      xtream: { server: $('xServer').value.trim(), username: $('xUser').value.trim(), password: $('xPass').value },
+      m3u: { url: $('mUrl').value.trim(), epgUrl: $('mEpg').value.trim() },
+      profiles: profiles.filter(function (p) { return p.name.trim(); }),
+      options: {
+        appName: $('appName').value.trim(), hideAdult: $('hideAdult').checked, cleanNames: $('cleanNames').checked,
+        liveFormat: $('liveFormat').value, previews: $('previews').value, audioMode: $('audioMode').value, userAgent: $('ua').value.trim(),
+        epgUrl: $('epgUrl').value.trim(), kidsPattern: $('kidsPattern').value.trim()
+      }
+    };
+  }
+
+  function result(el, ok, text) { el.className = 'result on ' + (ok ? 'ok' : 'err'); el.textContent = text; }
+
+  $('testBtn').onclick = function () {
+    var b = $('testBtn');
+    b.disabled = true; b.textContent = 'Testar…';
+    api('POST', '/api/setup/test', body()).then(function (r) {
+      if (r.error) return result($('testRes'), false, r.error);
+      if (r.entries) return result($('testRes'), true, 'Det fungerar. Spellistan innehåller ' + r.entries.toLocaleString('sv-SE') + ' poster.');
+      var t = 'Det fungerar. Kontot är ' + (r.status === 'Active' ? 'aktivt' : (r.status || 'okänt').toLowerCase());
+      if (r.exp) t += ' till ' + new Date(r.exp).toLocaleDateString('sv-SE', { day: 'numeric', month: 'long', year: 'numeric' });
+      if (r.maxConnections) t += ' och tillåter ' + r.maxConnections + (r.maxConnections === 1 ? ' samtidig ström' : ' samtidiga strömmar');
+      result($('testRes'), true, t + '.');
+    }).catch(function (e) { result($('testRes'), false, e.message); })
+      .then(function () { b.disabled = false; b.textContent = 'Testa anslutningen'; });
+  };
+
+  $('saveBtn').onclick = function () {
+    var b = $('saveBtn');
+    var data = body();
+    if (data.source === 'xtream' && (!data.xtream.server || !data.xtream.username || (!data.xtream.password && !(cfg && cfg.xtream.hasPassword)))) {
+      $('srcSec').scrollIntoView({ behavior: 'smooth' });
+      return result($('testRes'), false, 'Fyll i serveradress, användarnamn och lösenord.');
+    }
+    if (data.source === 'm3u' && !data.m3u.url) return result($('testRes'), false, 'Klistra in länken till spellistan.');
+    b.disabled = true; b.textContent = 'Sparar…';
+    api('POST', '/api/setup', data).then(function (r) {
+      cfg = r.config;
+      $('xPass').value = '';
+      fill();
+      b.textContent = 'Sparat';
+      setTimeout(function () { b.textContent = 'Spara och hämta utbudet'; b.disabled = false; }, 1500);
+      poll(true);
+    }).catch(function (e) { b.disabled = false; b.textContent = 'Spara och hämta utbudet'; result($('testRes'), false, e.message); });
+  };
+
+  /* status */
+  var pollT = null;
+  function poll(fresh) {
+    clearTimeout(pollT);
+    fetch('/api/status', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (st) {
+      var chip = $('chip');
+      if (st.loading) { chip.className = 'chip'; chip.innerHTML = '<span class="spin"></span>' + (st.stage || 'Hämtar…'); pollT = setTimeout(poll, 1200); return; }
+      if (st.error) { chip.className = 'chip err'; chip.textContent = 'Fel'; result($('testRes'), false, st.error); return; }
+      if (st.ready && st.counts) {
+        chip.className = 'chip ok';
+        chip.textContent = st.counts.live.toLocaleString('sv-SE') + ' kanaler, ' + st.counts.movie.toLocaleString('sv-SE') + ' filmer, ' + st.counts.series.toLocaleString('sv-SE') + ' serier';
+        if (fresh || !cats) loadCats();
+      } else if (!st.configured) { chip.className = 'chip'; chip.textContent = 'Inte inställd'; }
+    }).catch(function () { $('chip').className = 'chip err'; $('chip').textContent = 'Ingen kontakt'; });
+  }
+
+  /* categories */
+  var TYPES = [['live', 'Live-tv'], ['movie', 'Filmer'], ['series', 'Serier']];
+  function loadCats() {
+    api('GET', '/api/setup/categories').then(function (c) {
+      cats = c;
+      TYPES.forEach(function (t) { hidden[t[0]] = {}; (c[t[0]] || []).forEach(function (x) { if (x.hidden) hidden[t[0]][x.id] = true; }); });
+      $('catSec').classList.remove('hidden');
+      renderTabs(); renderCats();
+    }).catch(function () { /* not ready */ });
+  }
+  function renderTabs() {
+    var box = $('catTabs');
+    box.innerHTML = '';
+    TYPES.forEach(function (t) {
+      var b = document.createElement('button');
+      b.type = 'button'; b.className = t[0] === catType ? 'on' : '';
+      b.textContent = t[1] + ' (' + (cats[t[0]] || []).length + ')';
+      b.onclick = function () { catType = t[0]; renderTabs(); renderCats(); };
+      box.appendChild(b);
+    });
+  }
+  function matching() {
+    var f = $('catFilter').value.trim().toLowerCase();
+    return (cats[catType] || []).filter(function (c) { return !f || c.name.toLowerCase().indexOf(f) >= 0; });
+  }
+  function renderCats() {
+    var list = matching();
+    var box = $('catList');
+    box.innerHTML = '';
+    var frag = document.createDocumentFragment();
+    list.forEach(function (c) {
+      var off = !!hidden[catType][c.id];
+      var row = document.createElement('label');
+      row.className = 'cat' + (off ? ' off' : '');
+      row.innerHTML = '<input type="checkbox"' + (off ? '' : ' checked') + '><span class="n"></span>' + (c.adult ? '<span class="flag">18+</span>' : '') + '<span class="c">' + c.n + '</span>';
+      row.querySelector('.n').textContent = c.name;
+      row.querySelector('input').onchange = function (e) {
+        if (e.target.checked) delete hidden[catType][c.id]; else hidden[catType][c.id] = true;
+        row.classList.toggle('off', !e.target.checked);
+        count();
+      };
+      frag.appendChild(row);
+    });
+    box.appendChild(frag);
+    count();
+  }
+  function count() {
+    var all = cats[catType] || [];
+    var vis = all.filter(function (c) { return !hidden[catType][c.id]; }).length;
+    $('catCount').textContent = vis + ' av ' + all.length + ' kategorier visas.' + ($('hideAdult').checked ? ' Vuxenkategorier döljs ändå.' : '');
+  }
+  $('catFilter').addEventListener('input', renderCats);
+  $('showMatch').onclick = function () { matching().forEach(function (c) { delete hidden[catType][c.id]; }); renderCats(); };
+  $('hideMatch').onclick = function () { matching().forEach(function (c) { hidden[catType][c.id] = true; }); renderCats(); };
+  $('saveCats').onclick = function () {
+    var out = {};
+    TYPES.forEach(function (t) { out[t[0]] = Object.keys(hidden[t[0]]); });
+    api('POST', '/api/setup/categories', out).then(function () { result($('catRes'), true, 'Sparat. Tv:n visar det nya urvalet nästa gång du byter sida.'); })
+      .catch(function (e) { result($('catRes'), false, e.message); });
+  };
+
+  function fill() {
+    $('appTitle').textContent = cfg.options.appName || 'Norrsken';
+    document.title = 'Inställningar – ' + (cfg.options.appName || 'Norrsken');
+    $('xServer').value = cfg.xtream.server || '';
+    $('xUser').value = cfg.xtream.username || '';
+    $('passHelp').textContent = cfg.xtream.hasPassword ? 'Ett lösenord är sparat. Lämna fältet tomt för att behålla det.' : '';
+    $('xPass').placeholder = cfg.xtream.hasPassword ? '••••••••' : '';
+    $('mUrl').value = cfg.m3u.url || '';
+    $('mEpg').value = cfg.m3u.epgUrl || '';
+    var o = cfg.options;
+    $('appName').value = o.appName || '';
+    $('hideAdult').checked = o.hideAdult !== false;
+    $('cleanNames').checked = o.cleanNames !== false;
+    $('liveFormat').value = o.liveFormat || 'hls';
+    $('previews').value = o.previews || 'sound';
+    $('audioMode').value = o.audioMode || 'auto';
+    $('ua').value = o.userAgent || '';
+    $('epgUrl').value = o.epgUrl || '';
+    $('kidsPattern').value = o.kidsPattern || '';
+    profiles = (cfg.profiles || []).map(function (p) { return { id: p.id, name: p.name, color: p.color, kids: p.kids }; });
+    renderProfiles();
+    setSource(cfg.source || 'xtream');
+  }
+
+  function load() {
+    $('tvAddr').textContent = location.origin + '/';
+    api('GET', '/api/setup').then(function (c) { cfg = c; fill(); poll(); }).catch(function () { /* pin dialog or offline */ });
+  }
+  load();
+})();
+</script>
+</body>
+</html>

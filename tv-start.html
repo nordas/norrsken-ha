@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Norrsken</title>
+<style>html,body{margin:0;height:100%;background:#050505;color:#fff;font-family:Arial,sans-serif;display:flex;align-items:center;justify-content:center;font-size:28px}</style>
+</head>
+<body>
+<p id="m">Startar…</p>
+<script>
+  // Ändra till den fasta IP-adressen för datorn som kör Norrsken (Home Assistant).
+  var SERVER = 'http://192.168.1.50:8787/';
+  var img = new Image();
+  var done = false;
+  img.onload = img.onerror = function () { if (!done) { done = true; location.replace(SERVER); } };
+  img.src = SERVER + 'api/qr.svg?text=ping&t=' + Date.now();
+  setTimeout(function () {
+    if (done) return;
+    document.getElementById('m').textContent = 'Når inte servern på ' + SERVER + '. Kontrollera att datorn med Home Assistant är igång.';
+  }, 6000);
+</script>
+</body>
+</html>
