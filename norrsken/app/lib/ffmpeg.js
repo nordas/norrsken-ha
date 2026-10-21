@@ -33,9 +33,18 @@ const LANGS = {
 };
 function langName(code) { return LANGS[String(code || '').toLowerCase()] ?? String(code || '').toUpperCase(); }
 
+const probing = new Map();
+/** Read a file's streams. Concurrent calls for the same file share one ffprobe (providers often allow one connection). */
 function probe(url, ua) {
   const c = probes.get(url);
   if (c) return Promise.resolve(c);
+  if (probing.has(url)) return probing.get(url);
+  const pr = probeOnce(url, ua).finally(() => probing.delete(url));
+  probing.set(url, pr);
+  return pr;
+}
+
+function probeOnce(url, ua) {
   return new Promise((resolve, reject) => {
     const args = ['-v', 'error', '-print_format', 'json', '-show_streams', '-show_format', '-user_agent', ua || DEFAULT_UA, '-rw_timeout', '15000000', url];
     const p = spawn(FP, args);
@@ -68,6 +77,7 @@ function probe(url, ua) {
             res.subs.push({ i: si++, codec: s.codec_name, lang: tags.language || '', label: langName(tags.language) || 'Undertext ' + si, title: tags.title || '', text, forced: !!(s.disposition && s.disposition.forced) });
           }
         }
+        if (!res.video && !res.audio.length) return reject(new Error('Kunde inte läsa filen'));
         probes.set(url, res);
         resolve(res);
       } catch (e) { reject(new Error('Kunde inte läsa filen')); }
@@ -164,4 +174,109 @@ function subs(req, res, url, { s = 0, ss = 0, ua } = {}) {
   p.stdout.pipe(res);
 }
 
-module.exports = { has, probe, remux, subs, langName, plan, playsAsIs };
+/* ------------------------------------------------------------------ HLS conversion
+   Works everywhere, including Safari and iPhone (which can't play a streamed MP4 without byte ranges).
+   One session per film; seeking far away restarts it at the new position. */
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const HLS_ROOT = path.join(os.tmpdir(), 'norrsken-hls');
+const sessions = new Map(); // key -> session
+
+function argsFor(info, p, url, ss, a, ua, dir) {
+  const args = ['-hide_banner', '-loglevel', 'error', '-user_agent', ua || DEFAULT_UA,
+    '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5'];
+  if (ss > 0) args.push('-ss', String(ss));
+  args.push('-i', url, '-map', '0:v:0', '-map', '0:a:' + (a | 0) + '?');
+  if (p.videoCopy) {
+    args.push('-c:v', 'copy');
+    if (/hevc|h265/.test(p.vcodec)) args.push('-tag:v', 'hvc1');
+  } else {
+    const vf = p.scale ? "scale='min(1920,iw)':-2" : "scale='min(3840,iw)':-2";
+    args.push('-c:v', 'libx264', '-preset', p.big ? 'ultrafast' : 'veryfast', '-tune', 'zerolatency', '-crf', p.big ? '23' : '21',
+      '-g', '96', '-keyint_min', '48', '-sc_threshold', '0', '-maxrate', p.scale ? '10M' : '30M', '-bufsize', p.scale ? '20M' : '60M',
+      '-pix_fmt', 'yuv420p', '-threads', '0', '-vf', vf);
+  }
+  if (p.audio.copy) args.push('-c:a', 'copy');
+  else args.push('-c:a', p.audio.codec, '-b:a', p.audio.br, '-ac', String(p.audio.ch));
+  args.push('-sn', '-dn', '-avoid_negative_ts', 'make_zero', '-max_muxing_queue_size', '2048',
+    '-f', 'hls', '-hls_time', '4', '-hls_list_size', '0', '-hls_playlist_type', 'event', '-hls_segment_type', 'fmp4',
+    '-hls_fmp4_init_filename', 'init.mp4', '-hls_flags', 'independent_segments+temp_file',
+    '-hls_segment_filename', path.join(dir, 's%05d.m4s'), path.join(dir, 'index.m3u8'));
+  return args;
+}
+
+function stopSession(s) {
+  if (!s || s.dead) return;
+  s.dead = true;
+  sessions.delete(s.key);
+  try { s.proc.kill('SIGKILL'); } catch (_) { /* gone */ }
+  setTimeout(() => fs.rm(s.dir, { recursive: true, force: true }, () => {}), 2000);
+}
+
+setInterval(() => {
+  const now = Date.now();
+  for (const s of sessions.values()) if (now - s.last > 90e3) stopSession(s);
+}, 15e3).unref();
+
+/**
+ * Get (or start) a conversion session. opts: { group, ss, a, ua, audioMode, maxRes, caps, safe }
+ * group identifies the film: starting a new position stops the old one, so the provider only sees one connection.
+ */
+async function hlsSession(url, opts) {
+  const { group, ss = 0, a = 0, ua, audioMode = 'auto', maxRes = 'orig', caps = {}, safe = false } = opts;
+  const key = group + '|' + Math.floor(ss) + '|' + a + '|' + (safe ? 's' : Object.keys(caps).sort().join(','));
+  let s = sessions.get(key);
+  if (s && !s.dead) { s.last = Date.now(); return s; }
+  for (const o of sessions.values()) if (o.group === group) stopSession(o);
+  let info = null;
+  try { info = await probe(url, ua); } catch (_) { /* go blind */ }
+  const p = plan(info, safe ? {} : caps, { a, audioMode, maxRes: safe ? '1080' : maxRes });
+  if (safe && !p.videoCopy) p.scale = true;
+  const id = Math.random().toString(36).slice(2, 10);
+  const dir = path.join(HLS_ROOT, id);
+  fs.mkdirSync(dir, { recursive: true });
+  console.log('[remux]', info ? info.video + ' ' + info.height + 'p ' + (info.audio[a] || {}).codec : 'okänd fil', '→ bild', p.videoCopy ? 'orörd' : 'H.264' + (p.scale ? ' 1080p' : ''), '· ljud', p.audio.copy ? 'orört' : p.audio.codec + ' ' + p.audio.ch + 'ch', '· från', Math.floor(ss) + 's', '(HLS)');
+  const proc = spawn(FF, argsFor(info, p, url, ss, a, ua, dir));
+  s = { key, group, id, dir, proc, last: Date.now(), dead: false, err: '', done: false };
+  proc.stderr.on('data', d => { if (s.err.length < 3000) s.err += d; });
+  proc.on('close', (code) => {
+    s.done = true;
+    if (code && code !== 255 && !s.dead) console.error('[remux] ffmpeg fel', code, s.err.split('\n').slice(-4).join(' '));
+  });
+  sessions.set(key, s);
+  return s;
+}
+
+/** Playlist for a session, waiting for the first segment. Segment URIs point at prefix/<id>/. */
+async function hlsPlaylist(s, prefix) {
+  const f = path.join(s.dir, 'index.m3u8');
+  const t0 = Date.now();
+  for (;;) {
+    let text = '';
+    try { text = fs.readFileSync(f, 'utf8'); } catch (_) { /* not yet */ }
+    if (/#EXTINF/.test(text)) {
+      return text.split('\n').map((l) => {
+        if (l.startsWith('#EXT-X-MAP:URI="')) return l.replace(/URI="([^"]+)"/, (m, u) => 'URI="' + prefix + '/' + s.id + '/' + path.basename(u) + '"');
+        if (l && l[0] !== '#') return prefix + '/' + s.id + '/' + path.basename(l.trim());
+        return l;
+      }).join('\n');
+    }
+    if (s.done || s.dead) throw new Error(s.err.split('\n').filter(Boolean).slice(-1)[0] || 'Konverteringen avbröts');
+    if (Date.now() - t0 > 45000) throw new Error('Konverteringen kom inte igång');
+    await new Promise(ok => setTimeout(ok, 300));
+  }
+}
+
+function hlsFile(id, name) {
+  for (const s of sessions.values()) {
+    if (s.id === id) {
+      s.last = Date.now();
+      if (!/^(init\.mp4|s\d{5}\.m4s)$/.test(name)) return null;
+      return path.join(s.dir, name);
+    }
+  }
+  return null;
+}
+
+module.exports = { has, probe, remux, subs, langName, plan, playsAsIs, hlsSession, hlsPlaylist, hlsFile };

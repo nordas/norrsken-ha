@@ -253,9 +253,7 @@
       return this.next('MPEG-TS stöds inte');
     }
     if (src.kind === 'remux') {
-      this.offset = at;
-      v.src = NS.remuxUrl(src.url, at, this.audioIdx, this.safeMode);
-      this.playPromise();
+      this.startRemux(at);
       if (this.sub && this.sub.kind === 'ff') this.startSubs(this.sub.i, at);
       return;
     }
@@ -264,6 +262,28 @@
     v.src = src.url;
     this.playPromise();
     if (this.sub && this.sub.kind === 'ff') this.startSubs(this.sub.i, at);
+  };
+
+  /** Converted playback: an HLS stream from the server, starting at `at` seconds into the film. */
+  Player.prototype.startRemux = function (at) {
+    var self = this, v = this.video;
+    var src = this.sources[this.si];
+    this.offset = at || 0;
+    var url = NS.remuxUrl(src.url, this.offset, this.audioIdx, this.safeMode);
+    if (window.Hls && window.Hls.isSupported()) {
+      var hls = this.hls = new window.Hls({
+        enableWorker: true, startPosition: 0, maxBufferLength: 60, maxMaxBufferLength: 180, backBufferLength: 60,
+        manifestLoadingTimeOut: 60000, manifestLoadingMaxRetry: 1, levelLoadingTimeOut: 30000, fragLoadingTimeOut: 60000,
+        liveSyncDurationCount: 9999, liveDurationInfinity: false
+      });
+      hls.on(window.Hls.Events.ERROR, function (ev, d) { self.onHlsError(d); });
+      hls.on(window.Hls.Events.MANIFEST_PARSED, function () { self.playPromise(); });
+      hls.loadSource(url);
+      hls.attachMedia(v);
+      return;
+    }
+    v.src = url;
+    this.playPromise();
   };
 
   Player.prototype.playPromise = function () {
@@ -305,6 +325,11 @@
     var H = window.Hls;
     var src = this.sources && this.sources[this.si];
     if (src && src.direct && !this.played) { NS.directBad.hls = true; this.next('Direktuppspelning blockerad'); return; }
+    if (src && src.kind === 'remux' && !this.safeMode && (d.type === H.ErrorTypes.MEDIA_ERROR || /manifest|buffer/i.test(d.details || ''))) {
+      this.safeMode = true; console.log('[norrsken] conversion output not playable, retry fully converted');
+      var at = this.played ? this.cur() : this.start;
+      this.teardown(); this.kind = 'remux'; this.startRemux(at); return;
+    }
     if (d.type === H.ErrorTypes.NETWORK_ERROR && this.netRetry < 3) {
       this.netRetry++;
       setTimeout(function () { if (self.hls) self.hls.startLoad(); }, 1000 * this.netRetry);
@@ -364,11 +389,18 @@
     var d = this.duration();
     t = Math.max(0, d ? Math.min(t, d - 2) : t);
     if (this.kind === 'remux') {
-      this.offset = t;
-      this.buffering(true);
-      this.video.src = NS.remuxUrl(this.sources[this.si].url, t, this.audioIdx, this.safeMode);
-      this.playPromise();
-      if (this.sub && this.sub.kind === 'ff') this.rebaseSubs(t);
+      // inside what has already been converted: just move; further away: restart the conversion there
+      var rel = t - this.offset;
+      var v = this.video, inBuf = false;
+      try { for (var i = 0; i < v.seekable.length; i++) if (rel >= v.seekable.start(i) && rel <= v.seekable.end(i) - 1) inBuf = true; } catch (e) { /* ignore */ }
+      if (inBuf && rel >= 0) { try { v.currentTime = rel; } catch (e) { /* ignore */ } }
+      else {
+        this.buffering(true);
+        this.teardown();
+        this.kind = 'remux';
+        this.startRemux(t);
+        if (this.sub && this.sub.kind === 'ff') this.rebaseSubs(t);
+      }
     } else {
       try { this.video.currentTime = t; } catch (e) { /* ignore */ }
       if (this.sub && this.sub.kind === 'ff' && (t < this.subFrom - 1 || t > this.subLast + 90)) this.startSubs(this.sub.i, t);

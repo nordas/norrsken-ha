@@ -485,7 +485,7 @@ route('GET', '/api/stream/:type/:id', async (req, res, q, p) => {
   const t = tok(src.primary);
   const sources = [];
   const files = both('file', src.primary);
-  const remux = { kind: 'remux', url: ing + '/remux?t=' + t };
+  const remux = { kind: 'remux', url: ing + '/rx/play.m3u8?t=' + t };
   if (nativeOk) sources.push(...files);
   else {
     // MKV/AVI: let the TV try the file itself if it says it can play the container, otherwise remux on the server
@@ -520,6 +520,31 @@ route('GET', '/remux', (req, res, q) => {
   if (!proxy.isAllowed(url)) return bad(res, 'forbidden', 403);
   const o = store.config.options;
   ff.remux(req, res, url, { ss: Math.max(0, +q.get('ss') || 0), a: +q.get('a') || 0, ua: catalog.ua(), audioMode: o.audioMode, maxRes: o.maxRes, caps: parseCaps(q.get('caps')) });
+});
+
+// Converted playback as HLS: works in every browser, including Safari and iPhone
+route('GET', '/rx/play.m3u8', async (req, res, q) => {
+  if (!ff.has()) return bad(res, 'ffmpeg saknas', 501);
+  const t = q.get('t') || '';
+  const url = proxy.untoken(t);
+  if (!proxy.isAllowed(url)) return bad(res, 'forbidden', 403);
+  const o = store.config.options;
+  try {
+    const s = await ff.hlsSession(url, { group: t, ss: Math.max(0, +q.get('ss') || 0), a: +q.get('a') || 0, ua: catalog.ua(),
+      audioMode: o.audioMode, maxRes: o.maxRes, caps: parseCaps(q.get('caps')), safe: q.get('safe') === '1' });
+    const text = await ff.hlsPlaylist(s, ingressBase(req) + '/rx');
+    send(res, 200, text, 'application/vnd.apple.mpegurl', { 'Access-Control-Allow-Origin': '*' });
+  } catch (e) { bad(res, e.message, 502); }
+});
+
+route('GET', '/rx/:id/:name', (req, res, q, p) => {
+  const f = ff.hlsFile(p.id, p.name);
+  if (!f) return bad(res, 'slut', 404);
+  fs.stat(f, (err, st) => {
+    if (err) return bad(res, 'saknas', 404);
+    res.writeHead(200, { 'Content-Type': p.name.endsWith('.mp4') ? 'video/mp4' : 'video/iso.segment', 'Content-Length': st.size, 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' });
+    fs.createReadStream(f).pipe(res);
+  });
 });
 
 route('GET', '/subs', (req, res, q) => {

@@ -22,7 +22,12 @@
       mp.attachMediaElement(v);
       mp.load();
     } else if (src.kind === 'remux') {
-      v.src = NS.remuxUrl(src.url, at, 0);
+      var u = NS.remuxUrl(src.url, at, 0);
+      if (window.Hls && window.Hls.isSupported()) {
+        hls = new window.Hls({ enableWorker: true, startPosition: 0, maxBufferLength: 12, manifestLoadingTimeOut: 30000, liveSyncDurationCount: 9999 });
+        hls.on(window.Hls.Events.ERROR, function (e, d) { if (d && d.fatal) fail(); });
+        hls.loadSource(u); hls.attachMedia(v);
+      } else v.src = u;
     } else {
       v.src = src.url;
       if (at > 0) v.addEventListener('loadedmetadata', function once() { v.removeEventListener('loadedmetadata', once); try { v.currentTime = at; } catch (e) { /* ignore */ } });

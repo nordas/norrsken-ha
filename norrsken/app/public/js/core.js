@@ -188,7 +188,7 @@
     } catch (e) { /* assume basics */ }
     return out.join(',');
   })();
-  NS.remuxUrl = function (base, at, a, safe) { return base + '&ss=' + Math.floor(at || 0) + '&a=' + (a || 0) + '&caps=' + (safe ? '' : NS.caps); };
+  NS.remuxUrl = function (base, at, a, safe) { return base + '&ss=' + Math.floor(at || 0) + '&a=' + (a || 0) + '&caps=' + (safe ? '' : NS.caps) + (safe ? '&safe=1' : ''); };
 
   /* ---------------------------------------------------------------- direct playback */
   /** Kinds of direct (TV → provider) playback that failed this session; those go via the server instead. */
