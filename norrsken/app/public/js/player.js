@@ -84,7 +84,7 @@
 
     // media events
     var on = function (ev, fn) { v.addEventListener(ev, fn); };
-    on('playing', function () { self.buffering(false); self.errShown = false; self.lastMove = Date.now(); });
+    on('playing', function () { self.buffering(false); self.errShown = false; self.played = true; self.lastMove = Date.now(); });
     on('waiting', function () { self.buffering(true); });
     on('stalled', function () { self.buffering(true); });
     on('canplay', function () { self.buffering(false); });
@@ -97,6 +97,8 @@
     on('ended', function () { self.onEnded(); });
     on('error', function () {
       if (self.kind === 'hls' && self.hls) return; // hls.js reports its own errors
+      var cs = self.sources && self.sources[self.si];
+      if (cs && cs.direct && !self.played && cs.kind === 'file') NS.directBad.file = true;
       var err = v.error;
       self.fail(err ? 'Mediafel ' + err.code : 'Mediafel');
     });
@@ -162,7 +164,7 @@
     var req = this.reqId = {};
     NS.preview.settle().then(function () { return NS.api.stream(item.t, item.id, item.ext); }).then(function (res) {
       if (req !== self.reqId) return;
-      self.sources = res.sources || [];
+      self.sources = NS.usableSources(res.sources || []);
       self.tok = res.t || '';
       self.si = 0;
       if (!self.sources.length) return self.fail('Ingen ström hittades');
@@ -196,14 +198,17 @@
     this.kind = src.kind;
     this.netRetry = 0;
     this.mediaRetry = 0;
+    this.played = false;
     this.lastMove = Date.now();
     this.pendingSeek = 0;
     at = at || 0;
     if (src.kind === 'hls') {
       if (window.Hls && window.Hls.isSupported()) {
         var hls = this.hls = new window.Hls({
-          enableWorker: true, lowLatencyMode: false, backBufferLength: 30, maxBufferLength: 30, maxMaxBufferLength: 60,
-          liveSyncDurationCount: 3, manifestLoadingMaxRetry: 3, levelLoadingMaxRetry: 4, fragLoadingMaxRetry: 6,
+          enableWorker: true, lowLatencyMode: false, backBufferLength: 30, maxBufferLength: 40, maxMaxBufferLength: 120,
+          maxBufferHole: 1, liveSyncDurationCount: 4, liveMaxLatencyDurationCount: 12, startFragPrefetch: true,
+          manifestLoadingTimeOut: 15000, fragLoadingTimeOut: 30000, abrEwmaDefaultEstimate: 4000000,
+          manifestLoadingMaxRetry: src.direct ? 0 : 3, levelLoadingMaxRetry: 4, fragLoadingMaxRetry: 6,
           startPosition: !this.live && at > 0 ? at : -1, capLevelToPlayerSize: true
         });
         hls.on(window.Hls.Events.ERROR, function (ev, d) { self.onHlsError(d); });
@@ -220,9 +225,10 @@
     if (src.kind === 'ts') {
       if (window.mpegts && window.mpegts.isSupported()) {
         var mp = this.mp = window.mpegts.createPlayer({ type: 'mpegts', isLive: true, url: src.url }, {
-          enableWorker: true, lazyLoad: false, liveBufferLatencyChasing: true, liveBufferLatencyMaxLatency: 6, liveBufferLatencyMinRemain: 1.5, autoCleanupSourceBuffer: true
+          enableWorker: true, lazyLoad: false, enableStashBuffer: true, stashInitialSize: 1024 * 1024,
+          liveBufferLatencyChasing: false, autoCleanupSourceBuffer: true, autoCleanupMaxBackwardDuration: 60, autoCleanupMinBackwardDuration: 30
         });
-        mp.on(window.mpegts.Events.ERROR, function (t, d) { self.next('Strömfel: ' + (d || t)); });
+        mp.on(window.mpegts.Events.ERROR, function (t, d) { if (src.direct && !self.played) NS.directBad.ts = true; self.next('Strömfel: ' + (d || t)); });
         mp.attachMediaElement(v);
         mp.load();
         this.playPromise();
@@ -253,6 +259,8 @@
     if (!d || !d.fatal) return;
     var self = this;
     var H = window.Hls;
+    var src = this.sources && this.sources[this.si];
+    if (src && src.direct && !this.played) { NS.directBad.hls = true; this.next('Direktuppspelning blockerad'); return; }
     if (d.type === H.ErrorTypes.NETWORK_ERROR && this.netRetry < 3) {
       this.netRetry++;
       setTimeout(function () { if (self.hls) self.hls.startLoad(); }, 1000 * this.netRetry);
@@ -287,7 +295,7 @@
   Player.prototype.watchdog = function () {
     var v = this.video;
     if (this.errShown || v.paused || !this.sources) return;
-    if (Date.now() - (this.lastMove || 0) > 14000) {
+    if (Date.now() - (this.lastMove || 0) > 25000) {
       // stuck: reload the current source once, then fall back
       if (!this.reloaded) { this.reloaded = true; this.startSource(this.live ? 0 : this.cur()); }
       else { this.reloaded = false; this.next('Strömmen har slutat svara'); }

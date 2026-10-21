@@ -9,14 +9,16 @@
   function mode() { return (NS.status && NS.status.previews) || 'sound'; }
 
   /** Attach a source to a <video>; returns a teardown function. */
-  function attach(v, src, at) {
+  function attach(v, src, at, fail) {
     var hls = null, mp = null;
     if (src.kind === 'hls' && window.Hls && window.Hls.isSupported()) {
-      hls = new window.Hls({ enableWorker: true, maxBufferLength: 12, backBufferLength: 0, capLevelToPlayerSize: true, startPosition: at > 0 ? at : -1, startLevel: -1 });
+      hls = new window.Hls({ enableWorker: true, maxBufferLength: 12, backBufferLength: 0, capLevelToPlayerSize: true, startPosition: at > 0 ? at : -1, startLevel: -1, manifestLoadingMaxRetry: src.direct ? 0 : 2 });
+      hls.on(window.Hls.Events.ERROR, function (e, d) { if (d && d.fatal) { if (src.direct) NS.directBad.hls = true; fail(); } });
       hls.loadSource(src.url);
       hls.attachMedia(v);
     } else if (src.kind === 'ts' && window.mpegts && window.mpegts.isSupported()) {
-      mp = window.mpegts.createPlayer({ type: 'mpegts', isLive: true, url: src.url }, { enableWorker: true, liveBufferLatencyChasing: true, autoCleanupSourceBuffer: true });
+      mp = window.mpegts.createPlayer({ type: 'mpegts', isLive: true, url: src.url }, { enableWorker: true, liveBufferLatencyChasing: false, autoCleanupSourceBuffer: true });
+      mp.on(window.mpegts.Events.ERROR, function () { if (src.direct) NS.directBad.ts = true; fail(); });
       mp.attachMediaElement(v);
       mp.load();
     } else if (src.kind === 'remux') {
@@ -95,7 +97,7 @@
       else job.host.appendChild(v);
       job.video = v;
       // the server already orders sources best-first; fall back in order
-      var list = res.sources.slice();
+      var list = NS.usableSources(res.sources);
       var i = 0;
       var at = startAt(t, t.dur, t.pos);
       var self = this;
@@ -104,7 +106,7 @@
         if (job.teardown) job.teardown();
         if (i >= list.length) { self.stop(); return; }
         var src = list[i++];
-        job.teardown = attach(v, src, at);
+        job.teardown = attach(v, src, at, function () { if (cur === job && !job.on) setTimeout(next, 0); });
         var p = v.play();
         if (p && p.catch) p.catch(function () { v.muted = true; var p2 = v.play(); if (p2 && p2.catch) p2.catch(function () { /* give up quietly */ }); });
       };

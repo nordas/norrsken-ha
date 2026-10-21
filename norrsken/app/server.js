@@ -443,21 +443,36 @@ route('GET', '/api/stream/:type/:id', async (req, res, q, p) => {
   const tok = (u) => { proxy.allow(u); return proxy.token(u); };
   const pathOf = (u) => proxy.path(u);
   const kindOf = (u) => (/\.m3u8?(\?|$)/i.test(u) ? 'hls' : /\.(mp4|m4v|mov|webm|mkv|avi|wmv|flv|mpg|mpeg)(\?|$)/i.test(u) ? 'file' : 'ts');
+  // Direct = the TV fetches from the provider itself (fastest, no detour via this server).
+  // Proxied = via this server (works even when the provider blocks browsers). The player tries them in order.
+  const direct = store.config.options.directPlay !== 'off';
+  const both = (kind, u) => {
+    const out = [];
+    if (direct) out.push({ kind, url: u, direct: true });
+    out.push({ kind, url: pathOf(u) });
+    return out;
+  };
   if (type === 'live') {
-    const list = [{ kind: kindOf(src.primary), url: pathOf(src.primary) }];
-    if (src.alt) list.push({ kind: kindOf(src.alt), url: pathOf(src.alt) });
-    if (list[0].kind === 'ts' && !src.alt) list.push({ kind: 'file', url: list[0].url });
+    const k1 = kindOf(src.primary);
+    let list = both(k1, src.primary);
+    if (src.alt) list = list.concat(both(kindOf(src.alt), src.alt));
+    else if (k1 === 'ts') list.push({ kind: 'file', url: pathOf(src.primary) });
     return ok(res, { live: true, sources: list });
   }
   const ext = String(src.ext || '').toLowerCase();
   const nativeOk = ['mp4', 'm4v', 'mov', 'webm'].includes(ext);
   const t = tok(src.primary);
   const sources = [];
-  const file = { kind: 'file', url: pathOf(src.primary) };
+  const files = both('file', src.primary);
   const remux = { kind: 'remux', url: '/remux?t=' + t };
-  if (ff.has()) {
-    if (nativeOk) sources.push(file, remux); else sources.push(remux, file);
-  } else sources.push(file);
+  if (nativeOk) sources.push(...files);
+  else {
+    // MKV/AVI: let the TV try the file itself if it says it can play the container, otherwise remux on the server
+    if (direct) sources.push({ ...files[0], needs: ext === 'avi' ? 'video/x-msvideo' : 'video/x-matroska' });
+    if (ff.has()) sources.push(remux);
+    sources.push(files[files.length - 1]);
+  }
+  if (nativeOk && ff.has()) sources.push(remux);
   ok(res, { live: false, sources, t: ff.has() ? t : '', ext });
 });
 
@@ -527,6 +542,7 @@ route('POST', '/api/setup', async (req, res) => {
     if (['hls', 'ts'].includes(o.liveFormat)) opt.liveFormat = o.liveFormat;
     if (['auto', 'aac', 'copy'].includes(o.audioMode)) opt.audioMode = o.audioMode;
     if (['sound', 'muted', 'off'].includes(o.previews)) opt.previews = o.previews;
+    if (['auto', 'off'].includes(o.directPlay)) opt.directPlay = o.directPlay;
     for (const k of ['userAgent', 'epgUrl', 'kidsPattern']) if (typeof o[k] === 'string') opt[k] = o[k].trim().slice(0, 500);
   }
   const hasSource = c.source === 'm3u' ? !!c.m3u.url : !!(c.xtream.server && c.xtream.username && c.xtream.password);

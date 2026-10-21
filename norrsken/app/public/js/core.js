@@ -158,6 +158,19 @@
     recent: function (item) { return req('POST', '/api/state/' + NS.profile.id + '/recent', { item: item }); }
   };
 
+  /* ---------------------------------------------------------------- direct playback */
+  /** Kinds of direct (TV → provider) playback that failed this session; those go via the server instead. */
+  NS.directBad = {};
+  NS.usableSources = function (list) {
+    var probe = document.createElement('video');
+    var out = list.filter(function (s) {
+      if (s.direct && NS.directBad[s.kind]) return false;
+      if (s.needs && !probe.canPlayType(s.needs)) return false;
+      return true;
+    });
+    return out.length ? out : list;
+  };
+
   /* ---------------------------------------------------------------- profile state cache */
   NS.state = { myList: {}, progress: {}, dirty: false };
   NS.loadState = function () {

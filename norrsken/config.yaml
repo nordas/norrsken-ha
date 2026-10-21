@@ -1,5 +1,5 @@
 name: Norrsken IPTV
-version: "1.0.1"
+version: "1.1.0"
 slug: norrsken
 description: Egen IPTV-app med Netflix-känsla för Philips-tv (Titan OS). Öppna http://<home-assistant-ip>:8787/ på tv:n.
 url: https://github.com/nordas/norrsken-ha

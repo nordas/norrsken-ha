@@ -18,6 +18,7 @@ const DEFAULT_CONFIG = {
     liveFormat: 'hls', // hls | ts
     audioMode: 'auto', // auto | aac | copy
     previews: 'sound', // sound | muted | off
+    directPlay: 'auto', // auto: TV fetches from provider directly, falls back to proxy | off: always via server
     userAgent: '',
     epgUrl: '',
     kidsPattern: '',

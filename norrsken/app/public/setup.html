@@ -149,6 +149,9 @@ summary { cursor: pointer; font-weight: 650; color: #c9d3df; padding: 10px 0; }
     <label for="previews">Förhandsvisningar</label>
     <select id="previews"><option value="sound">Spela automatiskt med ljud</option><option value="muted">Spela automatiskt utan ljud</option><option value="off">Av</option></select>
     <p class="help">Billboarden och kortet du står på börjar spela efter ett par sekunder. Varje förhandsvisning använder en av kontots samtidiga strömmar medan den spelar.</p>
+    <label for="directPlay">Uppspelning</label>
+    <select id="directPlay"><option value="auto">Direkt från leverantören (snabbast)</option><option value="off">Alltid via servern</option></select>
+    <p class="help">Direkt betyder att tv:n hämtar videon själv. Om leverantören inte tillåter det går appen automatiskt via servern.</p>
     <label for="liveFormat">Format för live-tv</label>
     <select id="liveFormat"><option value="hls">HLS (rekommenderas)</option><option value="ts">MPEG-TS</option></select>
     <p class="help">Byt till MPEG-TS om kanaler hackar eller inte startar. Appen provar det andra formatet automatiskt om det första inte fungerar.</p>
@@ -297,7 +300,7 @@ summary { cursor: pointer; font-weight: 650; color: #c9d3df; padding: 10px 0; }
       profiles: profiles.filter(function (p) { return p.name.trim(); }),
       options: {
         appName: $('appName').value.trim(), hideAdult: $('hideAdult').checked, cleanNames: $('cleanNames').checked,
-        liveFormat: $('liveFormat').value, previews: $('previews').value, audioMode: $('audioMode').value, userAgent: $('ua').value.trim(),
+        liveFormat: $('liveFormat').value, previews: $('previews').value, directPlay: $('directPlay').value, audioMode: $('audioMode').value, userAgent: $('ua').value.trim(),
         epgUrl: $('epgUrl').value.trim(), kidsPattern: $('kidsPattern').value.trim()
       }
     };
@@ -430,6 +433,7 @@ summary { cursor: pointer; font-weight: 650; color: #c9d3df; padding: 10px 0; }
     $('cleanNames').checked = o.cleanNames !== false;
     $('liveFormat').value = o.liveFormat || 'hls';
     $('previews').value = o.previews || 'sound';
+    $('directPlay').value = o.directPlay || 'auto';
     $('audioMode').value = o.audioMode || 'auto';
     $('ua').value = o.userAgent || '';
     $('epgUrl').value = o.epgUrl || '';
