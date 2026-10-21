@@ -629,7 +629,7 @@ server.keepAliveTimeout = 65000;
 
 function start() {
   server.listen(PORT, HOST, () => {
-    const urls = lanUrls();
+    const urls = process.env.PUBLIC_URL ? [process.env.PUBLIC_URL.replace(/\/$/, '')] : lanUrls();
     console.log(`\n  ${store.config.options.appName || 'Norrsken'} ${pkg.version} kör på port ${PORT}`);
     console.log('  TV-appen:      ' + (urls[0] || 'http://localhost:' + PORT) + '/');
     console.log('  Inställningar: ' + (urls[0] || 'http://localhost:' + PORT) + '/setup');
