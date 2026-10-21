@@ -73,6 +73,11 @@
     del: '<path d="M9 5h11v14H9l-6-7z"/><path d="M12.5 9.5l5 5M17.5 9.5l-5 5"/>',
     space: '<path d="M4 10v4h16v-4"/>',
     episodes: '<path d="M4 6h16M4 12h16M4 18h10"/>',
+    rw: '<path d="M11 6l-6 6 6 6M19 6l-6 6 6 6"/>',
+    ff: '<path d="M13 6l6 6-6 6M5 6l6 6-6 6"/>',
+    x: '<path d="M6 6l12 12M18 6L6 18"/>',
+    fs: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
+    up: '<path d="M6 14.5l6-6 6 6"/>',
     aurora: '<path d="M3 17c3-8 6-11 9-11s6 3 9 11" stroke-width="2.4"/><path d="M6 19c2-5 4-7 6-7s4 2 6 7" stroke-width="1.6"/>'
   };
   var FILLED = { play: 1, pause: 1, next: 1, star: 1 };
@@ -183,7 +188,7 @@
     } catch (e) { /* assume basics */ }
     return out.join(',');
   })();
-  NS.remuxUrl = function (base, at, a) { return base + '&ss=' + Math.floor(at || 0) + '&a=' + (a || 0) + '&caps=' + NS.caps; };
+  NS.remuxUrl = function (base, at, a, safe) { return base + '&ss=' + Math.floor(at || 0) + '&a=' + (a || 0) + '&caps=' + (safe ? '' : NS.caps); };
 
   /* ---------------------------------------------------------------- direct playback */
   /** Kinds of direct (TV → provider) playback that failed this session; those go via the server instead. */

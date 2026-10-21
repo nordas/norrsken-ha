@@ -125,6 +125,7 @@ async function remux(req, res, url, { ss = 0, a = 0, ua, audioMode = 'auto', max
   let info = null;
   try { info = await probe(url, ua); } catch (_) { /* go blind */ }
   const p = plan(info, caps, { a, audioMode, maxRes });
+  console.log('[remux]', info ? info.video + ' ' + info.height + 'p ' + (info.audio[a] || {}).codec : 'okänd fil', '→ bild', p.videoCopy ? 'orörd' : 'H.264', '· ljud', p.audio.copy ? 'orört' : p.audio.codec + ' ' + p.audio.ch + 'ch', '· från', Math.floor(ss) + 's');
   const args = ['-hide_banner', '-loglevel', 'error', '-user_agent', ua || DEFAULT_UA,
     '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5'];
   if (ss > 0) args.push('-ss', String(ss));
@@ -146,7 +147,7 @@ async function remux(req, res, url, { ss = 0, a = 0, ua, audioMode = 'auto', max
   killOnClose(res, proc);
   let err = '';
   proc.stderr.on('data', d => { if (err.length < 2000) err += d; });
-  proc.on('close', (code) => { if (code && code !== 255) console.error('[remux] ffmpeg exit', code, err.split('\n').slice(-3).join(' ')); });
+  proc.on('close', (code) => { if (code && code !== 255) console.error('[remux] ffmpeg fel', code, err.split('\n').slice(-4).join(' ')); });
   res.writeHead(200, { 'Content-Type': 'video/mp4', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' });
   proc.stdout.pipe(res);
 }

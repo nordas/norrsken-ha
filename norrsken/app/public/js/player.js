@@ -82,6 +82,8 @@
     this.sideR = h('div', { class: 'panel-side right' });
     el.appendChild(this.sideR);
 
+    if (NS.touch) this.touchUi();
+
     // media events
     var on = function (ev, fn) { v.addEventListener(ev, fn); };
     on('playing', function () { self.buffering(false); self.errShown = false; self.played = true; self.lastMove = Date.now(); });
@@ -101,6 +103,11 @@
       var err = v.error;
       if (cs && cs.direct && !self.played && cs.kind === 'file' && err && err.code === 2) NS.directBad.file = true;
       // the file itself can't be decoded here (code 4): skip the other copies of the same file and go to the converter
+      // the converter's output still can't be decoded (e.g. HEVC the hardware can't handle): convert everything to H.264/AAC
+      if (cs && cs.kind === 'remux' && !self.safeMode && err && (err.code === 3 || err.code === 4)) {
+        self.safeMode = true; console.log('[norrsken] retry with full conversion');
+        self.startSource(self.played ? self.cur() : self.start); return;
+      }
       if (cs && cs.kind === 'file' && err && err.code === 4 && self.sources) {
         var ri = -1;
         for (var k = self.si + 1; k < self.sources.length; k++) if (self.sources[k].kind === 'remux') { ri = k; break; }
@@ -171,6 +178,8 @@
     NS.preview.settle().then(function () { return NS.api.stream(item.t, item.id, item.ext); }).then(function (res) {
       if (req !== self.reqId) return;
       self.sources = NS.usableSources(res.sources || []);
+      self.media = res.media || null;
+      self.safeMode = false;
       self.tok = res.t || '';
       self.si = 0;
       if (!self.sources.length) return self.fail('Ingen ström hittades');
@@ -244,7 +253,7 @@
     }
     if (src.kind === 'remux') {
       this.offset = at;
-      v.src = NS.remuxUrl(src.url, at, this.audioIdx);
+      v.src = NS.remuxUrl(src.url, at, this.audioIdx, this.safeMode);
       this.playPromise();
       if (this.sub && this.sub.kind === 'ff') this.startSubs(this.sub.i, at);
       return;
@@ -320,7 +329,7 @@
     if (this.kind === 'remux') {
       this.offset = t;
       this.buffering(true);
-      this.video.src = NS.remuxUrl(this.sources[this.si].url, t, this.audioIdx);
+      this.video.src = NS.remuxUrl(this.sources[this.si].url, t, this.audioIdx, this.safeMode);
       this.playPromise();
       if (this.sub && this.sub.kind === 'ff') this.rebaseSubs(t);
     } else {
@@ -871,6 +880,7 @@
     this.errEl.appendChild(h('div', { class: 'box' }, [
       h('h2', { text: this.live ? 'Kanalen går inte att spela just nu' : 'Det går inte att spela upp' }),
       h('p', { text: (why || 'Okänt fel') + '. Leverantören kan ha tillfälliga problem, eller så används alla tillåtna anslutningar på kontot.' }),
+      this.media ? h('p', { style: 'opacity:.6;font-size:.8em', text: 'Fil: ' + [this.media.v, this.media.h ? this.media.h + 'p' : '', this.media.a ? 'ljud ' + this.media.a + (this.media.ch ? ' ' + this.media.ch + 'ch' : '') : ''].filter(Boolean).join(', ') + ' · skärmen klarar: ' + (NS.caps || 'grundformat') + (this.safeMode ? ' · full konvertering provad' : '') }) : null,
       h('div', { class: 'btns' }, this.errBtns)
     ]));
     this.errEl.classList.add('on');
@@ -965,6 +975,73 @@
     else if (a === 'ok') { this.pressBtn(); return; }
     this.paintZone();
     this.showOsd(true);
+  };
+
+  /* ------------------------------------------------------------ touch controls (phones/tablets) */
+  Player.prototype.touchUi = function () {
+    var self = this;
+    var el = this.el;
+    el.classList.add('touch');
+    var btn = function (cls, icon, fn, label) {
+      var b = h('button', { class: 'tbtn ' + cls, 'aria-label': label || '' }, NS.icon(icon));
+      b.addEventListener('click', function (e) { e.stopPropagation(); fn(); self.showOsd(self.video.paused); });
+      return b;
+    };
+    this.osd.appendChild(btn('tclose', 'back', function () { self.exit(); }, 'Stäng'));
+    if (el.requestFullscreen || el.webkitRequestFullscreen) {
+      this.osd.appendChild(btn('tfs', 'fs', function () {
+        var d = document;
+        if (d.fullscreenElement || d.webkitFullscreenElement) (d.exitFullscreen || d.webkitExitFullscreen).call(d);
+        else {
+          var r = (el.requestFullscreen || el.webkitRequestFullscreen).call(el);
+          if (r && r.then && screen.orientation && screen.orientation.lock) r.then(function () { screen.orientation.lock('landscape').catch(function () {}); });
+        }
+      }, 'Helskärm'));
+    }
+    this.tPlay = btn('tplay', 'pause', function () { if (self.video.paused) self.playPromise(); else self.video.pause(); }, 'Spela/pausa');
+    var mid = this.live
+      ? [btn('tside', 'up', function () { self.zap(1); }, 'Föregående kanal'), this.tPlay, btn('tside', 'down', function () { self.zap(-1); }, 'Nästa kanal')]
+      : [btn('tside', 'rw', function () { self.seekTo(self.cur() - 10); }, 'Bakåt 10 s'), this.tPlay, btn('tside', 'ff', function () { self.seekTo(self.cur() + 10); }, 'Framåt 10 s')];
+    this.osd.appendChild(h('div', { class: 'tmid' }, mid));
+    if (this.live) {
+      this.osd.appendChild(h('div', { class: 'tlive' }, [
+        h('button', { class: 'btn', onclick: function (e) { e.stopPropagation(); self.openChannels(); } }, [NS.icon('episodes'), 'Kanaler']),
+        h('button', { class: 'btn', onclick: function (e) { e.stopPropagation(); self.openTracks(); } }, [NS.icon('sub'), 'Ljud'])
+      ]));
+    }
+    var sync = function () { self.tPlay.innerHTML = ''; self.tPlay.appendChild(NS.icon(self.video.paused ? 'play' : 'pause')); };
+    this.video.addEventListener('play', sync);
+    this.video.addEventListener('pause', sync);
+    // tap anywhere: show/hide controls
+    el.addEventListener('click', function (e) {
+      if (e.target.closest && e.target.closest('button, .btn, .bar, .panel-side, .nextup, .perror, .ci, .ti')) return;
+      if (self.osdOn) self.hideOsd(); else self.showOsd();
+    });
+    // drag on the progress bar
+    if (this.bar) {
+      var at = function (e) {
+        var r = self.bar.getBoundingClientRect();
+        var x = (e.touches ? e.touches[0].clientX : e.clientX) - r.left;
+        return Math.max(0, Math.min(1, x / r.width)) * self.duration();
+      };
+      var drag = false;
+      var down = function (e) { if (!self.duration()) return; drag = true; self.scrubbing = at(e); self.bar.classList.add('scrub'); self.showOsd(true); self.tick(); e.preventDefault(); };
+      var move = function (e) { if (!drag) return; self.scrubbing = at(e); self.tick(); e.preventDefault(); };
+      var up = function () { if (!drag) return; drag = false; self.commitScrub(); };
+      this.bar.addEventListener('touchstart', down, { passive: false });
+      this.bar.addEventListener('touchmove', move, { passive: false });
+      this.bar.addEventListener('touchend', up);
+      this.bar.addEventListener('mousedown', down);
+      window.addEventListener('mousemove', move);
+      window.addEventListener('mouseup', up);
+    }
+    // channel list: tap the arrows to switch category, tap outside to close
+    this.side.addEventListener('click', function (e) {
+      var arr = e.target.closest && e.target.closest('.arr');
+      if (arr) { var r = arr.getBoundingClientRect(); self.switchCat(e.clientX < r.left + r.width / 2 ? -1 : 1); }
+    });
+    var closer = function (e) { if (self.panel && !(e.target.closest && e.target.closest('.panel-side, .tlive, .obtns'))) { e.stopPropagation(); self.closePanel(); } };
+    el.addEventListener('click', closer, true);
   };
 
   NS.Player = Player;

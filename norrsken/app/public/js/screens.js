@@ -90,7 +90,7 @@
     var p = this.list[this.i];
     NS.profile = p;
     NS.store.set('profile', p.id);
-    NS.loadState().then(function () { NS.router.reset(new Browse('home')); });
+    NS.loadState().then(function () { NS.router.reset(new NS.Browse('home')); });
   };
   Profiles.prototype.onKey = function (a) {
     if (a === 'left' && this.i > 0) this.i--;
@@ -186,7 +186,7 @@
         self.rows.emitFocus();
       }
     }).catch(function (e) {
-      if (e.status === 503) { NS.router.reset(new Welcome()); return; }
+      if (e.status === 503) { NS.router.reset(new NS.Welcome()); return; }
       NS.toast(e.message || 'Kunde inte hämta sidan', 'info');
     });
   };
