@@ -741,6 +741,8 @@ route('GET', '/rx/play.m3u8', async (req, res, q) => {
   } catch (e) { bad(res, e.message, 502); }
 });
 
+route('POST', '/rx/stop', (req, res, q) => { ff.stopGroup(q.get('t') || ''); ok(res, { ok: true }); });
+
 route('GET', '/rx/:id/:name', (req, res, q, p) => {
   const f = ff.hlsFile(p.id, p.name);
   if (!f) return bad(res, 'slut', 404);

@@ -189,8 +189,12 @@
       if (ok('audio/mp4; codecs="ac-3"')) out.push('ac3');
       if (ok('audio/mp4; codecs="ec-3"')) out.push('eac3');
       if (ok('audio/mp4; codecs="opus"')) out.push('opus');
-      if (ok('video/mp4; codecs="hvc1.1.6.L120.90"') || ok('video/mp4; codecs="hev1.1.6.L120.90"')) out.push('hevc');
-      if (ok('video/mp4; codecs="hvc1.2.4.L153.90"') || ok('video/mp4; codecs="hev1.2.4.L153.90"')) out.push('hevc10');
+      // HEVC (4K): many browsers answer "no" but decode it fine (patched Macs, some TVs). So it is tried untouched
+      // first; only if that really fails is it remembered on this device and converted instead.
+      var hevcSays = ok('video/mp4; codecs="hvc1.1.6.L120.90"') || ok('video/mp4; codecs="hev1.1.6.L120.90"') || ok('video/mp4; codecs="hvc1.1.6.L150.B0"') || ok('video/mp4; codecs="hvc1"');
+      var hevcBad = false;
+      try { hevcBad = localStorage.getItem('nsk.hevcBad') === 'true'; } catch (e) { /* ignore */ }
+      if (hevcSays || !hevcBad) { out.push('hevc'); out.push('hevc10'); }
       if (ok('audio/mp4; codecs="flac"')) out.push('flac');
       if (ok('video/mp4; codecs="vp09.00.10.08"')) out.push('vp9');
       if (ok('video/mp4; codecs="av01.0.05M.08"')) out.push('av1');

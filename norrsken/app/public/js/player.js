@@ -113,6 +113,7 @@
       // the converter's output still can't be decoded (e.g. HEVC the hardware can't handle): convert everything to H.264/AAC
       if (cs && cs.kind === 'remux' && !self.safeMode && err && (err.code === 3 || err.code === 4)) {
         self.safeMode = true; console.log('[norrsken] retry with full conversion');
+        if (self.media && /hevc|h265/i.test(self.media.v || '')) NS.store.set('hevcBad', true);
         self.startSource(self.played ? self.cur() : self.start); return;
       }
       if (cs && cs.kind === 'file' && err && err.code === 4 && self.sources) {
@@ -150,6 +151,8 @@
   };
   Player.prototype.destroy = function () {
     this.saveProgress(true);
+    // let the server stop converting right away (frees the provider connection for the next title)
+    if (this.tok) { try { var u = 'rx/stop?t=' + encodeURIComponent(this.tok); if (navigator.sendBeacon) navigator.sendBeacon(u); else NS.api.post(u, {}); } catch (e) { /* ignore */ } }
     this.timers.forEach(clearInterval);
     clearInterval(this.clk);
     clearTimeout(this.osdT); clearTimeout(this.scrubT); clearTimeout(this.numT); clearInterval(this.nextT); clearTimeout(this.zapT);
@@ -225,6 +228,10 @@
       self.tok = res.t || '';
       self.si = 0;
       if (!self.sources.length) return self.fail('Ingen ström hittades');
+      var go = function () { if (req !== self.reqId) return; self.waitStart = false; self.startSource(self.start); };
+      // converted playback: read the tracks first (the server already did, so it's instant), so the chosen
+      // audio language goes into the first request instead of restarting the conversion a moment later
+      self.waitStart = !!self.tok && self.sources[0].kind === 'remux';
       if (self.tok) {
         NS.api.probe(self.tok).then(function (p) {
           if (req !== self.reqId) return;
@@ -232,9 +239,11 @@
           if (p.dur) self.dur = p.dur;
           self.autoTracks();
           self.renderButtons();
-        }).catch(function () {});
+          if (self.waitStart) go();
+        }).catch(function () { if (self.waitStart) go(); });
       }
-      self.startSource(self.start);
+      if (self.waitStart) setTimeout(function () { if (self.waitStart) go(); }, 4000);
+      else go();
     }).catch(function (e) { if (req === self.reqId) self.fail(e.message); });
   };
 
@@ -381,6 +390,7 @@
     if (src && src.direct && !this.played) { NS.directBad.hls = true; this.next('Direktuppspelning blockerad'); return; }
     if (src && src.kind === 'remux' && !this.safeMode && (d.type === H.ErrorTypes.MEDIA_ERROR || /manifest|buffer/i.test(d.details || ''))) {
       this.safeMode = true; console.log('[norrsken] conversion output not playable, retry fully converted');
+      if (this.media && /hevc|h265/i.test(this.media.v || '')) NS.store.set('hevcBad', true);
       var at = this.played ? this.cur() : this.start;
       this.teardown(); this.kind = 'remux'; this.startRemux(at); return;
     }
@@ -807,6 +817,7 @@
     // switching audio in a container the browser plays natively needs the remuxer
     var ri = this.sources.findIndex(function (s) { return s.kind === 'remux'; });
     if (ri < 0) return;
+    if (this.waitStart) { this.si = ri; return; } // not started yet: the first start uses this track
     var at = this.cur();
     this.si = ri;
     this.startSource(at);

@@ -46,7 +46,8 @@ function probe(url, ua) {
 
 function probeOnce(url, ua) {
   return new Promise((resolve, reject) => {
-    const args = ['-v', 'error', '-print_format', 'json', '-show_streams', '-show_format', '-user_agent', ua || DEFAULT_UA, '-rw_timeout', '15000000', url];
+    // only the start of the file: enough for codecs and tracks, and seconds faster on big MKVs over the internet
+    const args = ['-v', 'error', '-probesize', '8M', '-analyzeduration', '4M', '-print_format', 'json', '-show_streams', '-show_format', '-user_agent', ua || DEFAULT_UA, '-rw_timeout', '15000000', url];
     const p = spawn(FP, args);
     let out = '';
     p.stdout.on('data', d => { out += d; });
@@ -143,6 +144,7 @@ async function remux(req, res, url, { ss = 0, a = 0, ua, audioMode = 'auto', max
   console.log('[remux]', info ? info.video + ' ' + info.height + 'p ' + (info.audio[a] || {}).codec : 'okänd fil', '→ bild', p.videoCopy ? 'orörd' : 'H.264', '· ljud', p.audio.copy ? 'orört' : p.audio.codec + ' ' + p.audio.ch + 'ch', '· från', Math.floor(ss) + 's');
   const args = ['-hide_banner', '-loglevel', 'error', '-user_agent', ua || DEFAULT_UA,
     '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5'];
+  args.push('-probesize', '8M', '-analyzeduration', '3M', '-fflags', '+genpts+discardcorrupt');
   if (ss > 0) args.push('-ss', String(ss));
   args.push('-i', url, '-map', '0:v:0', '-map', '0:a:' + (a | 0) + '?');
   if (p.videoCopy) {
@@ -192,6 +194,7 @@ const sessions = new Map(); // key -> session
 function argsFor(info, p, url, ss, a, ua, dir) {
   const args = ['-hide_banner', '-loglevel', 'error', '-user_agent', ua || DEFAULT_UA,
     '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5'];
+  args.push('-probesize', '8M', '-analyzeduration', '3M', '-fflags', '+genpts+discardcorrupt');
   if (ss > 0) args.push('-ss', String(ss));
   args.push('-i', url, '-map', '0:v:0', '-map', '0:a:' + (a | 0) + '?');
   if (p.videoCopy) {
@@ -207,7 +210,7 @@ function argsFor(info, p, url, ss, a, ua, dir) {
   else if (p.audio.codec === 'flac') args.push('-c:a', 'flac', '-compression_level', '2', '-ac', String(p.audio.ch), '-strict', '-2');
   else args.push('-c:a', p.audio.codec, '-b:a', p.audio.br, '-ac', String(p.audio.ch));
   args.push('-sn', '-dn', '-avoid_negative_ts', 'make_zero', '-max_muxing_queue_size', '2048',
-    '-f', 'hls', '-hls_time', '4', '-hls_list_size', '0', '-hls_playlist_type', 'event', '-hls_segment_type', 'fmp4',
+    '-f', 'hls', '-hls_init_time', '1', '-hls_time', '4', '-hls_list_size', '0', '-hls_playlist_type', 'event', '-hls_segment_type', 'fmp4',
     '-hls_fmp4_init_filename', 'init.mp4', '-hls_flags', 'independent_segments+temp_file',
     '-hls_segment_filename', path.join(dir, 's%05d.m4s'), path.join(dir, 'index.m3u8'));
   return args;
@@ -235,7 +238,8 @@ async function hlsSession(url, opts) {
   const key = group + '|' + Math.floor(ss) + '|' + a + '|' + (safe ? 's' : Object.keys(caps).sort().join(','));
   let s = sessions.get(key);
   if (s && !s.dead) { s.last = Date.now(); return s; }
-  for (const o of sessions.values()) if (o.group === group) stopSession(o);
+  // one provider connection: a new title also stops conversions nobody is fetching any more
+  for (const o of sessions.values()) if (o.group === group || Date.now() - o.last > 8000) stopSession(o);
   let info = null;
   try { info = await probe(url, ua); } catch (_) { /* go blind */ }
   const p = plan(info, safe ? {} : caps, { a, audioMode, maxRes: safe ? '1080' : maxRes });
@@ -244,13 +248,26 @@ async function hlsSession(url, opts) {
   const dir = path.join(HLS_ROOT, id);
   fs.mkdirSync(dir, { recursive: true });
   console.log('[remux]', info ? info.video + ' ' + info.height + 'p ' + (info.audio[a] || {}).codec : 'okänd fil', '→ bild', p.videoCopy ? 'orörd' : 'H.264' + (p.scale ? ' 1080p' : ''), '· ljud', p.audio.copy ? 'orört' : p.audio.codec + ' ' + p.audio.ch + 'ch', '· från', Math.floor(ss) + 's', '(HLS)');
-  const proc = spawn(FF, argsFor(info, p, url, ss, a, ua, dir));
-  s = { key, group, id, dir, proc, last: Date.now(), dead: false, err: '', done: false };
-  proc.stderr.on('data', d => { if (s.err.length < 3000) s.err += d; });
-  proc.on('close', (code) => {
-    s.done = true;
-    if (code && code !== 255 && !s.dead) console.error('[remux] ffmpeg fel', code, s.err.split('\n').slice(-4).join(' '));
-  });
+  s = { key, group, id, dir, proc: null, last: Date.now(), dead: false, err: '', done: false, tries: 0 };
+  const start = () => {
+    const proc = s.proc = spawn(FF, argsFor(info, p, url, ss, a, ua, dir));
+    proc.stderr.on('data', d => { if (s.err.length < 3000) s.err += d; });
+    proc.on('close', (code) => {
+      if (s.dead) return;
+      // the provider answered with an error page (often: the previous stream's connection hadn't closed yet): try once more
+      const nothing = !fs.existsSync(path.join(dir, 'init.mp4'));
+      if (code && code !== 255 && nothing && s.tries < 1) {
+        s.tries++;
+        console.log('[remux] leverantören svarade inte med video – försöker igen');
+        s.err = '';
+        setTimeout(() => { if (!s.dead) start(); }, 1500);
+        return;
+      }
+      s.done = true;
+      if (code && code !== 255) console.error('[remux] ffmpeg fel', code, s.err.split('\n').slice(-4).join(' '));
+    });
+  };
+  start();
   sessions.set(key, s);
   return s;
 }
@@ -287,5 +304,7 @@ function hlsFile(id, name) {
 }
 
 function activeSessions() { return sessions.size; }
+/** The player was closed: free the provider connection at once instead of after 90 s. */
+function stopGroup(group) { for (const o of sessions.values()) if (o.group === group) stopSession(o); }
 
-module.exports = { activeSessions, has, probe, remux, subs, langName, plan, playsAsIs, hlsSession, hlsPlaylist, hlsFile };
+module.exports = { stopGroup, activeSessions, has, probe, remux, subs, langName, plan, playsAsIs, hlsSession, hlsPlaylist, hlsFile };
