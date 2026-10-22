@@ -192,7 +192,7 @@ const HLS_ROOT = path.join(os.tmpdir(), 'norrsken-hls');
 const sessions = new Map(); // key -> session
 
 function argsFor(info, p, url, ss, a, ua, dir) {
-  const args = ['-hide_banner', '-loglevel', 'error', '-user_agent', ua || DEFAULT_UA,
+  const args = ['-hide_banner', '-loglevel', 'error', '-nostats', '-progress', 'pipe:1', '-user_agent', ua || DEFAULT_UA,
     '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5'];
   args.push('-probesize', '8M', '-analyzeduration', '3M', '-fflags', '+genpts+discardcorrupt');
   if (ss > 0) args.push('-ss', String(ss));
@@ -252,6 +252,27 @@ async function hlsSession(url, opts) {
   const start = () => {
     const proc = s.proc = spawn(FF, argsFor(info, p, url, ss, a, ua, dir));
     proc.stderr.on('data', d => { if (s.err.length < 3000) s.err += d; });
+    // speed log: how fast the film arrives from the provider compared with playing it (under 1.0× = it will buffer)
+    const t0 = Date.now();
+    let lastLog = 0, firstSeen = false, buf = '';
+    proc.stdout.on('data', (d) => {
+      buf += d;
+      const lines = buf.split('\n'); buf = lines.pop();
+      const kv = {};
+      for (const l of lines) { const i = l.indexOf('='); if (i > 0) kv[l.slice(0, i)] = l.slice(i + 1).trim(); }
+      const outS = (+kv.out_time_us || +kv.out_time_ms || 0) / 1e6;
+      if (!firstSeen && fs.existsSync(path.join(dir, 's00000.m4s'))) {
+        firstSeen = true;
+        console.log('[remux] första bilden klar efter', ((Date.now() - t0) / 1000).toFixed(1), 's');
+      }
+      const now = Date.now();
+      if (outS > 0 && now - lastLog > 20000) {
+        lastLog = now;
+        const el = (now - t0) / 1000;
+        const x = outS / el;
+        console.log('[remux] hastighet', x.toFixed(2) + '×', '·', Math.round(outS) + ' s film på', Math.round(el) + ' s', '·', kv.bitrate || '', x < 1.05 ? '· FÖR LÅNGSAMT: leverantören/nätet hinner inte' : '');
+      }
+    });
     proc.on('close', (code) => {
       if (s.dead) return;
       // the provider answered with an error page (often: the previous stream's connection hadn't closed yet): try once more
