@@ -333,6 +333,12 @@
     var src = this.sources[this.si];
     this.offset = at || 0;
     var url = NS.remuxUrl(src.url, this.offset, this.audioIdx, this.safeMode);
+    // Safari (iPhone, iPad, Mac) plays HLS best with its own player
+    if (v.canPlayType('application/vnd.apple.mpegurl') && /Apple/.test(navigator.vendor || '')) {
+      v.src = url;
+      this.playPromise();
+      return;
+    }
     if (window.Hls && window.Hls.isSupported()) {
       var hls = this.hls = new window.Hls({
         enableWorker: true, startPosition: 0, maxBufferLength: 60, maxMaxBufferLength: 180, backBufferLength: 60,

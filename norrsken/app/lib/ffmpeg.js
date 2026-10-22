@@ -301,6 +301,9 @@ async function hlsPlaylist(s, prefix) {
     let text = '';
     try { text = fs.readFileSync(f, 'utf8'); } catch (_) { /* not yet */ }
     if (/#EXTINF/.test(text)) {
+      // the playlist grows while converting: tell players to start at the beginning, not at the "live" end
+      // (Safari/iPhone otherwise jump forward and keep buffering)
+      if (text.indexOf('#EXT-X-START') < 0) text = text.replace('#EXTM3U', '#EXTM3U\n#EXT-X-START:TIME-OFFSET=0,PRECISE=YES');
       return text.split('\n').map((l) => {
         if (l.startsWith('#EXT-X-MAP:URI="')) return l.replace(/URI="([^"]+)"/, (m, u) => 'URI="' + prefix + '/' + s.id + '/' + path.basename(u) + '"');
         if (l && l[0] !== '#') return prefix + '/' + s.id + '/' + path.basename(l.trim());
