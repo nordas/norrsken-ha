@@ -29,4 +29,4 @@
 8. Småsaker: gräns 36 h i guiden (move), position i catch-up, "I går", sökrutans text, PIN-etikett i inställningarna.
 
 ## Kod
-- Källa: norrsken/app (server.js, lib/, public/). Tester: `node --test test/*.test.js` i källrepot (25 st, mock-leverantör i test/).
+- Källa: norrsken/app (server.js, lib/, public/). Tester och mock-leverantör: dev/test (kopiera till app-mappen som test/, skapa testmedia med make-media.sh, kör `node --test test/*.test.js`, 25 st).
