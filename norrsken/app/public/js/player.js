@@ -151,8 +151,14 @@
   Player.prototype.every = function (ms, fn) { this.timers.push(setInterval(fn, ms)); };
   Player.prototype.deactivate = function () {
     clearInterval(this.clk);
-    // something opened on top (guide, another player): stop streaming so we don't hold a second provider connection
-    if (this.sources) { this.resumeAt = this.live ? 0 : this.cur(); this.saveProgress(); this.teardown(); this.suspended = true; }
+    // something opened on top (guide, another player): stop streaming so we don't hold a second provider connection.
+    // Always cancel a request still in flight too, or it would start playing behind whatever is now on top.
+    this.reqId = {};
+    this.waitStart = false;
+    if (!this.suspended) this.resumeAt = this.live ? 0 : this.sources ? this.cur() : this.start;
+    if (this.sources) this.saveProgress();
+    this.teardown();
+    this.suspended = true;
   };
   Player.prototype.destroy = function () {
     this.saveProgress(true);
@@ -263,6 +269,7 @@
 
   Player.prototype.startSource = function (at) {
     var self = this;
+    if (this.suspended) return;
     if (this.item.t === 'catchup') {
       // the archive URL is fixed to its start time: a retry/reload asks for a new one at the current position
       // (moving on to the next source of the same request is fine; reloading the same one is not)
@@ -359,15 +366,9 @@
         } catch (e) { /* ignore */ }
       });
       this.airUrl = url;
-      // iPhone/iPad (ManagedMediaSource): give Safari a plain HLS source too, before attaching, so AirPlay is offered
-      if (window.ManagedMediaSource && window.WebKitPlaybackTargetAvailabilityEvent) {
-        var old = v.querySelector('source.air');
-        if (old) old.remove();
-        var so = document.createElement('source');
-        so.className = 'air'; so.type = 'application/x-mpegURL'; so.src = new URL(url, location.href).href;
-        v.appendChild(so);
-        v.disableRemotePlayback = false;
-      }
+      // iPhone/iPad (ManagedMediaSource): hls.js clears all <source> children and turns remote playback off when it
+      // attaches, so the plain HLS source for AirPlay has to be added after that, next to hls.js's own source
+      hls.on(window.Hls.Events.MEDIA_ATTACHED, function () { if (self.hls === hls) self.addAirSource(); });
       hls.loadSource(url);
       hls.attachMedia(v);
       return;
@@ -377,20 +378,28 @@
     this.playPromise();
   };
 
+  /** With hls.js in Safari: a plain HLS <source> after hls.js's own, which is what AirPlay hands to the Apple TV. */
+  Player.prototype.addAirSource = function () {
+    var v = this.video;
+    if (!window.WebKitPlaybackTargetAvailabilityEvent || !this.hls) return;
+    var src = this.airUrl || (this.sources && this.sources[this.si] && this.sources[this.si].url) || '';
+    if (!src) return;
+    try {
+      v.disableRemotePlayback = false;
+      v.setAttribute('x-webkit-airplay', 'allow');
+      var el = v.querySelector('source.air') || document.createElement('source');
+      el.className = 'air'; el.type = 'application/x-mpegURL'; el.src = new URL(src, location.href).href;
+      if (!el.parentNode) v.appendChild(el);
+    } catch (e) { /* ignore */ }
+  };
+
   /** AirPlay (iPhone/iPad/Mac Safari): the Apple TV fetches the stream itself, so it gets a full address. */
   Player.prototype.airplay = function () {
     var v = this.video;
     try {
       v.disableRemotePlayback = false;
       v.setAttribute('x-webkit-airplay', 'allow');
-      var src = this.airUrl || (this.sources && this.sources[this.si] && this.sources[this.si].url) || '';
-      if (src && this.hls) {
-        // with hls.js (ManagedMediaSource) Safari needs a plain HLS source to hand over
-        var abs = new URL(src, location.href).href;
-        var el = v.querySelector('source.air') || document.createElement('source');
-        el.className = 'air'; el.type = 'application/x-mpegURL'; el.src = abs;
-        if (!el.parentNode) v.appendChild(el);
-      }
+      this.addAirSource();
       if (v.webkitShowPlaybackTargetPicker) v.webkitShowPlaybackTargetPicker();
       else NS.toast('AirPlay finns i Safari på iPhone, iPad och Mac', 'info');
     } catch (e) { NS.toast('AirPlay gick inte att starta', 'info'); }
@@ -475,7 +484,7 @@
 
   Player.prototype.watchdog = function () {
     var v = this.video;
-    if (this.errShown || !this.sources || this.tapEl) return;
+    if (this.suspended || this.errShown || !this.sources || this.tapEl) return;
     // never got going on this source: try the next one instead of spinning forever
     if (!this.played && Date.now() - (this.srcStart || 0) > (this.kind === 'remux' ? 30000 : 15000)) {
       console.log('[norrsken] source', this.si, this.kind, 'did not start, trying next');
@@ -579,7 +588,7 @@
 
   Player.prototype.onEnded = function () {
     if (this.live) { this.startSource(0); return; }
-    if (this.item.t === 'catchup') { this.toLive(); return; }
+    if (this.item.t === 'catchup') { this.cuEnded(); return; }
     this.saveProgress(true);
     if (this.nextEp()) this.playNext();
     else this.exit();
@@ -980,7 +989,7 @@
   Player.prototype.cuLiveNow = function () { var cu = this.item.cu; return cu && Date.now() / 1000 < cu.start + cu.dur * 60; };
   /** Catch-up: after a new start, wait until the exact second is loaded, then jump there. */
   Player.prototype.cuCatch = function () {
-    if (!this.cuSeek) return;
+    if (!this.cuSeek || this.suspended) return;
     var v = this.video;
     var end = 0;
     try { if (v.buffered.length) end = v.buffered.end(v.buffered.length - 1); } catch (e) { /* ignore */ }
@@ -990,6 +999,22 @@
       this.buffering(false);
       if (v.paused && this._cuHeld) { this._cuHeld = false; this.playPromise(); }
     } else if (this.played && !v.paused) { v.pause(); this._cuHeld = true; this.buffering(true); }
+  };
+
+  /**
+   * Catch-up: the archive stream ran out. The provider cuts an archive request at the length it knew about
+   * when it was asked, so in a programme still on air (or one cut short) ask again from where we are;
+   * go to the live broadcast only when we are close to "now" or the programme is over.
+   */
+  Player.prototype.cuEnded = function () {
+    var cu = this.item.cu, pos = this.cur();
+    var left = this.cuLiveNow() ? this.cuMax() - pos : cu.dur * 60 - 30 - pos;
+    // the same end again right away: the archive has nothing more for us, don't loop
+    var again = this._cuEnd !== undefined && Math.abs(pos - this._cuEnd) < 10;
+    this._cuEnd = pos;
+    if (left >= 60 && !again) { this.play(this.item, pos); return; }
+    if (this.cuLiveNow()) { this.toLive(); return; }
+    this.exit();
   };
 
   /** Yellow (or 0): jump back to the channel you watched before. */
@@ -1308,13 +1333,15 @@
       return b;
     };
     this.osd.appendChild(btn('tclose', 'back', function () { self.exit(); }, 'Stäng'));
-    if (el.requestFullscreen || el.webkitRequestFullscreen) {
-      if (window.WebKitPlaybackTargetAvailabilityEvent) {
-        var air = btn('tair', 'airplay', function () { self.airplay(); }, 'AirPlay');
-        air.style.display = 'none';
-        this.osd.appendChild(air);
-        this.video.addEventListener('webkitplaybacktargetavailabilitychanged', function (e) { air.style.display = e.availability === 'available' ? '' : 'none'; });
-      }
+    // AirPlay: iPhone Safari has no element fullscreen, so this must not depend on the fullscreen button.
+    // Always shown in Safari (the picker says itself when no Apple TV is found); dimmed while none is seen.
+    if (window.WebKitPlaybackTargetAvailabilityEvent) {
+      var air = btn('tair', 'airplay', function () { self.airplay(); }, 'AirPlay');
+      this.osd.appendChild(air);
+      this.video.addEventListener('webkitplaybacktargetavailabilitychanged', function (e) { air.classList.toggle('dim', e.availability !== 'available'); });
+    }
+    if (!(el.requestFullscreen || el.webkitRequestFullscreen)) el.classList.add('nofs');
+    else {
       this.osd.appendChild(btn('tfs', 'fs', function () {
         var d = document;
         if (d.fullscreenElement || d.webkitFullscreenElement) (d.exitFullscreen || d.webkitExitFullscreen).call(d);
