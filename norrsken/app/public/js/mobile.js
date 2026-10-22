@@ -31,6 +31,7 @@
     var pos = it.pos || (pr && pr.pos) || 0, dur = it.dur || (pr && pr.dur) || 0;
     if (dur && pos > 0) f.appendChild(NS.progEl(pos / dur * 100));
     if (it.add && Date.now() / 1000 - it.add < 10 * 86400) f.appendChild(h('span', { class: 'm-new', text: it.t === 'series' ? 'Nytt' : 'Ny' }));
+    if (it.q === '4K') f.appendChild(h('span', { class: 'm-q', text: '4K' }));
     c.appendChild(f);
     if (opts.caption) c.appendChild(h('div', { class: 'm-cap', text: opts.caption }));
     return c;
@@ -63,6 +64,17 @@
     (ev.detail || []).forEach(function (id) { (liveCards[id] || []).forEach(function (c) { if (c.isConnected) paintLive(c); }); });
   });
 
+  /** Long-press (or the ⋯ button) opens the same quick menu as the TV's options key. */
+  function longPress(el, fn) {
+    var t = null, fired = false, sx = 0, sy = 0;
+    el.addEventListener('touchstart', function (e) { fired = false; var p = e.touches[0]; sx = p.clientX; sy = p.clientY; t = setTimeout(function () { fired = true; if (navigator.vibrate) navigator.vibrate(12); fn(); }, 520); }, { passive: true });
+    el.addEventListener('touchmove', function (e) { var p = e.touches[0]; if (Math.abs(p.clientX - sx) + Math.abs(p.clientY - sy) > 10) clearTimeout(t); }, { passive: true });
+    el.addEventListener('touchend', function () { clearTimeout(t); });
+    el.addEventListener('contextmenu', function (e) { e.preventDefault(); fired = true; fn(); });
+    el.addEventListener('click', function (e) { if (fired) { e.stopImmediatePropagation(); e.preventDefault(); fired = false; } }, true);
+  }
+  NS.mLongPress = longPress;
+
   function open(it, row) {
     if (it.t === 'live') { NS.playItem(it, { list: (row && row.items) || [it], cat: (row && row.cat) || null }); return; }
     if (row && row.id === 'cw') { NS.playItem(it, { start: it.upnext ? 0 : it.pos || 0 }); return; }
@@ -72,6 +84,11 @@
 
   /** A horizontally scrolling row that loads more items as you swipe. */
   function rowEl(def) {
+    if (def.kind === 'pill') {
+      return h('section', { class: 'm-row' }, h('div', { class: 'm-chips' }, (def.items || []).map(function (c) {
+        return h('button', { class: 'm-chip', onclick: function () { NS.router.push(new MGrid(c.type, c.id, c.label)); } }, c.label);
+      })));
+    }
     var items = (def.items || []).slice();
     var total = def.total || items.length;
     var kind = def.kind === 'live' ? 'live' : 'poster';
@@ -83,6 +100,7 @@
         if (kind === 'live') c = liveCard(it);
         else c = poster(it, { num: def.kind === 'top10' ? startIdx + i + 1 : 0, caption: def.id === 'cw' ? (it.t === 'episode' ? NS.epCode(it) + ' ' + it.n : NS.left(it.pos || 0, it.dur || 1)) : '' });
         c.addEventListener('click', function () { open(it, { id: def.id, items: items, cat: def.cat }); });
+        longPress(c, function () { NS.cardMenu(it, def.id).then(function (changed) { if (changed) { NS.state.dirty = true; var top = NS.router.top(); if (top && top.refresh) top.refresh(); } }); });
         track.appendChild(c);
       });
       if (kind === 'live') NS.needEpg(list.map(function (x) { return x.id; }));
@@ -102,7 +120,13 @@
     };
     track.addEventListener('scroll', more, { passive: true });
     if (!items.length && total) more();
-    return h('section', { class: 'm-row' }, [def.title ? h('h2', {}, [def.title, def.showCount ? h('span', { text: ' ' + total }) : null]) : null, track]);
+    var head = null;
+    if (def.title) {
+      var canGrid = def.cat && def.type && def.type !== 'live';
+      head = h('h2', canGrid ? { class: 'm-h2-link', onclick: function () { NS.router.push(new MGrid(def.type, def.cat, def.title)); } } : {},
+        [def.title, def.showCount ? h('span', { text: ' ' + total }) : null, canGrid ? h('i', { class: 'm-chev' }, NS.icon('right')) : null]);
+    }
+    return h('section', { class: 'm-row' }, [head, track]);
   }
 
   /* ---------------------------------------------------------------- page scrolling
@@ -129,7 +153,7 @@
         var b = NS.router.stack[0];
         while (NS.router.stack.length > 1) origPop();
         if (b && b.load) { b.load(t.id); top0(); }
-      } }, [lead, h('span', { text: t.id === 'me' ? 'Mitt ' + ((NS.status && NS.status.appName) || 'Norrsken') : t.label })]);
+      } }, [lead, h('span', { text: t.id === 'me' ? 'Min sida' : t.label })]);
     }));
   }
 
@@ -181,6 +205,7 @@
     this.title.textContent = TITLES[page] || 'Hem';
     this.pillsEl.innerHTML = '';
     if (page !== 'home') this.pillsEl.appendChild(h('button', { class: 'm-pill m-pill-x', 'aria-label': 'Tillbaka till Hem', onclick: function () { self.load('home'); top0(); } }, NS.icon('x')));
+    this.pillsEl.style.display = page === 'live' ? 'none' : '';
     TABS.forEach(function (t) {
       if (page !== 'home' && t.id !== page) return;
       self.pillsEl.appendChild(h('button', { class: 'm-pill' + (t.id === page ? ' on' : ''), onclick: function () { self.load(t.id === page ? 'home' : t.id); top0(); } }, t.label));
@@ -196,6 +221,7 @@
     var tok = this._tok = {};
     this.body.innerHTML = '';
     this.body.appendChild(h('div', { class: 'm-loading' }, h('div', { class: 'spinner' })));
+    if (page === 'live') { this.loadLive(tok); return; }
     NS.api.page(page).then(function (res) {
       if (tok !== self._tok) return;
       self.body.innerHTML = '';
@@ -218,6 +244,133 @@
     });
   };
 
+  /** Live-tv on the phone: category chips and a vertical channel list with what is on now (like a compact guide). */
+  MBrowse.prototype.loadLive = function (tok) {
+    var self = this;
+    NS.api.cats('live').then(function (r) {
+      if (tok !== self._tok) return;
+      var cats = [{ id: 'fav', name: '★ Favoriter' }].concat((Array.isArray(r) ? r : r.cats || []).map(function (c) { return { id: c.id, name: c.name || c.n }; }));
+      var cur = NS.store.get(NS.pkey('mLiveCat'), null);
+      var favs = Object.keys(NS.state.myList || {}).filter(function (k) { return k.indexOf('l:') === 0; });
+      if (!cur || !cats.some(function (c) { return c.id === cur; })) cur = favs.length ? 'fav' : (cats[1] && cats[1].id);
+      self.body.innerHTML = '';
+      var chips = h('div', { class: 'm-chips m-live-cats' });
+      var list = h('div', { class: 'm-chlist' });
+      self.body.appendChild(chips);
+      self.body.appendChild(list);
+      var show = function (id) {
+        cur = id;
+        NS.store.set(NS.pkey('mLiveCat'), id);
+        Array.prototype.forEach.call(chips.children, function (b) { b.classList.toggle('on', b._id === id); });
+        list.innerHTML = '';
+        list.appendChild(h('div', { class: 'm-loading' }, h('div', { class: 'spinner' })));
+        var get = id === 'fav'
+          ? NS.api.page('live').then(function (pg) { var f = (pg.rows || []).filter(function (x) { return x.id === 'fav'; })[0]; return { items: f ? f.items : [] }; })
+          : NS.api.list('live', id, 0, 3000);
+        get.then(function (res) {
+          if (cur !== id) return;
+          list.innerHTML = '';
+          var items = res.items || [];
+          if (!items.length) list.appendChild(h('div', { class: 'm-empty' }, [h('h2', { text: id === 'fav' ? 'Inga favoriter än' : 'Inga kanaler' }), h('p', { text: id === 'fav' ? 'Tryck på stjärnan vid en kanal för att spara den här.' : '' })]));
+          items.forEach(function (it) { list.appendChild(chanRow(it, items, id)); });
+          NS.needEpg(items.slice(0, 80).map(function (x) { return x.id; }));
+        }).catch(function () { list.innerHTML = ''; });
+      };
+      cats.forEach(function (c) { var b = h('button', { class: 'm-chip', onclick: function () { show(c.id); b.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' }); } }, c.name); b._id = c.id; chips.appendChild(b); });
+      if (cur) show(cur);
+    }).catch(function () { self.body.innerHTML = ''; });
+  };
+  var chanRows = {};
+  function chanRow(it, items, cat) {
+    var logo = h('div', { class: 'm-ch-logo', style: 'background:' + NS.rgba(NS.hueColor(it.n), 0.35) });
+    if (it.img) logo.appendChild(NS.pic(it.img, 'm-logo', function () { logo.textContent = it.n.slice(0, 3); }));
+    else logo.textContent = it.n.slice(0, 3);
+    var info = h('div', { class: 'm-ch-info' });
+    var fav = NS.inList(it.k);
+    var star = h('button', { class: 'm-star' + (fav ? ' on' : ''), 'aria-label': 'Favorit', onclick: function (e) {
+      e.stopPropagation();
+      NS.toggleList(it).then(function (on) { star.classList.toggle('on', !!on); star.textContent = on ? '★' : '☆'; NS.state.dirty = true; });
+    }, text: fav ? '★' : '☆' });
+    var more = h('button', { class: 'm-star m-chmore', 'aria-label': 'Tablå', onclick: function (e) { e.stopPropagation(); NS.router.push(new MChannel(it, items)); } }, NS.icon('right'));
+    var row = h('div', { class: 'm-ch', onclick: function () { NS.playItem(it, { list: items, cat: cat === 'fav' ? null : cat }); } }, [logo, info, star, more]);
+    row._it = it; row._info = info;
+    paintChan(row);
+    (chanRows[it.id] = chanRows[it.id] || []).push(row);
+    longPress(row, function () { NS.cardMenu(it, 'live'); });
+    return row;
+  }
+  function paintChan(row) {
+    var it = row._it, e = NS.epgFor(it.id);
+    row._info.innerHTML = '';
+    row._info.appendChild(h('b', { text: (it.num ? it.num + '  ' : '') + it.n }));
+    if (e && e.now) {
+      row._info.appendChild(h('span', { class: 'm-ch-now', text: NS.fmtClock(e.now.s) + '  ' + e.now.t }));
+      row._info.appendChild(NS.progEl(NS.livePct(e.now)));
+      if (e.next) row._info.appendChild(h('span', { class: 'm-ch-next', text: NS.fmtClock(e.next.s) + '  ' + e.next.t }));
+    }
+  }
+  document.addEventListener('nsk-epg', function (ev) {
+    (ev.detail || []).forEach(function (id) { (chanRows[id] || []).forEach(function (r) { if (r.isConnected) paintChan(r); }); });
+  });
+
+  /** One channel's schedule: watch live, replay earlier programmes (catch-up), get reminded of later ones. */
+  function MChannel(ch, list) {
+    var self = this;
+    this.ch = ch; this.list = list || [ch];
+    this.el = h('div', { class: 'screen m-screen m-chan' });
+    var logo = h('div', { class: 'm-ch-logo big', style: 'background:' + NS.rgba(NS.hueColor(ch.n), 0.35) });
+    if (ch.img) logo.appendChild(NS.pic(ch.img, 'm-logo')); else logo.textContent = ch.n.slice(0, 3);
+    this.el.appendChild(h('header', { class: 'm-head solid' }, [h('div', { class: 'm-bar' }, [
+      h('button', { class: 'm-icon', 'aria-label': 'Tillbaka', onclick: NS.mBack }, NS.icon('back')),
+      h('h1', { class: 'm-title small', text: ch.n })]), this.days = h('nav', { class: 'm-chips' })]));
+    var body = h('div', { class: 'm-body' });
+    body.appendChild(h('div', { class: 'm-chan-top' }, [logo, h('button', { class: 'm-btn', onclick: function () { NS.playItem(ch, { list: self.list, cat: ch.cat }); } }, [NS.icon('play'), 'Titta live'])]));
+    this.listEl = h('div', { class: 'm-progs' });
+    body.appendChild(this.listEl);
+    this.el.appendChild(body);
+    this.el.appendChild(tabbar('live'));
+    this.listEl.appendChild(h('div', { class: 'm-loading' }, h('div', { class: 'spinner' })));
+    NS.api.guide(ch.id, 30, ch.arc ? Math.min(72, ch.arc * 24) : 2).then(function (progs) {
+      self.progs = (progs || []).filter(function (p) { return p.e > p.s; });
+      var dayOf = function (t) { var d = new Date(t); d.setHours(0, 0, 0, 0); return d.getTime(); };
+      var today = dayOf(Date.now());
+      var days = [];
+      self.progs.forEach(function (p) { var d = dayOf(p.s); if (days.indexOf(d) < 0) days.push(d); });
+      var label = function (d) { var n = Math.round((d - today) / 86400e3); return n === 0 ? 'I dag' : n === -1 ? 'I går' : n === 1 ? 'I morgon' : new Date(d).toLocaleDateString('sv-SE', { weekday: 'short', day: 'numeric' }); };
+      self.day = days.indexOf(today) >= 0 ? today : days[0];
+      var paintDays = function () {
+        self.days.innerHTML = '';
+        days.forEach(function (d) { self.days.appendChild(h('button', { class: 'm-chip' + (d === self.day ? ' on' : ''), onclick: function () { self.day = d; paintDays(); self.paint(); } }, label(d))); });
+      };
+      paintDays();
+      self.paint();
+    }).catch(function () { self.listEl.innerHTML = ''; self.listEl.appendChild(h('div', { class: 'm-empty' }, [h('h2', { text: 'Ingen tablå' }), h('p', { text: 'Kanalen saknar tv-guide.' })])); });
+  }
+  MChannel.prototype.paint = function () {
+    var self = this, ch = this.ch, now = Date.now();
+    var d0 = this.day, d1 = d0 + 86400e3;
+    var list = (this.progs || []).filter(function (p) { return p.s < d1 && p.e > d0; });
+    this.listEl.innerHTML = '';
+    if (!list.length) { this.listEl.appendChild(h('div', { class: 'm-empty' }, [h('h2', { text: 'Ingen tablå' })])); return; }
+    var nowEl = null;
+    list.forEach(function (p) {
+      var live = p.s <= now && p.e > now, past = p.e <= now, arc = past && NS.canArc && NS.canArc(ch, p);
+      var rem = !past && !live && NS.hasReminder(ch.id, p.s);
+      var act = live ? h('span', { class: 'm-pact live', text: 'Live' }) : arc ? h('span', { class: 'm-pact' }, NS.icon('archive')) : !past ? h('span', { class: 'm-pact bell' + (rem ? ' on' : '') }, NS.icon('bell')) : null;
+      var row = h('div', { class: 'm-prog' + (past && !arc ? ' past' : '') + (live ? ' now' : ''), onclick: function () {
+        if (live) NS.playItem(ch, { list: self.list, cat: ch.cat });
+        else if (arc) NS.playItem(NS.catchupItem(ch, p, self.list));
+        else if (!past) { NS.toggleReminder(ch, p); self.paint(); }
+        else NS.toast('Programmet finns inte i arkivet', 'info');
+      } }, [h('span', { class: 'm-ptime', text: NS.fmtClock(p.s) }), h('div', { class: 'm-ptxt' }, [h('b', { text: p.t }), live ? NS.progEl(NS.livePct(p)) : null, p.d ? h('p', { text: p.d }) : null]), act]);
+      if (live) nowEl = row;
+      self.listEl.appendChild(row);
+    });
+    if (nowEl) setTimeout(function () { window.scrollTo(0, Math.max(0, nowEl.getBoundingClientRect().top + window.scrollY - 200)); }, 50);
+  };
+  MChannel.prototype.activate = function (first) { if (first) top0(); else restoreY(this); };
+  MChannel.prototype.deactivate = function () { saveY(this); };
+
   MBrowse.prototype.hero = function (it) {
     var art = h('div', { class: 'm-hero-art' });
     var img = it.img || it.bd;
@@ -232,15 +385,17 @@
     var meta = h('p', { class: 'm-hero-meta' }, [NS.kindLabel(it)].concat(genres).map(function (x, i) { return h('span', { class: i ? '' : 'b', text: x }); }));
     var card = h('div', { class: 'm-hero' }, [art, h('span', { class: 'm-hero-mark' }, NS.icon('aurora')), h('div', { class: 'm-hero-txt' }, [
       h('h1', { class: it.n.length > 18 ? 'long' : '', text: it.n }), meta,
-      h('button', { class: 'm-btn', onclick: function () {
+      h('div', { class: 'm-hero-btns' }, [h('button', { class: 'm-btn', onclick: function () {
         if (it.t === 'movie') NS.playItem(it, { start: NS.resumePos(it) });
         else NS.router.push(new MDetail(it, { autoplay: true }));
-      } }, [NS.icon('play'), it.t === 'series' ? 'Spela upp serie' : 'Spela']),
-      listBtn
+      } }, [NS.icon('play'), 'Spela']),
+      listBtn])
     ])]);
     art.addEventListener('click', function () { NS.router.push(new MDetail(it)); });
     return card;
   };
+
+  MBrowse.prototype.refresh = function () { var y = window.scrollY; var self = this; NS.loadState().then(function () { self.load(self.page); setTimeout(function () { window.scrollTo(0, y); }, 400); }); };
 
   MBrowse.prototype.activate = function (first) {
     var self = this;
@@ -266,7 +421,12 @@
     this.el.appendChild(this.art);
     this.box = h('div', { class: 'm-d-wrap' });
     this.el.appendChild(this.box);
-    this.el.appendChild(h('button', { class: 'm-icon m-back', 'aria-label': 'Tillbaka', onclick: NS.mBack }, NS.icon('back')));
+    // a slim bar with the back button that turns solid (with the title) once you scroll past the picture
+    this.dtitle = h('span', { class: 'm-dhead-t', text: item.n });
+    this.dhead = h('header', { class: 'm-dhead' }, [h('button', { class: 'm-icon m-back', 'aria-label': 'Tillbaka', onclick: NS.mBack }, NS.icon('back')), this.dtitle]);
+    this.el.appendChild(this.dhead);
+    this._onScroll = function () { if (NS.router.top() === self) self.dhead.classList.toggle('solid', (window.scrollY || 0) > 160); };
+    window.addEventListener('scroll', this._onScroll, { passive: true });
     this.render();
     NS.infoFor(item).then(function (info) {
       self.info = info;
@@ -296,7 +456,7 @@
 
   MDetail.prototype.play = function (restart) {
     var d = this.data();
-    if (d.t === 'movie') { NS.playItem(d, { start: restart ? 0 : NS.resumePos(d) }); return; }
+    if (d.t === 'movie') { NS.playItem(this.ver ? Object.assign({}, d, { vid: this.ver.id, ext: this.ver.ext || d.ext }) : d, { start: restart ? 0 : NS.resumePos(d) }); return; }
     var t = this.target();
     if (!t) return;
     var p = NS.state.progress[t.k];
@@ -338,8 +498,18 @@
     var canRestart = (d.t === 'movie' && NS.resumePos(d)) || (d.t === 'series' && this.target() && NS.state.progress[this.target().k]);
     b.appendChild(h('div', { class: 'm-d-actions' }, [
       h('button', { class: 'm-act', onclick: function () { NS.toggleList(self.item).then(function () { self.render(); }); } }, [NS.icon(inl ? 'check' : 'plus'), h('span', { text: 'Min lista' })]),
-      canRestart ? h('button', { class: 'm-act', onclick: function () { self.play(true); } }, [NS.icon('restart'), h('span', { text: 'Från början' })]) : null
+      canRestart ? h('button', { class: 'm-act', onclick: function () { self.play(true); } }, [NS.icon('restart'), h('span', { text: 'Från början' })]) : null,
+      canRestart ? h('button', { class: 'm-act', onclick: function () {
+        var tt = d.t === 'series' ? Object.assign({}, self.target(), { t: 'episode', sid: d.id, sn: d.n }) : d;
+        NS.cardMenu(tt, 'cw').then(function (ch) { if (ch) NS.loadState().then(function () { self.render(); }); });
+      } }, [NS.icon('more'), h('span', { text: 'Fler val' })]) : null
     ]));
+    if (d.t === 'movie' && d.versions && d.versions.length > 1) {
+      if (!this.ver) this.ver = NS.bestVersion(d.versions);
+      var vsel = h('select', { class: 'm-season m-ver', onchange: function () { self.ver = d.versions[+vsel.value]; } });
+      d.versions.forEach(function (v, i) { var o = h('option', { value: String(i), text: 'Version: ' + NS.versionLabel(v) }); if (v.id === self.ver.id) o.selected = true; vsel.appendChild(o); });
+      b.appendChild(vsel);
+    }
     if (d.p) b.appendChild(h('p', { class: 'm-d-desc', text: d.p }));
     if (d.cast) b.appendChild(h('p', { class: 'm-d-cast' }, [h('b', { text: 'Medverkande: ' }), d.cast]));
     if (d.dir) b.appendChild(h('p', { class: 'm-d-cast' }, [h('b', { text: 'Regi: ' }), d.dir]));
@@ -355,23 +525,32 @@
       d.seasons[this.season].eps.forEach(function (e) {
         var th = h('div', { class: 'm-ep-img', style: 'background:' + NS.fallbackBg(e.n) }, [e.img ? NS.pic(e.img, 'm-img') : null, h('span', { class: 'm-ep-play' }, NS.icon('play'))]);
         var p = NS.state.progress[e.k];
-        if (p && p.dur && p.pos > 0) th.appendChild(NS.progEl(p.pos / p.dur * 100));
-        eps.appendChild(h('div', { class: 'm-ep', onclick: function () {
+        if (NS.isSeen(e.k) && !(p && p.pos > 0)) { th.appendChild(NS.progEl(100)); th.appendChild(h('span', { class: 'm-seen' }, NS.icon('check'))); }
+        else if (p && p.dur && p.pos > 0) th.appendChild(NS.progEl(p.pos / p.dur * 100));
+        var epEl;
+        eps.appendChild(epEl = h('div', { class: 'm-ep', onclick: function () {
           NS.playItem(Object.assign({}, e, { sn: d.n, bd: d.bd }), { start: NS.resumePos(e), series: d });
         } }, [h('div', { class: 'm-ep-top' }, [th, h('div', {}, [h('b', { text: e.ep + '. ' + e.n }), e.dur ? h('span', { text: NS.fmtDur(e.dur) }) : null])]),
           e.p ? h('p', { text: e.p }) : null]));
+        var seasonEps = d.seasons[self.season].eps;
+        longPress(epEl, function () { NS.cardMenu(Object.assign({}, e, { sn: d.n, sid: d.id }), 'eps', seasonEps).then(function (ch) { if (ch) self.render(); }); });
       });
       box.appendChild(eps);
-    } else if (d.t === 'movie' && d.cat) {
+    }
+    if (d.t === 'movie' || d.t === 'series') {
       var more = h('div', { class: 'm-more' });
-      box.appendChild(h('section', { class: 'm-row' }, [h('div', { class: 'm-tabs' }, h('span', { class: 'on', text: 'Mer som detta' })), more]));
-      NS.api.list('movie', d.cat, 0, 30).then(function (r) {
-        (r.items || []).filter(function (x) { return x.k !== d.k; }).slice(0, 18).forEach(function (x) {
+      var sec = h('section', { class: 'm-row' }, [h('div', { class: 'm-tabs' }, h('span', { class: 'on', text: 'Mer som detta' })), more]);
+      var fill = function (list) {
+        if (!list.length) { sec.remove(); return; }
+        list.slice(0, 18).forEach(function (x) {
           var c = poster(x);
           c.addEventListener('click', function () { NS.router.push(new MDetail(x)); });
           more.appendChild(c);
         });
-      }).catch(function () {});
+      };
+      box.appendChild(sec);
+      if (this.similar) fill(this.similar);
+      else NS.api.get('api/similar/' + d.t + '/' + encodeURIComponent(d.id)).then(function (r) { self.similar = r.items || []; fill(self.similar); }).catch(function () { sec.remove(); });
     }
   };
 
@@ -382,7 +561,7 @@
     NS.loadState().then(function () { self.render(); self.preview(); });
   };
   MDetail.prototype.deactivate = function () { saveY(this); NS.preview.stop(); };
-  MDetail.prototype.destroy = function () { NS.preview.stop(); };
+  MDetail.prototype.destroy = function () { NS.preview.stop(); window.removeEventListener('scroll', this._onScroll); };
 
   /* ---------------------------------------------------------------- search */
   function MSearch() {
@@ -397,26 +576,48 @@
     this.el.appendChild(this.res);
     this.el.appendChild(tabbar('search'));
     this.input.addEventListener('input', NS.debounce(function () { self.run(); }, 300));
-    this.input.addEventListener('keydown', function (e) { if (e.key === 'Enter') self.input.blur(); });
+    this.input.addEventListener('keydown', function (e) { if (e.key === 'Enter') { self.input.blur(); if (self.input.value.trim()) self.remember(self.input.value.trim()); } });
+    this.idle();
   }
+  MSearch.prototype.idle = function () {
+    var self = this;
+    var rec = NS.store.get(NS.pkey('searches'), []);
+    this.res.innerHTML = '';
+    var box = h('div', { class: 'm-recent' });
+    if (rec.length) {
+      box.appendChild(h('h2', {}, ['Senaste sökningar', h('button', { class: 'm-link', onclick: function () { NS.store.set(NS.pkey('searches'), []); self.idle(); }, text: 'Rensa' })]));
+      rec.forEach(function (q) { box.appendChild(h('button', { class: 'm-rec', onclick: function () { self.input.value = q; self.run(); } }, [NS.icon('search'), h('span', { text: q })])); });
+    } else box.appendChild(h('div', { class: 'm-empty' }, [h('h2', { text: 'Sök i hela utbudet' }), h('p', { text: 'Titlar, kanaler, skådespelare, regissörer och genrer.' })]));
+    this.res.appendChild(box);
+  };
+  MSearch.prototype.remember = function (q) {
+    var rec = NS.store.get(NS.pkey('searches'), []).filter(function (x) { return x.toLowerCase() !== q.toLowerCase(); });
+    rec.unshift(q);
+    NS.store.set(NS.pkey('searches'), rec.slice(0, 8));
+  };
   MSearch.prototype.activate = function (first) { var i = this.input; if (first) { top0(); setTimeout(function () { i.focus(); }, 250); } else restoreY(this); };
   MSearch.prototype.deactivate = function () { saveY(this); };
   MSearch.prototype.run = function () {
     var self = this;
     var q = this.input.value.trim();
     this.res.innerHTML = '';
-    if (!q) return;
+    if (!q) { this.idle(); return; }
     NS.api.search(q).then(function (r) {
       if (self.input.value.trim() !== q) return;
       self.res.innerHTML = '';
       if (r.live.length) self.res.appendChild(rowEl({ id: 's-live', title: 'Kanaler', kind: 'live', items: r.live }));
-      [['movie', 'Filmer'], ['series', 'Serier']].forEach(function (x) {
+      var people = r.movie.concat(r.series).filter(function (x) { return x.why; });
+      r.movie = r.movie.filter(function (x) { return !x.why; });
+      r.series = r.series.filter(function (x) { return !x.why; });
+      r.people = people;
+      [['movie', 'Filmer'], ['series', 'Serier'], ['people', 'Medverkande, regi eller genre: ”' + q + '”']].forEach(function (x) {
         if (!r[x[0]].length) return;
         var grid = h('div', { class: 'm-grid' });
-        r[x[0]].forEach(function (it) { var c = poster(it); c.addEventListener('click', function () { open(it); }); grid.appendChild(c); });
+        // titles under the posters, so two similar ones (or a sequel with the same art) can be told apart
+        r[x[0]].forEach(function (it) { var c = poster(it, { caption: it.n + (it.y ? ' (' + it.y + ')' : '') }); c.addEventListener('click', function () { self.remember(q); open(it); }); grid.appendChild(c); });
         self.res.appendChild(h('section', { class: 'm-row' }, [h('h2', { text: x[1] }), grid]));
       });
-      if (!r.live.length && !r.movie.length && !r.series.length) self.res.appendChild(h('div', { class: 'm-empty' }, [h('h2', { text: 'Inga träffar' }), h('p', { text: 'Inget matchar ”' + q + '”. Prova ett kortare ord.' })]));
+      if (!r.live.length && !r.movie.length && !r.series.length && !r.people.length) self.res.appendChild(h('div', { class: 'm-empty' }, [h('h2', { text: 'Inga träffar' }), h('p', { text: 'Inget matchar ”' + q + '”. Prova ett kortare ord.' })]));
     }).catch(function () {});
   };
 
@@ -426,7 +627,7 @@
     this.el = h('div', { class: 'screen m-screen' });
     var p = NS.profile || { name: '?', color: '#888' };
     this.el.appendChild(h('header', { class: 'm-head solid' }, h('div', { class: 'm-bar' }, [
-      h('h1', { class: 'm-title', text: 'Mitt ' + ((NS.status && NS.status.appName) || 'Norrsken') })])));
+      h('h1', { class: 'm-title', text: 'Min sida' })])));
     var body = h('div', { class: 'm-body' });
     this.el.appendChild(body);
     this.el.appendChild(tabbar('me'));
@@ -435,9 +636,12 @@
     ((NS.status && NS.status.profiles) || []).forEach(function (q) {
       if (q.id === p.id) return;
       list.appendChild(h('button', { class: 'm-prof', onclick: function () {
-        NS.profile = q; NS.store.set('profile', q.id);
-        NS.loadState().then(function () { NS.router.reset(new MBrowse('home')); top0(); });
-      } }, [h('span', { class: 'm-prof-av', style: 'background:' + q.color, text: q.name.charAt(0).toUpperCase() }), h('span', { text: 'Byt till ' + q.name })]));
+        (NS.pinNeeded(q, NS.profile) ? NS.askPin(q, NS.profile) : Promise.resolve(true)).then(function (okd) {
+          if (!okd) return;
+          NS.profile = q; NS.store.set('profile', q.id);
+          NS.loadState().then(function () { NS.router.reset(new MBrowse('home')); top0(); });
+        });
+      } }, [h('span', { class: 'm-prof-av', style: 'background:' + q.color, text: q.name.charAt(0).toUpperCase() }), h('span', { text: 'Byt till ' + q.name }), q.hasPin ? h('span', { class: 'm-lock' }, NS.icon('lock')) : null]));
     });
     if (list.childNodes.length) body.appendChild(list);
     this.rows = h('div');
@@ -445,7 +649,7 @@
     var st = NS.status || {};
     var c = st.counts || {};
     body.appendChild(h('div', { class: 'm-info' }, [
-      h('a', { class: 'm-btn ghost', href: 'setup' }, [NS.icon('settings'), 'Inställningar']),
+      p.kids ? null : h('a', { class: 'm-btn ghost', href: 'setup' }, [NS.icon('settings'), 'Inställningar']),
       h('p', { text: (c.live || 0) + ' kanaler, ' + (c.movie || 0) + ' filmer, ' + (c.series || 0) + ' serier' }),
       h('p', { text: (st.appName || 'Norrsken') + ' ' + (st.version || '') })
     ]));
@@ -459,6 +663,58 @@
   }
   MMe.prototype.activate = function (first) { if (first) top0(); else { restoreY(this); if (NS.state.dirty) this.fill(); } };
   MMe.prototype.deactivate = function () { saveY(this); };
+
+  /* ---------------------------------------------------------------- a whole category as a grid, with sorting */
+  var SORTS = [{ id: '', label: 'Standard' }, { id: 'new', label: 'Nyast' }, { id: 'rating', label: 'Högst betyg' }, { id: 'az', label: 'A–Ö' }];
+  function MGrid(type, cat, name) {
+    var self = this;
+    this.type = type; this.cat = cat;
+    this.sort = NS.store.get('gridSort', '');
+    this.el = h('div', { class: 'screen m-screen' });
+    this.el.appendChild(h('header', { class: 'm-head solid' }, [h('div', { class: 'm-bar' }, [
+      h('button', { class: 'm-icon', 'aria-label': 'Tillbaka', onclick: NS.mBack }, NS.icon('back')),
+      h('h1', { class: 'm-title small', text: name })]), this.sorts = h('nav', { class: 'm-pills' })]));
+    this.grid = h('div', { class: 'm-grid m-body' });
+    this.el.appendChild(this.grid);
+    this.el.appendChild(tabbar(type === 'live' ? 'live' : 'home'));
+    this._onScroll = function () { if (NS.router.top() === self && window.innerHeight + window.scrollY > document.body.scrollHeight - 900) self.more(); };
+    window.addEventListener('scroll', this._onScroll, { passive: true });
+    this.paintSorts();
+    this.reset();
+  }
+  MGrid.prototype.paintSorts = function () {
+    var self = this;
+    this.sorts.innerHTML = '';
+    SORTS.forEach(function (s) { self.sorts.appendChild(h('button', { class: 'm-pill' + (s.id === self.sort ? ' on' : ''), onclick: function () { self.sort = s.id; NS.store.set('gridSort', s.id); self.paintSorts(); self.reset(); top0(); } }, s.label)); });
+  };
+  MGrid.prototype.reset = function () { this.items = []; this.total = 1; this.loading = false; this.grid.innerHTML = ''; this.more(); };
+  MGrid.prototype.more = function () {
+    var self = this;
+    if (this.loading || this.items.length >= this.total) return;
+    this.loading = true;
+    var sort = this.sort;
+    NS.api.get('api/list?type=' + this.type + '&cat=' + encodeURIComponent(this.cat) + '&offset=' + this.items.length + '&limit=60' + (sort ? '&sort=' + sort : '')).then(function (r) {
+      if (sort !== self.sort) return;
+      var list = r.items || [];
+      self.items = self.items.concat(list);
+      self.total = list.length ? r.total : self.items.length;
+      list.forEach(function (it) { var c = poster(it); c.addEventListener('click', function () { open(it); }); longPress(c, function () { NS.cardMenu(it); }); self.grid.appendChild(c); });
+      self.loading = false;
+    }).catch(function () { self.loading = false; });
+  };
+  MGrid.prototype.activate = function (first) { if (first) top0(); else restoreY(this); };
+  MGrid.prototype.deactivate = function () { saveY(this); };
+  MGrid.prototype.destroy = function () { window.removeEventListener('scroll', this._onScroll); };
+  NS.Grid = MGrid;
+  // "Open the guide" from a menu goes to the phone's live list
+  NS.mOpenLive = function (cat) {
+    if (cat) NS.store.set(NS.pkey('mLiveCat'), cat);
+    try { if (document.fullscreenElement) document.exitFullscreen(); } catch (e) { /* ignore */ }
+    var b = NS.router.stack[0];
+    while (NS.router.stack.length > 1) origPop();
+    if (b && b.load) { b.load('live'); top0(); }
+  };
+  NS.Guide = function (opts) { if (opts && opts.cat) NS.store.set(NS.pkey('mLiveCat'), opts.cat); return new MBrowse('live'); };
 
   NS.Browse = MBrowse;
   NS.Detail = MDetail;

@@ -9,7 +9,7 @@ const fs = require('fs');
 const path = require('path');
 const { URL } = require('url');
 const { Store } = require('./lib/store');
-const { Catalog, Xtream, xtreamFromM3uUrl, normServer } = require('./lib/provider');
+const { Catalog, Xtream, xtreamFromM3uUrl, normServer, dedupe } = require('./lib/provider');
 const { Proxy } = require('./lib/proxy');
 const ff = require('./lib/ffmpeg');
 const qr = require('./lib/qr');
@@ -66,6 +66,14 @@ function readBody(req, limit = 2e6) {
 
 function profileOf(q) { return store.profile(q.get('profile') || ''); }
 
+/* PIN-locked profiles: a correct PIN gives the device a token that playback then requires. */
+function pinSecret() {
+  if (!store.config.pinSecret) { store.config.pinSecret = require('crypto').randomBytes(16).toString('hex'); store.saveConfig(); }
+  return store.config.pinSecret;
+}
+function profToken(p) { return require('crypto').createHmac('sha256', pinSecret()).update(p.id + ':' + p.pin).digest('hex').slice(0, 24); }
+function pinOk(q, prof) { return !prof.pin || q.get('pt') === profToken(prof); }
+
 function snapshot(it) {
   if (!it || !it.t) return null;
   const s = {};
@@ -83,9 +91,17 @@ function row(id, title, kind, items, extra = {}) {
   return { id, title, kind, total: items.length, items: items.slice(0, extra.limit || INITIAL), ...extra };
 }
 
+/** Watched to the end? Films with long credits count as seen before the very last second. */
+function isDone(pos, dur, t) {
+  if (!(dur > 0)) return false;
+  const left = dur - pos;
+  const credits = t === 'episode' ? 120 : dur > 3600 ? 420 : 180;
+  return pos / dur >= 0.92 || (left <= credits && pos / dur > 0.6);
+}
+
 function continueItems(st) {
   return Object.values(st.progress)
-    .filter(p => p && p.item && (p.upnext || (p.dur > 0 && p.pos > 15 && p.pos / p.dur < 0.95)))
+    .filter(p => p && p.item && (p.upnext || (p.dur > 0 && p.pos > 15 && !isDone(p.pos, p.dur, p.item.t))))
     .sort((a, b) => b.ts - a.ts)
     .slice(0, 30)
     .map(p => {
@@ -100,7 +116,7 @@ function continueItems(st) {
 }
 
 function catRow(type, cat, prof, title, loadItems = true) {
-  const list = catalog.list(type, cat, prof);
+  const list = type === 'live' ? catalog.list(type, cat, prof) : dedupe(catalog.list(type, cat, prof));
   if (!list.length) return null;
   return { id: type + ':' + cat, title, kind: ROW_KIND[type], type, cat, total: list.length, items: loadItems ? list.slice(0, INITIAL) : [] };
 }
@@ -112,13 +128,20 @@ function homePage(prof, st) {
   const ml = st.myList.map(m => m.item).filter(Boolean);
   const mlv = ml.filter(i => i.t !== 'live');
   if (mlv.length) rows.push(row('ml', 'Min lista', 'poster', mlv, { limit: 60 }));
-  if (st.recent.length) rows.push(row('rc', 'Senast tittade kanaler', 'live', st.recent, { limit: 20 }));
-  const push = (r) => { if (r) rows.push(r); };
+  const mine = myChannels(st);
+  if (mine.length) rows.push(row('rc', 'Mina kanaler', 'live', mine, { limit: 30 }));
+  // skip a row that mostly repeats one already on the page (e.g. the provider's own "New films" category)
+  const push = (r) => {
+    if (!r) return;
+    const ks = r.items.slice(0, 20).map(i => i._nk || i.k);
+    if (ks.length >= 5 && rows.some(o => { const s = new Set((o.items || []).slice(0, 40).map(i => i._nk || i.k)); return ks.filter(k => s.has(k)).length / ks.length >= 0.8; })) return;
+    rows.push(r);
+  };
   push(catRow('movie', 'recent', prof, 'Nyligen tillagda filmer'));
   const liveCats = catalog.visibleCats('live', prof);
-  if (liveCats[0]) push(catRow('live', liveCats[0].id, prof, 'Live: ' + liveCats[0].name));
+  if (liveCats[0] && !mine.length) push(catRow('live', liveCats[0].id, prof, 'Live: ' + liveCats[0].name));
   push(catRow('series', 'recent', prof, 'Nya och uppdaterade serier'));
-  const top = catalog.list('movie', 'top', prof).slice(0, 10);
+  const top = dedupe(catalog.list('movie', 'top', prof)).slice(0, 10);
   if (top.length >= 5) rows.push({ id: 'top10', title: 'Topp 10 filmer med högst betyg', kind: 'top10', total: top.length, items: top });
   const mc = catalog.visibleCats('movie', prof).filter(c => catalog.list('movie', c.id, prof).length >= 6).slice(0, 8);
   const sc = catalog.visibleCats('series', prof).filter(c => catalog.list('series', c.id, prof).length >= 6).slice(0, 6);
@@ -132,9 +155,24 @@ function homePage(prof, st) {
   return rows;
 }
 
+/** Favourite channels first, then recently watched ones (no duplicates). */
+function myChannels(st) {
+  const fav = st.myList.map(m => m.item).filter(i => i && i.t === 'live');
+  const seen = new Set(fav.map(i => i.k));
+  return fav.concat(st.recent.filter(i => !seen.has(i.k)));
+}
+
 function typePage(type, prof, st) {
   const rows = [];
-  if (type === 'live' && st.recent.length) rows.push(row('rc', 'Senast tittade', 'live', st.recent, { limit: 20 }));
+  if (type === 'live') {
+    const fav = st.myList.map(m => m.item).filter(i => i && i.t === 'live');
+    if (fav.length) rows.push(row('fav', 'Favoriter', 'live', fav, { limit: 200 }));
+    if (st.recent.length) rows.push(row('rc', 'Senast tittade', 'live', st.recent, { limit: 20 }));
+  }
+  if (type === 'movie' || type === 'series') {
+    const cats = catalog.visibleCats(type, prof).map(c => ({ k: 'cat:' + c.id, t: 'cat', id: c.id, type, label: c.name, value: c.id }));
+    if (cats.length > 1) rows.push({ id: 'cats', title: 'Kategorier', kind: 'pill', total: cats.length, items: cats });
+  }
   if (type === 'movie') {
     const r1 = catRow('movie', 'recent', prof, 'Nyligen tillagt');
     const r2 = catRow('movie', 'top', prof, 'Högst betyg');
@@ -238,7 +276,8 @@ function status() {
     epg: { at: s.epgAt, count: s.epgCount, loading: s.epgLoading, error: s.epgError },
     ffmpeg: ff.has(),
     previews: store.config.options.previews || 'sound',
-    profiles: store.config.profiles,
+    parentPin: (store.config.profiles || []).some(p => !p.kids && p.pin),
+    profiles: publicProfiles(),
     pinRequired: !!SETUP_PIN,
     urls: process.env.PUBLIC_URL ? [process.env.PUBLIC_URL.replace(/\/$/, '')] : lanUrls(),
   };
@@ -253,9 +292,14 @@ function publicConfig() {
     source: c.source,
     xtream: { server: c.xtream.server, username: c.xtream.username, hasPassword: !!c.xtream.password },
     m3u: { url: c.m3u.url, epgUrl: c.m3u.epgUrl },
-    profiles: c.profiles,
+    profiles: publicProfiles(),
     options: c.options,
   };
+}
+
+/** Profiles as shown to devices: never the PIN itself. */
+function publicProfiles() {
+  return (store.config.profiles || []).map(p => ({ id: p.id, name: p.name, color: p.color, kids: !!p.kids, hasPin: !!p.pin }));
 }
 
 function checkPin(req, res) {
@@ -274,7 +318,10 @@ function cleanProfiles(list) {
     let id = String(p.id || '').replace(/[^\w-]/g, '').slice(0, 20) || 'p' + Math.random().toString(36).slice(2, 8);
     while (used.has(id)) id += 'x';
     used.add(id);
-    out.push({ id, name, color: /^#[0-9a-f]{6}$/i.test(p.color) ? p.color : '#35d0a0', kids: !!p.kids });
+    const old = (store.config.profiles || []).find(o => o.id === id) || {};
+    let pin = p.pin === undefined || p.pin === null ? old.pin || '' : String(p.pin).replace(/\D/g, '').slice(0, 4);
+    if (pin && pin.length !== 4) pin = '';
+    out.push({ id, name, color: /^#[0-9a-f]{6}$/i.test(p.color) ? p.color : '#35d0a0', kids: !!p.kids, pin });
     if (out.length >= 8) break;
   }
   return out.length ? out : [{ id: 'p1', name: 'Jag', color: '#35d0a0', kids: false }];
@@ -342,7 +389,11 @@ route('GET', '/api/list', (req, res, q) => {
   const prof = profileOf(q);
   const type = q.get('type');
   if (!['live', 'movie', 'series'].includes(type)) return bad(res, 'type');
-  const list = catalog.list(type, q.get('cat') || 'all', prof);
+  let list = type === 'live' ? catalog.list(type, q.get('cat') || 'all', prof) : dedupe(catalog.list(type, q.get('cat') || 'all', prof));
+  const sort = q.get('sort');
+  if (sort === 'new') list = list.slice().sort((a, b) => (b.add || 0) - (a.add || 0));
+  else if (sort === 'rating') list = list.slice().sort((a, b) => (b.r || 0) - (a.r || 0));
+  else if (sort === 'az') list = list.slice().sort((a, b) => a.n.localeCompare(b.n, 'sv'));
   const offset = Math.max(0, +q.get('offset') || 0);
   const limit = Math.min(3000, Math.max(1, +q.get('limit') || 40));
   ok(res, { total: list.length, items: list.slice(offset, offset + limit) });
@@ -365,7 +416,8 @@ route('GET', '/api/info/:type/:id', async (req, res, q, p) => {
   try {
     const info = p.type === 'series' ? await catalog.seriesInfo(id) : await catalog.movieInfo(id);
     if (!info) return bad(res, 'hittades inte', 404);
-    const extra = { catName: catalog.catName(p.type, info.cat) };
+    const vs = p.type === 'movie' || p.type === 'series' ? catalog.versions(p.type, id, profileOf(q)) : [];
+    const extra = { catName: catalog.catName(p.type, info.cat), versions: vs.length > 1 ? vs : undefined };
     ok(res, { ...info, ...extra });
   } catch (e) { bad(res, redact(e.message, catalog.secrets()), 502); }
 });
@@ -376,7 +428,7 @@ route('GET', '/api/epg/now', async (req, res, q) => {
 });
 
 route('GET', '/api/epg/channel/:id', async (req, res, q, p) => {
-  ok(res, await catalog.channelGuide(decodeURIComponent(p.id), Math.min(36, +q.get('hours') || 12)));
+  ok(res, await catalog.channelGuide(decodeURIComponent(p.id), Math.min(36, +q.get('hours') || 12), Math.min(72, +q.get('back') || 0)));
 });
 
 route('GET', '/api/search', (req, res, q) => {
@@ -390,6 +442,8 @@ route('GET', '/api/state/:profile', (req, res, q, p) => {
   ok(res, {
     myList: st.myList.map(m => m.item && m.item.k).filter(Boolean),
     progress: Object.fromEntries(Object.entries(st.progress).map(([k, v]) => [k, { pos: v.pos, dur: v.dur, ts: v.ts, upnext: !!v.upnext }])),
+    seen: st.seen || {},
+    reminders: (st.reminders || []).filter(r => r.s > Date.now() - 15 * 60e3),
   });
 });
 
@@ -414,8 +468,9 @@ route('POST', '/api/state/:profile/progress', async (req, res, q, p) => {
   const dur = Math.max(0, +b.dur || 0);
   // one entry per series in "Fortsätt titta"
   if (item.sid) for (const k of Object.keys(st.progress)) if (k !== item.k && st.progress[k].item && st.progress[k].item.sid === item.sid) delete st.progress[k];
-  const done = dur > 0 && pos / dur >= 0.95;
+  const done = b.seen ? true : isDone(pos, dur, item.t);
   if (done) {
+    markSeen(st, item.k, true);
     delete st.progress[item.k];
     if (item.t === 'episode' && item.sid) {
       try {
@@ -454,11 +509,155 @@ route('POST', '/api/state/:profile/recent', async (req, res, q, p) => {
   ok(res, { ok: true });
 });
 
+route('POST', '/api/profile/:id/unlock', async (req, res, q, p) => {
+  const b = await readBody(req);
+  const prof = (store.config.profiles || []).find(x => x.id === p.id);
+  if (!prof) return bad(res, 'profil', 404);
+  const all = store.config.profiles || [];
+  const from = all.find(x => x.id === b.from);
+  // accepted codes: the profile's own PIN; leaving a kids profile also takes any parent's PIN
+  const codes = [];
+  if (prof.pin) codes.push(prof.pin);
+  if (from && from.kids && !prof.kids) for (const x of all) if (!x.kids && x.pin) codes.push(x.pin);
+  if (!codes.length || codes.includes(String(b.pin || ''))) return ok(res, { ok: true, token: prof.pin ? profToken(prof) : '' });
+  await new Promise(r => setTimeout(r, 600)); // slow down guessing
+  bad(res, 'Fel PIN-kod', 403);
+});
+
+route('POST', '/api/state/:profile/reminders', async (req, res, q, p) => {
+  // reminders follow the profile, so one set on the phone also pops up on the TV
+  const b = await readBody(req);
+  const st = store.profileState(store.profile(p.profile).id);
+  st.reminders = (Array.isArray(b.list) ? b.list : []).slice(0, 100).map(r => ({
+    ch: snapshot(r.ch), s: +r.s || 0, t: String(r.t || '').slice(0, 200), done: !!r.done,
+  })).filter(r => r.ch && r.s > Date.now() - 15 * 60e3);
+  store.saveState();
+  ok(res, { ok: true, n: st.reminders.length });
+});
+
+function markSeen(st, k, on) {
+  if (!st.seen) st.seen = {};
+  if (on) st.seen[k] = Date.now(); else delete st.seen[k];
+  const keys = Object.keys(st.seen);
+  if (keys.length > 3000) keys.sort((a, b) => st.seen[a] - st.seen[b]).slice(0, keys.length - 3000).forEach(x => delete st.seen[x]);
+}
+
+route('POST', '/api/state/:profile/seen', async (req, res, q, p) => {
+  // mark as watched: same as reaching the end (series move on to the next episode); on:false marks as unwatched
+  const b = await readBody(req);
+  const st = store.profileState(store.profile(p.profile).id);
+  if (Array.isArray(b.keys)) { // a whole season
+    for (const k of b.keys.slice(0, 500)) { markSeen(st, String(k), b.on !== false); delete st.progress[String(k)]; }
+    store.saveState();
+    return ok(res, { ok: true });
+  }
+  const item = snapshot(b.item);
+  if (!item) return bad(res, 'item');
+  if (b.on === false) { markSeen(st, item.k, false); store.saveState(); return ok(res, { ok: true }); }
+  markSeen(st, item.k, true);
+  delete st.progress[item.k];
+  if (item.t === 'episode' && item.sid) {
+    try {
+      const s = await catalog.seriesInfo(item.sid);
+      const all = (s && s.seasons ? s.seasons : []).flatMap(x => x.eps);
+      const i = all.findIndex(e => e.id === item.id);
+      const nx = i >= 0 ? all[i + 1] : null;
+      if (nx) st.progress[nx.k] = { item: snapshot({ ...nx, sn: s.n, bd: s.bd, img: nx.img || s.img }), pos: 0, dur: nx.dur || 0, ts: Date.now(), upnext: true };
+    } catch (_) { /* no next */ }
+  }
+  store.saveState();
+  ok(res, { ok: true });
+});
+
+/* "Skip intro": learned from how people in the household jump past the intro. Shared by all devices; shown once
+   two jumps agree (within 15 s), using their median. A skip followed by jumping back counts against it. */
+function introOf(sid) {
+  const obs = ((store.state.intro || {})[sid] || []).filter(o => !o.bad);
+  if (obs.length < 2) return null;
+  let best = null;
+  for (const o of obs) {
+    const near = obs.filter(x => Math.abs(x.to - o.to) <= 15);
+    if (near.length >= 2 && (!best || near.length > best.length)) best = near;
+  }
+  if (!best) return null;
+  const med = (a) => { const s = a.slice().sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
+  return { from: Math.max(0, med(best.map(x => x.from)) - 3), to: med(best.map(x => x.to)), n: best.length };
+}
+route('GET', '/api/intro/:sid', (req, res, q, p) => ok(res, introOf(decodeURIComponent(p.sid)) || {}));
+route('POST', '/api/intro/:sid', async (req, res, q, p) => {
+  const b = await readBody(req);
+  const sid = decodeURIComponent(p.sid).slice(0, 40);
+  const all = store.state.intro = store.state.intro || {};
+  let list = all[sid] || [];
+  if (b.bad) {
+    // they skipped and then went back: forget the observations that made us show it
+    const cur = introOf(sid);
+    if (cur) list = list.filter(x => Math.abs(x.to - cur.to) > 15);
+  } else {
+    const from = +b.from, to = +b.to;
+    if (!(from >= 0 && to - from >= 20 && to - from <= 180 && from <= 420)) return bad(res, 'intervall');
+    list.push({ from, to, ts: Date.now() });
+  }
+  all[sid] = list.slice(-8);
+  const keys = Object.keys(all);
+  if (keys.length > 2000) delete all[keys[0]];
+  store.saveState();
+  ok(res, introOf(sid) || {});
+});
+
+route('GET', '/api/similar/:type/:id', async (req, res, q, p) => {
+  if (!catalog.ready()) return bad(res, 'inte redo', 503);
+  const prof = profileOf(q);
+  const type = p.type === 'series' ? 'series' : 'movie';
+  const id = decodeURIComponent(p.id);
+  let base = catalog.get(type, id);
+  if (!base) return ok(res, { items: [] });
+  try { base = (type === 'series' ? await catalog.seriesInfo(id) : await catalog.movieInfo(id)) || base; } catch (_) { /* basic */ }
+  const gs = new Set(String(base.g || '').toLowerCase().split(/[,/|&]/).map(x => x.trim()).filter(Boolean));
+  const scored = [];
+  for (const it of catalog.list(type, 'all', prof)) {
+    if (it.id === base.id) continue;
+    let sc = 0;
+    if (it.cat === base.cat) sc += 2;
+    for (const g of String(it.g || '').toLowerCase().split(/[,/|&]/)) if (gs.has(g.trim())) sc += 3;
+    if (base.y && it.y && Math.abs(base.y - it.y) <= 5) sc += 1;
+    if (it.r) sc += Math.min(2, it.r / 5);
+    if (sc > 2) scored.push([sc, it]);
+  }
+  scored.sort((a, b) => b[0] - a[0]);
+  const baseKey = (catalog.get(type, id) || {})._nk;
+  ok(res, { items: dedupe(scored.map(x => x[1]).filter(x => !baseKey || x._nk !== baseKey)).slice(0, 30) });
+});
+
+let preparing = false;
+let lastStreamAt = 0;
+catalog.isBusy = () => Date.now() - lastStreamAt < 15 * 60e3 || ff.activeSessions() > 0;
+route('POST', '/api/prepare/:type/:id', (req, res, q, p) => {
+  // Read the file's format in the background so pressing Play starts faster – but never at the cost of a
+  // provider connection someone needs: one at a time, not while anything plays, not on 1–2 connection accounts.
+  const maxConn = (catalog.data && catalog.data.maxConn) || 0;
+  const busy = preparing || Date.now() - lastStreamAt < 20000 || ff.activeSessions() > 0 || (maxConn && maxConn <= 2);
+  if (!busy && catalog.ready() && ff.has() && (p.type === 'movie' || p.type === 'episode')) {
+    const src = catalog.streamUrl(p.type, decodeURIComponent(p.id), q.get('ext'));
+    if (src && src.primary) {
+      preparing = true;
+      proxy.allow(src.primary);
+      ff.probe(src.primary, catalog.ua()).catch(() => {}).then(() => { preparing = false; });
+    }
+  }
+  ok(res, { ok: true, skipped: busy });
+});
+
 route('GET', '/api/stream/:type/:id', async (req, res, q, p) => {
   if (!catalog.ready()) return bad(res, 'inte redo', 503);
   const type = p.type;
   const id = decodeURIComponent(p.id);
-  const src = catalog.streamUrl(type, id, q.get('ext'));
+  const prof = profileOf(q);
+  if (prof.kids && !catalog.allowed(type, id, prof)) return bad(res, 'Det här finns inte i barnprofilen', 403);
+  if (!pinOk(q, prof)) return bad(res, 'Profilen är låst – välj den igen och ange PIN-koden', 401);
+  lastStreamAt = Date.now();
+  let src = catalog.streamUrl(type, id, q.get('ext'));
+  if (type === 'live' && q.get('start')) src = catalog.timeshiftUrl(id, +q.get('start'), +q.get('dur') || 60) || src;
   if (!src || !src.primary) return bad(res, 'Kunde inte hitta strömmen', 404);
   const tok = (u) => { proxy.allow(u); return proxy.token(u); };
   const ing = ingressBase(req);
@@ -473,6 +672,11 @@ route('GET', '/api/stream/:type/:id', async (req, res, q, p) => {
     out.push({ kind, url: pathOf(u) });
     return out;
   };
+  if (type === 'live' && src.timeshift) {
+    // MPEG-TS first; the same archive as HLS for devices without MPEG-TS support (iPhone, some TVs)
+    const hls = src.primary.replace(/\.ts$/, '.m3u8');
+    return ok(res, { live: false, catchup: true, sources: both('ts', src.primary).concat(both('hls', hls)) });
+  }
   if (type === 'live') {
     const k1 = kindOf(src.primary);
     let list = both(k1, src.primary);

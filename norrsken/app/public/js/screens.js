@@ -19,8 +19,66 @@
   };
   NS.resumePos = function (item) {
     var p = NS.state.progress[item.k];
-    if (p && p.pos > 15 && p.dur && p.pos / p.dur < 0.95) return p.pos;
+    if (p && p.pos > 15 && p.dur && !NS.isDone(p.pos, p.dur, item.t)) return p.pos;
     return 0;
+  };
+
+  /** Options for a card: continue-watching entries and channels. Resolves true when something changed. */
+  NS.cardMenu = function (it, rowId, season) {
+    var items = [];
+    if (it.t === 'episode' && rowId === 'eps') {
+      var seen = NS.isSeen(it.k);
+      items.push({ label: 'Spela', icon: 'play', value: 'play' });
+      items.push({ label: seen ? 'Markera som osedd' : 'Markera som sedd', icon: seen ? 'x' : 'check', value: seen ? 'unseen' : 'seen' });
+      if (season && season.length > 1) {
+        var all = season.every(function (e) { return NS.isSeen(e.k); });
+        items.push({ label: all ? 'Markera säsongen som osedd' : 'Markera säsongen som sedd', icon: 'episodes', value: all ? 'sunseen' : 'sseen' });
+      }
+      return NS.menu(NS.epCode(it) + ' ' + it.n, items).then(function (v) {
+        if (v === 'play') { NS.playItem(it, { start: NS.resumePos(it) }); return false; }
+        if (v === 'seen' || v === 'unseen') return NS.markSeen(it, v === 'seen').then(function () { return true; });
+        if (v === 'sseen' || v === 'sunseen') return NS.markSeason(season, v === 'sseen').then(function () { return true; });
+        return false;
+      });
+    }
+    if (it.t === 'live') {
+      var fav = NS.inList(it.k);
+      items.push({ label: fav ? 'Ta bort från favoriter' : 'Lägg till i favoriter', icon: fav ? 'check' : 'plus', value: 'fav' });
+      items.push({ label: 'Öppna tv-guiden', icon: 'episodes', value: 'guide' });
+    } else {
+      if (NS.touch) items.push({ label: rowId === 'cw' || NS.state.progress[it.k] ? 'Fortsätt titta' : 'Spela', icon: 'play', value: 'play' });
+      if (rowId === 'cw' || NS.state.progress[it.k]) {
+        items.push({ label: 'Ta bort från Fortsätt titta', icon: 'x', value: 'forget' });
+        items.push({ label: 'Markera som sedd', icon: 'check', value: 'seen' });
+      }
+      if (it.t === 'movie' && NS.isSeen(it.k)) items.push({ label: 'Markera som osedd', icon: 'x', value: 'unseen' });
+      if (it.t === 'episode' && it.sid) items.push({ label: 'Gå till serien', icon: 'series', value: 'series' });
+      else items.push({ label: 'Mer info', icon: 'info', value: 'info' });
+      var inl = NS.inList(it.t === 'episode' && it.sid ? 's:' + it.sid : it.k);
+      items.push({ label: inl ? 'Ta bort från Min lista' : 'Lägg till i Min lista', icon: inl ? 'check' : 'plus', value: 'list' });
+    }
+    var title = it.t === 'episode' ? (it.sn || it.n) : it.n;
+    var sub = it.t === 'episode' ? NS.epCode(it) + ' ' + it.n : [NS.kindLabel(it), it.y].filter(Boolean).join('  ·  ');
+    return NS.menu(title, items, NS.touch ? sub : null, NS.touch ? it.img : null).then(function (v) {
+      if (!v) return false;
+      if (v === 'play') {
+        if (it.t === 'series') NS.router.push(new NS.Detail(it, { autoplay: true }));
+        else NS.playItem(it, { start: it.upnext ? 0 : NS.resumePos(it) || it.pos || 0 });
+        return false;
+      }
+      if (v === 'fav') return NS.toggleList(it).then(function () { return true; });
+      if (v === 'guide') { NS.router.push(new NS.Guide({ cat: it.cat })); return false; }
+      if (v === 'forget') { NS.toast('Borttagen från Fortsätt titta', 'check'); return NS.forget(it).then(function () { return true; }); }
+      if (v === 'seen') { NS.toast('Markerad som sedd', 'check'); return NS.markSeen(it).then(function () { return true; }); }
+      if (v === 'unseen') { NS.toast('Markerad som osedd', 'check'); return NS.markSeen(it, false).then(function () { return true; }); }
+      if (v === 'series') { NS.router.push(new NS.Detail({ t: 'series', id: it.sid, k: 's:' + it.sid, n: it.sn || it.n, img: it.img, bd: it.bd })); return false; }
+      if (v === 'info') { NS.router.push(new NS.Detail(it)); return false; }
+      if (v === 'list') {
+        var target = it.t === 'episode' && it.sid ? { t: 'series', id: it.sid, k: 's:' + it.sid, n: it.sn || it.n, img: it.img, bd: it.bd } : it;
+        return NS.toggleList(target).then(function () { return true; });
+      }
+      return false;
+    });
   };
 
   /* ================================================================ WELCOME (first run) */
@@ -68,8 +126,9 @@
   NS.Welcome = Welcome;
 
   /* ================================================================ PROFILES */
-  function Profiles(profiles) {
+  function Profiles(profiles, fromMenu) {
     this.list = profiles;
+    this.fromMenu = !!fromMenu;
     var last = NS.store.get('profile', '');
     this.i = Math.max(0, profiles.findIndex(function (p) { return p.id === last; }));
     this.el = h('div', { class: 'screen profiles' });
@@ -78,9 +137,14 @@
     this.els = profiles.map(function (p, i) {
       return h('div', { class: 'p', onclick: function () { self.i = i; self.pick(); } }, [
         h('div', { class: 'av', style: 'background:' + p.color, text: p.name.charAt(0).toUpperCase() }),
-        p.name, p.kids ? h('span', { class: 'kid', text: 'Barnprofil' }) : null
+        p.name, p.kids ? h('span', { class: 'kid', text: 'Barnprofil' }) : p.hasPin ? h('span', { class: 'kid', text: 'Låst med PIN' }) : null
       ]);
     });
+    // settings tile at the end (hidden while a kids profile is in use)
+    if (!(NS.profile && NS.profile.kids)) {
+      this.els.push(h('div', { class: 'p p-gear', onclick: function () { self.i = self.els.length - 1; self.pick(); } }, [
+        h('div', { class: 'av' }, NS.icon('settings')), 'Inställningar']));
+    }
     this.el.appendChild(h('div', { class: 'plist' }, this.els));
     this.el.appendChild(h('div', { class: 'foot', text: 'Profiler ändrar du i mobilen: ' + NS.lanUrl().replace(/^https?:\/\//, '') + '/setup' }));
     this.paint();
@@ -88,15 +152,22 @@
   Profiles.prototype.paint = function () { var i = this.i; this.els.forEach(function (e, j) { e.classList.toggle('focus', i === j); }); };
   Profiles.prototype.pick = function () {
     var p = this.list[this.i];
-    NS.profile = p;
-    NS.store.set('profile', p.id);
-    NS.loadState().then(function () { NS.router.reset(new NS.Browse('home')); });
+    if (!p) { NS.router.push(new NS.Settings()); return; }
+    var all = (NS.status && NS.status.profiles) || this.list;
+    var from = NS.profile || all.filter(function (q) { return q.id === NS.store.get('profile', ''); })[0];
+    // leaving a kids profile, or entering a locked one, needs the PIN
+    (NS.pinNeeded(p, from) ? NS.askPin(p, from) : Promise.resolve(true)).then(function (okd) {
+      if (!okd) return;
+      NS.profile = p;
+      NS.store.set('profile', p.id);
+      NS.loadState().then(function () { NS.router.reset(new NS.Browse('home')); });
+    });
   };
   Profiles.prototype.onKey = function (a) {
     if (a === 'left' && this.i > 0) this.i--;
-    else if (a === 'right' && this.i < this.list.length - 1) this.i++;
+    else if (a === 'right' && this.i < this.els.length - 1) this.i++;
     else if (a === 'ok') return this.pick();
-    else if (a === 'back') return NS.exitApp();
+    else if (a === 'back') return this.fromMenu ? NS.router.pop() : NS.exitApp();
     this.paint();
   };
   NS.Profiles = Profiles;
@@ -126,6 +197,7 @@
       { id: 'search', icon: 'search' },
       { id: 'home', label: 'Hem' },
       { id: 'live', label: 'Live-tv' },
+      { id: 'guide', label: 'Tv-guide' },
       { id: 'movie', label: 'Filmer' },
       { id: 'series', label: 'Serier' },
       { id: 'mylist', label: 'Min lista' }
@@ -241,6 +313,7 @@
   };
 
   Browse.prototype.select = function (it, row) {
+    if (it.t === 'cat') { NS.router.push(new NS.Grid(it.type, it.id, it.label)); return; }
     if (it.t === 'live') {
       var R = this.rows.currentRow();
       NS.playItem(it, { list: R ? R.items : [it], cat: row.cat || null });
@@ -248,21 +321,36 @@
     }
     if (row.id === 'cw') { NS.playItem(it, { start: it.upnext ? 0 : it.pos || 0 }); return; }
     if (it.t === 'episode') { NS.playItem(it, { start: NS.resumePos(it) }); return; }
-    NS.router.push(new Detail(it));
+    NS.router.push(new NS.Detail(it));
   };
 
   /** Play button on the remote: start right away instead of opening details. */
   Browse.prototype.quickPlay = function (it, row) {
     if (it.t === 'movie') { NS.playItem(it, { start: NS.resumePos(it) }); return; }
-    if (it.t === 'series') { NS.router.push(new Detail(it, { autoplay: true })); return; }
+    if (it.t === 'series') { NS.router.push(new NS.Detail(it, { autoplay: true })); return; }
     this.select(it, row || {});
   };
 
   Browse.prototype.navSelect = function (it) {
-    if (it.id === 'search') { NS.router.push(new Search()); return; }
-    if (it.id === 'profile') { NS.router.push(new Settings()); return; }
+    if (it.id === 'search') { NS.router.push(new NS.Search()); return; }
+    if (it.id === 'profile') { NS.router.push(new NS.Profiles(NS.status.profiles, true)); return; }
+    if (it.id === 'guide') { NS.router.push(new NS.Guide()); return; }
     if (it.id !== this.page) this.load(it.id);
     else this.setMode('rows');
+  };
+
+  /** Options for the focused card: red key / info. */
+  Browse.prototype.options = function () {
+    var self = this;
+    var it = this.rows.current();
+    var R = this.rows.currentRow();
+    if (!it || !R) return;
+    NS.cardMenu(it, R.def.id).then(function (changed) {
+      if (!changed) return;
+      NS.state.dirty = false;
+      var r = self.rows.r, col = R.col;
+      NS.loadState().then(function () { self.load(self.page, { rowId: R.def.id, k: '', r: r, col: col }); });
+    });
   };
 
   Browse.prototype.activate = function (first) {
@@ -303,10 +391,14 @@
       this.setMode('nav');
       return;
     }
-    if (a === 'char:s' || a === 'yellow') { NS.router.push(new Search()); return; }
+    if (a === 'char:s' || a === 'yellow') { NS.router.push(new NS.Search()); return; }
+    if (a === 'red') { this.options(); return; }
+    if (a === 'green') { var c0 = this.rows.current(); if (c0 && c0.t === 'live') NS.toggleList(c0); return; }
     if (a === 'blue' || a === 'info') {
       var cur = this.rows.current();
-      if (cur && (cur.t === 'movie' || cur.t === 'series')) { NS.router.push(new Detail(cur)); return; }
+      var R0 = this.rows.currentRow();
+      if (cur && R0 && (R0.def.id === 'cw' || cur.t === 'live')) { this.options(); return; }
+      if (cur && (cur.t === 'movie' || cur.t === 'series')) { NS.router.push(new NS.Detail(cur)); return; }
     }
     this.rows.onKey(a);
   };
@@ -328,6 +420,8 @@
     this.pvHost = h('div', { class: 'dpv' });
     this.el.appendChild(this.pvHost);
     this.el.appendChild(h('div', { class: 'dbg-shade' }));
+    this.el.appendChild(h('div', { class: 'dbg-left' }));
+    this.el.appendChild(h('div', { class: 'ep-hint' }, ['Håll ', h('kbd', { text: 'OK' }), ' för fler val (sedd, hela säsongen)']));
     this.infoEl = h('div', { class: 'dinfo' });
     this.el.appendChild(this.infoEl);
     this.zone = 'btns';
@@ -346,6 +440,13 @@
 
   Detail.prototype.fetch = function () {
     var self = this;
+    var it = this.item;
+    // start reading the file now so Play starts faster
+    if (it.t === 'movie') NS.api.post('api/prepare/movie/' + encodeURIComponent(it.id) + (it.ext ? '?ext=' + it.ext : ''), {}).catch(function () {});
+    NS.api.get('api/similar/' + it.t + '/' + encodeURIComponent(it.id)).then(function (r) {
+      self.similar = r.items || [];
+      if (self.info || it.t === 'movie') self.buildRows();
+    }).catch(function () {});
     infoFor(this.item).then(function (info) {
       self.info = info;
       self.render();
@@ -422,6 +523,10 @@
       var p = NS.state.progress[d.k];
       btns.push({ id: 'play', icon: 'play', label: pos ? 'Fortsätt titta' : 'Spela', sub: pos && p ? NS.left(pos, p.dur) : '' });
       if (pos) btns.push({ id: 'restart', icon: 'restart', label: 'Från början' });
+      if (d.versions && d.versions.length > 1) {
+        if (!this.ver) this.ver = NS.bestVersion(d.versions);
+        btns.push({ id: 'ver', icon: 'settings', label: 'Version: ' + (this.ver.q || 'Standard') });
+      }
     } else {
       var t = this.target();
       if (t) {
@@ -436,6 +541,8 @@
     }
     var inl = NS.inList(d.k);
     btns.push({ id: 'list', icon: inl ? 'check' : 'plus', label: 'Min lista' });
+    var prog = d.t === 'movie' ? NS.state.progress[d.k] : (this.target() ? NS.state.progress[this.target().k] : null);
+    if (prog) btns.push({ id: 'more', icon: 'episodes', label: 'Fler val' });
     this.btns = btns;
     this.btnEls = btns.map(function (b, i) {
       return h('div', { class: 'btn', onclick: function () { self.bi = i; self.setZone('btns'); self.press(); } }, [NS.icon(b.icon), b.label, b.sub ? h('span', { class: 'sub', text: b.sub }) : null]);
@@ -465,6 +572,7 @@
       if (seasons.length > 1) rows.push({ id: 'seasons', kind: 'pill', items: pills, selected: si });
       else rows.push({ id: 'seasons', kind: 'pill', items: [{ k: 'season0', label: 'Avsnitt', value: 0 }], selected: 0 });
       rows.push({ id: 'eps', kind: 'episode', items: eps });
+      if (this.similar && this.similar.length) rows.push({ id: 'more', title: 'Mer som detta', kind: 'poster', items: this.similar });
       this.rows.setRows(rows);
       this.rows.rows[1].col = Math.max(0, eps.indexOf(t));
       this.rows.rows[0].col = si;
@@ -472,24 +580,32 @@
       this.rows.layout();
       return;
     }
-    if (!d.cat) return;
-    NS.api.list('movie', d.cat, 0, 40).then(function (res) {
-      var items = (res.items || []).filter(function (x) { return x.k !== d.k; });
-      if (items.length) self.rows.setRows([{ id: 'more', title: 'Mer som detta', kind: 'poster', items: items }]);
-      self.rows.focus(self.zone === 'rows');
-    }).catch(function () { /* no extras */ });
+    if (this.similar && this.similar.length) {
+      this.rows.setRows([{ id: 'more', title: 'Mer som detta', kind: 'poster', items: this.similar }]);
+      this.rows.focus(this.zone === 'rows');
+    }
   };
 
   Detail.prototype.setZone = function (z) {
     if (z === 'rows' && !this.rows.rows.length) return;
     this.zone = z;
+    if (z === 'btns') { this.el.classList.remove('deep'); this.el.classList.remove('eps-focus'); this.rows.el.style.transform = ''; }
     this.rows.focus(z === 'rows');
+    var cr = this.rows.currentRow();
+    this.el.classList.toggle('eps-focus', z === 'rows' && !!cr && cr.def.id === 'eps');
     this.paintBtns();
     if (z === 'rows') this.rows.layout();
   };
 
   Detail.prototype.rowFocus = function (it, row) {
     var self = this;
+    var deep = row.id === 'more' && this.data().t === 'series';
+    this.el.classList.toggle('deep', deep);
+    var R = this.rows.currentRow();
+    this.rows.el.style.transform = deep && R ? 'translateY(' + (-R.y - 47) + 'rem)' : '';
+    clearTimeout(this._prep);
+    this.el.classList.toggle('eps-focus', row.id === 'eps' && this.zone === 'rows');
+    if (row.id === 'eps' && it && it.t === 'episode') this._prep = setTimeout(function () { NS.api.post('api/prepare/episode/' + encodeURIComponent(it.id) + (it.ext ? '?ext=' + it.ext : ''), {}).catch(function () {}); }, 900);
     if (row.id === 'seasons') {
       clearTimeout(this._st);
       this._st = setTimeout(function () {
@@ -506,7 +622,7 @@
   Detail.prototype.rowSelect = function (it, row) {
     if (row.id === 'seasons') { this.rows.go(1); return; }
     if (it.t === 'episode') { this.playEpisode(it, NS.resumePos(it)); return; }
-    NS.router.push(new Detail(it));
+    NS.router.push(new NS.Detail(it));
   };
 
   Detail.prototype.playEpisode = function (ep, start) {
@@ -520,9 +636,20 @@
     if (!b) return;
     var d = this.data();
     if (b.id === 'list') { NS.toggleList(this.item).then(function () { self.render(); }); return; }
+    if (b.id === 'more') {
+      var it = d.t === 'movie' ? d : Object.assign({}, this.target(), { sn: d.n, sid: d.id });
+      NS.cardMenu(it, 'cw').then(function (changed) { if (changed) NS.loadState().then(function () { self.render(); self.buildRows(); }); });
+      return;
+    }
     if (b.id === 'wait') return;
+    if (b.id === 'ver') {
+      NS.menu('Välj version', d.versions.map(function (v) { return { label: NS.versionLabel(v), icon: self.ver && self.ver.id === v.id ? 'check' : null, value: v }; }),
+        'Samma titel finns i flera kvaliteter hos leverantören.').then(function (v) { if (v) { self.ver = v; self.render(); } });
+      return;
+    }
     if (d.t === 'movie') {
-      NS.playItem(d, { start: b.id === 'restart' ? 0 : NS.resumePos(d) });
+      var pv = this.ver ? Object.assign({}, d, { vid: this.ver.id, ext: this.ver.ext || d.ext }) : d;
+      NS.playItem(pv, { start: b.id === 'restart' ? 0 : NS.resumePos(d) });
     } else {
       var t = this.target();
       if (!t) return;
@@ -558,6 +685,16 @@
       else if (a === 'play' || a === 'playpause') { this.bi = 0; this.press(); return; }
       this.paintBtns();
       return;
+    }
+    if (a === 'red') {
+      var R = this.rows.currentRow();
+      var it = R && R.def.items[R.col];
+      if (R && R.def.id === 'eps' && it) {
+        var self = this;
+        var d = this.data();
+        NS.cardMenu(Object.assign({}, it, { sn: d.n, bd: d.bd }), 'eps', R.def.items).then(function (ch) { if (ch) { self.render(); self.rows.repaintRow(self.rows.r); } });
+        return;
+      }
     }
     this.rows.onKey(a);
   };
@@ -602,6 +739,7 @@
     this.el.appendChild(this.rows.el);
     this.zone = 'kb';
     this.run = NS.debounce(this.search.bind(this), 350);
+    this.search();
     this.paint();
   }
   Search.prototype.focusKey = function (k) { this.kr = k.r; this.kc = this.grid[k.r].indexOf(k); this.setZone('kb'); };
@@ -631,13 +769,32 @@
   Search.prototype.search = function () {
     var self = this;
     var q = this.q.trim();
-    if (!q) { this.rows.setRows([]); this.showHint('Sök', 'Skriv några bokstäver för att hitta kanaler, filmer och serier.'); return; }
+    if (!q) {
+      // nothing typed yet: suggestions instead of an empty screen
+      this.hint.style.display = 'none';
+      Promise.all([NS.api.list('movie', 'top', 0, 20), NS.api.list('series', 'recent', 0, 20)]).then(function (r) {
+        if (self.q.trim()) return;
+        var rows = [];
+        if (r[0].items && r[0].items.length) rows.push({ id: 's-top', title: 'Förslag: högst betyg', kind: 'poster', items: r[0].items });
+        if (r[1].items && r[1].items.length) rows.push({ id: 's-new', title: 'Nya serier', kind: 'poster', items: r[1].items });
+        self.rows.setRows(rows);
+        self.rows.focus(self.zone === 'rows');
+        if (!rows.length) self.showHint('Sök', 'Skriv några bokstäver för att hitta kanaler, filmer, serier, skådespelare och genrer.');
+      }).catch(function () { self.showHint('Sök', 'Skriv några bokstäver för att hitta kanaler, filmer, serier, skådespelare och genrer.'); });
+      return;
+    }
     NS.api.search(q).then(function (r) {
       if (self.q.trim() !== q) return;
       var rows = [];
       if (r.live.length) rows.push({ id: 's-live', title: 'Kanaler', kind: 'live', items: r.live });
-      if (r.movie.length) rows.push({ id: 's-movie', title: 'Filmer', kind: 'poster', items: r.movie });
-      if (r.series.length) rows.push({ id: 's-series', title: 'Serier', kind: 'poster', items: r.series });
+      // titles first; then what matched on actors/director or genre, in its own row so the match makes sense
+      var byTitle = function (l) { return l.filter(function (x) { return !x.why; }); };
+      var byPeople = r.movie.concat(r.series).filter(function (x) { return x.why === 'people'; });
+      var byGenre = r.movie.concat(r.series).filter(function (x) { return x.why === 'genre'; });
+      if (byTitle(r.movie).length) rows.push({ id: 's-movie', title: 'Filmer', kind: 'poster', items: byTitle(r.movie) });
+      if (byTitle(r.series).length) rows.push({ id: 's-series', title: 'Serier', kind: 'poster', items: byTitle(r.series) });
+      if (byPeople.length) rows.push({ id: 's-people', title: 'Med ”' + q + '” bland medverkande eller regi', kind: 'poster', items: byPeople });
+      if (byGenre.length) rows.push({ id: 's-genre', title: 'Genre: ' + q, kind: 'poster', items: byGenre });
       self.rows.setRows(rows);
       self.rows.focus(self.zone === 'rows');
       if (!rows.length) self.showHint('Inga träffar', 'Inget matchar ”' + q + '”. Prova ett kortare ord eller en annan stavning.');
@@ -652,7 +809,7 @@
   };
   Search.prototype.select = function (it, row) {
     if (it.t === 'live') { NS.playItem(it, { list: row.items }); return; }
-    NS.router.push(new Detail(it));
+    NS.router.push(new NS.Detail(it));
   };
   Search.prototype.destroy = function () { this.rows.destroy(); };
   Search.prototype.onKey = function (a, e) {

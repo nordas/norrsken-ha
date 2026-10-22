@@ -78,6 +78,11 @@
     x: '<path d="M6 6l12 12M18 6L6 18"/>',
     fs: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
     up: '<path d="M6 14.5l6-6 6 6"/>',
+    bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
+    belloff: '<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/><path d="M4 4l16 16"/>',
+    lock: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+    archive: '<path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v4h4"/><path d="M12 8v4l3 2"/>',
+        more: '<circle cx="5" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="19" cy="12" r="1.6" fill="currentColor"/>',
     aurora: '<path d="M3 17c3-8 6-11 9-11s6 3 9 11" stroke-width="2.4"/><path d="M6 19c2-5 4-7 6-7s4 2 6 7" stroke-width="1.6"/>'
   };
   var FILLED = { play: 1, pause: 1, next: 1, star: 1 };
@@ -143,7 +148,11 @@
       }).catch(function (e) { clearTimeout(t); reject(e.name === 'AbortError' ? new Error('Servern svarar inte') : e); });
     });
   }
-  function q(path) { return path + (path.indexOf('?') < 0 ? '?' : '&') + 'profile=' + encodeURIComponent(NS.profile ? NS.profile.id : ''); }
+  function q(path) {
+    var id = NS.profile ? NS.profile.id : '';
+    var pt = id ? NS.store.get('pt.' + id, '') : '';
+    return path + (path.indexOf('?') < 0 ? '?' : '&') + 'profile=' + encodeURIComponent(id) + (pt ? '&pt=' + pt : '');
+  }
   NS.api = {
     get: function (p, t) { return req('GET', q(p), null, t); },
     post: function (p, b) { return req('POST', p, b); },
@@ -156,7 +165,7 @@
     cats: function (type) { return NS.api.get('api/cats/' + type); },
     stream: function (type, id, ext) { return NS.api.get('api/stream/' + type + '/' + encodeURIComponent(id) + '?caps=' + NS.caps + (ext ? '&ext=' + ext : ''), 20000); },
     probe: function (t) { return req('GET', 'api/probe?t=' + t, null, 30000); },
-    guide: function (id, h) { return NS.api.get('api/epg/channel/' + encodeURIComponent(id) + '?hours=' + (h || 6)); },
+    guide: function (id, h, back) { return NS.api.get('api/epg/channel/' + encodeURIComponent(id) + '?hours=' + (h || 6) + (back ? '&back=' + back : '')); },
     state: function () { return req('GET', 'api/state/' + NS.profile.id); },
     myList: function (item, on) { return req('POST', 'api/state/' + NS.profile.id + '/mylist', { item: item, on: on }); },
     progress: function (item, pos, dur) { return req('POST', 'api/state/' + NS.profile.id + '/progress', { item: item, pos: pos, dur: dur }); },
@@ -210,14 +219,22 @@
       NS.state.myList = {};
       (s.myList || []).forEach(function (k) { NS.state.myList[k] = true; });
       NS.state.progress = s.progress || {};
+      NS.state.seen = s.seen || {};
+      NS.state.reminders = s.reminders || [];
     }).catch(function () { /* offline */ });
+  };
+  /** A played-back programme from a channel's archive, played like a film with its own timeline. */
+  NS.catchupItem = function (ch, prog, list) {
+    return { t: 'catchup', id: ch.id, k: 'cu:' + ch.id, n: prog.t, sn: ch.n, img: ch.img, ch: ch, chList: list || [ch],
+      cu: { start: Math.floor(prog.s / 1000), dur: Math.ceil((prog.e - prog.s) / 60000) }, dur: Math.round((prog.e - prog.s) / 1000) };
   };
   NS.inList = function (k) { return !!NS.state.myList[k]; };
   NS.toggleList = function (item) {
     var on = !NS.inList(item.k);
     if (on) NS.state.myList[item.k] = true; else delete NS.state.myList[item.k];
     NS.state.dirty = true;
-    NS.toast(on ? 'Tillagd i Min lista' : 'Borttagen från Min lista', on ? 'check' : 'list');
+    var live = item.t === 'live';
+    NS.toast(on ? (live ? 'Tillagd i favoriter' : 'Tillagd i Min lista') : (live ? 'Borttagen från favoriter' : 'Borttagen från Min lista'), on ? 'check' : 'list');
     return NS.api.myList(item, on).then(function () { return on; });
   };
 
@@ -277,7 +294,7 @@
       case 412: return 'rw';
       case 33: case 427: return 'chup';
       case 34: case 428: return 'chdn';
-      case 403: return 'red';
+      case 403: case 93: return 'red';
       case 404: return 'green';
       case 405: return 'yellow';
       case 406: return 'blue';
@@ -300,6 +317,14 @@
   };
 
   var lastKey = 0;
+  function dispatch(a, e) {
+    if (NS.dialog && NS.dialog.onKey(a, e)) return;
+    var top = NS.router.top();
+    if (top && top.onKey) top.onKey(a, e);
+  }
+  /* Holding OK opens the options menu (like a long press on the phone). Only once we know this device sends
+     key-up events; until then OK reacts on key-down as before. */
+  var sawOkUp = false, okTimer = null, okLong = false;
   document.addEventListener('keydown', function (e) {
     var a = NS.keyAction(e);
     if (!a) return;
@@ -307,11 +332,28 @@
     if (tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA')) return;
     e.preventDefault();
     var now = Date.now();
+    if (a === 'ok' && sawOkUp && !NS.touch) {
+      if (e.repeat || okTimer) return;
+      okLong = false;
+      okTimer = setTimeout(function () {
+        okTimer = null; okLong = true;
+        var top = NS.router.top();
+        // in the player and in dialogs a long press is just OK
+        dispatch(NS.dialog || (top && top.video) ? 'ok' : 'red', e);
+      }, 600);
+      return;
+    }
     if (e.repeat && now - lastKey < 70) return; // keep held arrows smooth on slow TVs
     lastKey = now;
-    if (NS.dialog && NS.dialog.onKey(a, e)) return;
-    var top = NS.router.top();
-    if (top && top.onKey) top.onKey(a, e);
+    dispatch(a, e);
+  }, true);
+  document.addEventListener('keyup', function (e) {
+    if (NS.keyAction(e) !== 'ok') return;
+    var first = !sawOkUp;
+    sawOkUp = true;
+    if (first) return;
+    if (okTimer) { clearTimeout(okTimer); okTimer = null; if (!okLong) dispatch('ok', e); }
+    okLong = false;
   }, true);
 
   /* ---------------------------------------------------------------- router */
@@ -356,6 +398,171 @@
   };
 
   /** Modal with buttons. opts: { title, text, buttons: [{label, icon, value}], focus, cancel } → Promise(value) */
+  /** Same "watched" rule as the server: films with long end credits count as seen. */
+  NS.isDone = function (pos, dur, t) {
+    if (!(dur > 0)) return false;
+    var credits = t === 'episode' ? 120 : dur > 3600 ? 420 : 180;
+    return pos / dur >= 0.92 || (dur - pos <= credits && pos / dur > 0.6);
+  };
+  /** Per-profile key for settings remembered on this device. */
+  NS.pkey = function (k) { return k + '.' + (NS.profile ? NS.profile.id : ''); };
+
+  NS.forget = function (item) {
+    delete NS.state.progress[item.k];
+    NS.state.dirty = true;
+    return NS.api.post('api/state/' + NS.profile.id + '/forget', { k: item.k });
+  };
+  /** Of several versions of a title, the best this device can show (4K only when it decodes HEVC). */
+  NS.bestVersion = function (vs) {
+    if (!vs || !vs.length) return null;
+    var hevc = String(NS.caps || '').indexOf('hevc') >= 0;
+    for (var i = 0; i < vs.length; i++) if (hevc || vs[i].q !== '4K') return vs[i];
+    return vs[0];
+  };
+  NS.versionLabel = function (v) { return (v.q || 'Standard') + (v.cat ? '  ·  ' + v.cat : ''); };
+  /* ---------------------------------------------------------------- reminders for programmes that haven't started */
+  NS.reminders = function () { return (NS.state.reminders || []).filter(function (r) { return r.s > Date.now() - 10 * 60e3; }); };
+  function saveReminders(list) {
+    NS.state.reminders = list;
+    if (NS.profile) NS.api.post('api/state/' + NS.profile.id + '/reminders', { list: list }).catch(function () {});
+  }
+  NS.hasReminder = function (chId, s) { return NS.reminders().some(function (r) { return r.ch.id === chId && r.s === s; }); };
+  NS.toggleReminder = function (ch, p) {
+    var list = NS.reminders();
+    var on = !list.some(function (r) { return r.ch.id === ch.id && r.s === p.s; });
+    if (on) list.push({ ch: { t: 'live', id: ch.id, k: ch.k, n: ch.n, img: ch.img, num: ch.num, cat: ch.cat, arc: ch.arc }, s: p.s, t: p.t });
+    else list = list.filter(function (r) { return !(r.ch.id === ch.id && r.s === p.s); });
+    saveReminders(list);
+    NS.toast(on ? 'Påminnelse ' + NS.fmtClock(p.s) + ': ' + p.t : 'Påminnelsen är borttagen', on ? 'check' : 'x');
+    return on;
+  };
+  NS.checkReminders = function () {
+    if (!NS.profile || NS.dialog) return;
+    var now = Date.now();
+    var list = NS.reminders();
+    var due = list.filter(function (r) { return !r.done && r.s <= now + 60e3 && r.s > now - 5 * 60e3; })[0];
+    if (!due) return;
+    due.done = true;
+    saveReminders(list);
+    var top = NS.router.top();
+    if (top && top.item && top.item.t === 'live' && top.item.id === due.ch.id) return;
+    NS.confirm({ title: due.t, text: (due.s > now ? 'Börjar ' + NS.fmtClock(due.s) : 'Har börjat') + ' på ' + due.ch.n + '.', buttons: [{ label: 'Byt kanal', icon: 'play', value: 'go' }, { label: 'Inte nu', value: '' }], cancel: '' })
+      .then(function (v) { if (v === 'go') { if (top && top.item && top.item.t === 'live' && top.tune) top.tune(due.ch); else NS.playItem(due.ch, { list: [due.ch] }); } });
+  };
+  /** "I dag", "I går", "I morgon" or "lör 18 okt". */
+  NS.dayLabel = function (t) {
+    var d = new Date(t); d.setHours(0, 0, 0, 0);
+    var n = new Date(); n.setHours(0, 0, 0, 0);
+    var k = Math.round((d - n) / 86400e3);
+    if (k === 0) return 'i dag';
+    if (k === -1) return 'i går';
+    if (k === 1) return 'i morgon';
+    return d.toLocaleDateString('sv-SE', { weekday: 'short', day: 'numeric', month: 'short' });
+  };
+  NS.isSeen = function (k) { return !!(NS.state.seen && NS.state.seen[k]); };
+  NS.markSeen = function (item, on) {
+    on = on !== false;
+    NS.state.seen = NS.state.seen || {};
+    if (on) { NS.state.seen[item.k] = Date.now(); delete NS.state.progress[item.k]; } else delete NS.state.seen[item.k];
+    NS.state.dirty = true;
+    return NS.api.post('api/state/' + NS.profile.id + '/seen', { item: item, on: on });
+  };
+  NS.markSeason = function (eps, on) {
+    NS.state.seen = NS.state.seen || {};
+    eps.forEach(function (e) { if (on !== false) { NS.state.seen[e.k] = Date.now(); delete NS.state.progress[e.k]; } else delete NS.state.seen[e.k]; });
+    NS.state.dirty = true;
+    return NS.api.post('api/state/' + NS.profile.id + '/seen', { keys: eps.map(function (e) { return e.k; }), on: on !== false });
+  };
+
+  /**
+   * Vertical options menu. items: [{label, icon, value}] → Promise(value | undefined)
+   */
+  NS.menu = function (title, items, sub, thumb) {
+    return new Promise(function (resolve) {
+      var idx = 0;
+      var els = items.map(function (it, i) {
+        return NS.h('div', { class: 'btn mi-row', onclick: function () { idx = i; close(it.value); } }, [it.icon ? NS.icon(it.icon) : null, it.label]);
+      });
+      var el = NS.h('div', { class: 'dialog' }, NS.h('div', { class: 'box menu-box' }, [
+        NS.h('div', { class: 'menu-head' }, [thumb ? NS.pic(thumb, 'menu-thumb') : null, NS.h('div', {}, [NS.h('h2', { text: title }), sub ? NS.h('p', { text: sub }) : null])]),
+        NS.h('div', { class: 'menu-list' }, els),
+        NS.h('div', { class: 'menu-cancel', onclick: function () { close(undefined); }, text: 'Avbryt' })
+      ]));
+      el.addEventListener('click', function (e) { if (e.target === el) close(undefined); });
+      function paint() { els.forEach(function (b, i) { b.classList.toggle('focus', i === idx); }); }
+      function close(v) { el.remove(); NS.dialog = null; resolve(v); }
+      NS.dialog = {
+        onKey: function (a) {
+          if (a === 'up' && idx > 0) idx--;
+          else if (a === 'down' && idx < els.length - 1) idx++;
+          else if (a === 'ok') { close(items[idx].value); return true; }
+          else if (a === 'back' || a === 'left') { close(undefined); return true; }
+          paint();
+          return true;
+        }
+      };
+      paint();
+      document.getElementById('app').appendChild(el);
+    });
+  };
+
+  /** Ask for a profile's 4-digit PIN (number keys, on-screen digits or the phone keyboard). Resolves true when correct. */
+  /** Does switching to `to` need a PIN? Its own lock, or leaving a kids profile when a parent has a PIN. */
+  NS.pinNeeded = function (to, from) {
+    if (from && from.id === to.id) return false;
+    if (to.hasPin) return true;
+    return !!(from && from.kids && !to.kids && NS.status && NS.status.parentPin);
+  };
+  NS.askPin = function (prof, from) {
+    return new Promise(function (resolve) {
+      var code = '';
+      var dots = NS.h('div', { class: 'pin-dots' });
+      var parent = !prof.hasPin;
+      var msg = NS.h('p', { class: 'pin-msg', text: parent ? 'Ange en förälders PIN-kod för att lämna barnprofilen' : 'Ange PIN-koden för ' + prof.name });
+      var keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'del', '0', 'x'];
+      var ki = 0;
+      var kEls = keys.map(function (k, i) {
+        return NS.h('div', { class: 'btn pin-key', onclick: function () { ki = i; press(k); } }, k === 'del' ? NS.icon('del') : k === 'x' ? NS.icon('x') : k);
+      });
+      var hidden = NS.h('input', { type: 'tel', inputmode: 'numeric', maxlength: '4', class: 'pin-input', autocomplete: 'off' });
+      var el = NS.h('div', { class: 'dialog' }, NS.h('div', { class: 'box pin-box' }, [NS.h('h2', { text: prof.name }), msg, dots, NS.h('div', { class: 'pin-grid' }, kEls), hidden]));
+      function paint() {
+        dots.innerHTML = '';
+        for (var i = 0; i < 4; i++) dots.appendChild(NS.h('i', { class: i < code.length ? 'on' : '' }));
+        kEls.forEach(function (b, i) { b.classList.toggle('focus', i === ki); });
+      }
+      function close(v) { el.remove(); NS.dialog = null; resolve(v); }
+      function check() {
+        NS.api.post('api/profile/' + prof.id + '/unlock', { pin: code, from: from ? from.id : '' }).then(function (r) { if (r && r.token) NS.store.set('pt.' + prof.id, r.token); close(true); })
+          .catch(function () { code = ''; hidden.value = ''; msg.textContent = 'Fel PIN-kod. Försök igen.'; el.querySelector('.pin-box').classList.add('shake'); setTimeout(function () { var b = el.querySelector('.pin-box'); if (b) b.classList.remove('shake'); }, 400); paint(); });
+      }
+      function press(k) {
+        if (k === 'x') return close(false);
+        if (k === 'del') code = code.slice(0, -1);
+        else if (code.length < 4) code += k;
+        paint();
+        if (code.length === 4) check();
+      }
+      hidden.addEventListener('input', function () { code = hidden.value.replace(/\D/g, '').slice(0, 4); paint(); if (code.length === 4) check(); });
+      NS.dialog = {
+        onKey: function (a) {
+          if (a.indexOf('num') === 0) press(a.slice(3));
+          else if (a === 'back') { if (code) press('del'); else close(false); }
+          else if (a === 'left' && ki % 3) ki--;
+          else if (a === 'right' && ki % 3 < 2) ki++;
+          else if (a === 'up' && ki > 2) ki -= 3;
+          else if (a === 'down' && ki < 9) ki += 3;
+          else if (a === 'ok') press(keys[ki]);
+          paint();
+          return true;
+        }
+      };
+      paint();
+      document.getElementById('app').appendChild(el);
+      if (NS.touch) setTimeout(function () { hidden.focus(); }, 100);
+    });
+  };
+
   NS.confirm = function (opts) {
     return new Promise(function (resolve) {
       var idx = opts.focus || 0;

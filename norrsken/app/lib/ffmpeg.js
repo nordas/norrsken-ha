@@ -286,4 +286,6 @@ function hlsFile(id, name) {
   return null;
 }
 
-module.exports = { has, probe, remux, subs, langName, plan, playsAsIs, hlsSession, hlsPlaylist, hlsFile };
+function activeSessions() { return sessions.size; }
+
+module.exports = { activeSessions, has, probe, remux, subs, langName, plan, playsAsIs, hlsSession, hlsPlaylist, hlsFile };

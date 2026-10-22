@@ -13,6 +13,8 @@
     return (+(m[1] || 0)) * 3600 + (+m[2]) * 60 + (+m[3]) + (+m[4]) / 1000;
   }
 
+  NS.introCache = NS.introCache || {};
+
   function Player(opts) {
     var self = this;
     this.o = opts;
@@ -50,7 +52,8 @@
       this.chan = h('div', { class: 'chan' });
       this.osd.appendChild(this.chan);
       this.osd.appendChild(h('div', { class: 'hint', style: 'top:auto;bottom:3rem' }, [
-        h('span', {}, [h('kbd', { text: 'OK' }), 'Kanallista']), h('span', {}, [h('kbd', { text: '▲▼' }), 'Byt kanal']), h('span', {}, [h('kbd', { text: '0–9' }), 'Kanalnummer'])]));
+        h('span', {}, [h('kbd', { text: 'OK' }), 'Kanallista']), h('span', {}, [h('kbd', { text: '▲▼' }), 'Byt kanal']), h('span', {}, [h('kbd', { text: '0–9' }), 'Kanalnummer']), h('span', {}, [h('kbd', { text: 'Info' }), 'Tv-guide']), h('span', {}, [h('kbd', { text: '▶' }), 'Ljud/text']), h('span', {}, [h('kbd', { style: 'color:#f5d33c', text: '●' }), 'Förra kanalen']),
+        h('span', {}, [h('kbd', { style: 'color:#3ccf4e', text: '●' }), 'Favorit']), this.item.arc ? h('span', {}, [h('kbd', { style: 'color:#e5242b', text: '●' }), 'Starta om']) : null]));
     } else {
       this.bar = h('div', { class: 'bar' });
       this.bufEl = h('div', { class: 'buf' });
@@ -75,6 +78,8 @@
     el.appendChild(this.numEl);
     this.nextEl = h('div', { class: 'nextup' });
     el.appendChild(this.nextEl);
+    this.skipEl = h('div', { class: 'btn focus skip-intro', onclick: function (e) { e.stopPropagation(); self.skipIntro(); } }, [NS.icon('ff'), 'Hoppa över intro']);
+    el.appendChild(this.skipEl);
     this.errEl = h('div', { class: 'perror' });
     el.appendChild(this.errEl);
     this.side = h('div', { class: 'panel-side' });
@@ -90,6 +95,8 @@
     on('waiting', function () { self.buffering(true); });
     on('stalled', function () { self.buffering(true); });
     on('canplay', function () { self.buffering(false); });
+    on('pause', function () { self.renderButtons(); });
+    on('play', function () { self.renderButtons(); });
     on('pause', function () { self.bigIcon.innerHTML = ''; self.bigIcon.appendChild(NS.icon('pause')); self.bigIcon.classList.add('on'); self.showOsd(true); });
     on('play', function () { self.bigIcon.classList.remove('on'); self.showOsd(); });
     on('timeupdate', function () { self.lastMove = Date.now(); self.tick(); });
@@ -124,20 +131,30 @@
   Player.prototype.activate = function (first) {
     var self = this;
     this.clk = NS.clock(this.clockEl);
-    if (!first) return;
+    if (!first) {
+      if (this.suspended && !this.skipResume) { this.suspended = false; this.play(this.item, this.resumeAt || 0); }
+      this.skipResume = false;
+      return;
+    }
     this.play(this.item, this.start);
     this.every(3000, function () { self.watchdog(); });
+    this.every(500, function () { if (self.cuSeek) self.cuCatch(); });
     this.every(15000, function () { self.saveProgress(); });
     if (this.live) this.every(30000, function () { NS.needEpg([self.item.id]); });
   };
   Player.prototype.every = function (ms, fn) { this.timers.push(setInterval(fn, ms)); };
-  Player.prototype.deactivate = function () { clearInterval(this.clk); };
+  Player.prototype.deactivate = function () {
+    clearInterval(this.clk);
+    // something opened on top (guide, another player): stop streaming so we don't hold a second provider connection
+    if (this.sources) { this.resumeAt = this.live ? 0 : this.cur(); this.saveProgress(); this.teardown(); this.suspended = true; }
+  };
   Player.prototype.destroy = function () {
     this.saveProgress(true);
     this.timers.forEach(clearInterval);
     clearInterval(this.clk);
     clearTimeout(this.osdT); clearTimeout(this.scrubT); clearTimeout(this.numT); clearInterval(this.nextT); clearTimeout(this.zapT);
     document.removeEventListener('nsk-epg', this._epg);
+    if (this._winOff) this._winOff();
     this.stopSubs();
     this.teardown();
     if (this.chanRows) this.chanRows = null;
@@ -150,10 +167,12 @@
     this.item = item;
     this.start = start || 0;
     this.offset = 0;
+    this.cuOff = 0;
     this.probe = null;
     this.tok = '';
     this.audioIdx = 0;
     this.nextDismissed = false;
+    this.introDone = false;
     this.hideNext();
     this.stopSubs();
     this.sub = null;
@@ -167,6 +186,11 @@
       NS.needEpg([item.id]);
       NS.api.recent(snap(item)).catch(function () {});
       NS.state.dirty = true;
+      // zap through the whole category, not just the cards a row had loaded
+      if (!this.fullList && item.cat) {
+        this.fullList = true;
+        NS.api.list('live', item.cat, 0, 3000).then(function (r) { if (r.items && r.items.length > self.list.length) { self.list = r.items; self.cat = item.cat; } }).catch(function () {});
+      }
     } else {
       if (item.t === 'episode' && !this.series && item.sid) {
         NS.infoFor({ t: 'series', id: item.sid }).then(function (s) { self.series = s; self.renderButtons(); }).catch(function () {});
@@ -175,7 +199,25 @@
       this.showOsd();
     }
     var req = this.reqId = {};
-    NS.preview.settle().then(function () { return NS.api.stream(item.t, item.id, item.ext); }).then(function (res) {
+    var cu = item.t === 'catchup' ? item.cu : null;
+    if (cu) {
+      // timeshift works in whole minutes: start the archive at the minute we want and count from there
+      var cap = this.cuMax();
+      if (this.start > cap) this.start = cap;
+      this.cuOff = Math.max(0, Math.floor(this.start / 60) * 60);
+      this.cuSeek = this.start - this.cuOff; // the rest of the way, once enough has loaded
+      this.start = 0;
+      this._cuFresh = true;
+    }
+    // a film that exists in several qualities: play the best one this device can show (unless one was picked)
+    var pick = item.t === 'movie' && !item.vid && NS.infoFor ? NS.infoFor(item).then(function (info) {
+      var v = NS.bestVersion(info && info.versions);
+      if (v && v.id !== item.id) { item.vid = v.id; item.ext = v.ext || item.ext; }
+    }).catch(function () {}) : Promise.resolve();
+    NS.preview.settle().then(function () { return pick; }).then(function () {
+      if (cu) return NS.api.get('api/stream/live/' + encodeURIComponent(item.id) + '?caps=' + NS.caps + '&start=' + (cu.start + self.cuOff) + '&dur=' + Math.max(1, Math.ceil(cu.dur - self.cuOff / 60)), 20000);
+      return NS.api.stream(item.t, item.vid || item.id, item.ext);
+    }).then(function (res) {
       if (req !== self.reqId) return;
       self.sources = NS.usableSources(res.sources || []);
       self.media = res.media || null;
@@ -207,6 +249,18 @@
 
   Player.prototype.startSource = function (at) {
     var self = this;
+    if (this.item.t === 'catchup') {
+      // the archive URL is fixed to its start time: a retry/reload asks for a new one at the current position
+      // (moving on to the next source of the same request is fine; reloading the same one is not)
+      if (!this._cuFresh && this.si === this._cuSi) {
+        var pos = this.cur();
+        if (this.cuMax() - pos < 60 && this.cuLiveNow()) { this.toLive(); return; }
+        this.play(this.item, pos);
+        return;
+      }
+      this._cuFresh = false;
+      this._cuSi = this.si;
+    }
     var src = this.sources[this.si];
     var v = this.video;
     this.teardown();
@@ -380,14 +434,25 @@
   };
 
   /* ------------------------------------------------------------ time */
-  Player.prototype.cur = function () { return (this.kind === 'remux' ? this.offset : 0) + (this.video.currentTime || 0); };
+  Player.prototype.cur = function () { return (this.kind === 'remux' ? this.offset : 0) + (this.cuOff || 0) + (this.video.currentTime || 0); };
   Player.prototype.duration = function () {
+    if (this.item.t === 'catchup') return this.dur || 0;
     if (this.kind !== 'remux') { var d = this.video.duration; if (d && isFinite(d)) return d; }
     return this.dur || 0;
   };
   Player.prototype.seekTo = function (t) {
     var d = this.duration();
     t = Math.max(0, d ? Math.min(t, d - 2) : t);
+    if (this.item.t === 'catchup') {
+      // the archive can't be seeked inside one request: ask the provider for a new start time
+      t = Math.min(t, this.cuMax());
+      var rel0 = t - this.cuOff;
+      var v0 = this.video, inB = false;
+      try { for (var j = 0; j < v0.buffered.length; j++) if (rel0 >= v0.buffered.start(j) && rel0 <= v0.buffered.end(j) - 1) inB = true; } catch (e) { /* ignore */ }
+      if (inB) { try { v0.currentTime = rel0; } catch (e) { /* ignore */ } } else this.play(this.item, t);
+      this.tick();
+      return;
+    }
     if (this.kind === 'remux') {
       // inside what has already been converted: just move; further away: restart the conversion there
       var rel = t - this.offset;
@@ -410,6 +475,7 @@
 
   Player.prototype.tick = function () {
     if (this.live) return;
+    if (this.cuSeek) this.cuCatch();
     var d = this.duration();
     var c = this.scrubbing !== null && this.scrubbing !== undefined ? this.scrubbing : this.cur();
     var pct = d ? Math.min(100, c / d * 100) : 0;
@@ -429,11 +495,12 @@
       } catch (e) { /* ignore */ }
     }
     // next episode prompt
-    if (d > 60 && this.nextEp() && !this.nextDismissed && !this.nextOn && d - this.cur() <= 22 && !this.video.paused) this.showNext();
+    if (d > 60 && this.nextEp() && !this.nextDismissed && !this.nextOn && d - this.cur() <= Math.max(25, Math.min(d * 0.04, 90)) && !this.video.paused) this.showNext();
+    this.introTick();
   };
 
   Player.prototype.saveProgress = function (final) {
-    if (this.live || !this.sources) return;
+    if (this.live || !this.sources || this.item.t === 'catchup') return;
     var d = this.duration();
     var c = this.cur();
     if (!d || c < 5) return;
@@ -447,6 +514,7 @@
 
   Player.prototype.onEnded = function () {
     if (this.live) { this.startSource(0); return; }
+    if (this.item.t === 'catchup') { this.toLive(); return; }
     this.saveProgress(true);
     if (this.nextEp()) this.playNext();
     else this.exit();
@@ -467,9 +535,20 @@
     var i = all.findIndex(function (e) { return e.id === id; });
     return i >= 0 ? all[i + 1] || null : null;
   };
-  Player.prototype.playNext = function () {
+  Player.prototype.playNext = function (byUser) {
+    var self = this;
     var nx = this.nextEp();
     if (!nx) return;
+    this.autoCount = byUser ? 0 : (this.autoCount || 0) + 1;
+    if (this.autoCount >= 3) {
+      // three episodes in a row without touching anything: check that someone is still watching
+      this.autoCount = 0;
+      this.video.pause();
+      this.hideNext();
+      NS.confirm({ title: 'Tittar du fortfarande?', text: 'Nästa: ' + NS.epCode(nx) + ' ' + nx.n, buttons: [{ label: 'Fortsätt titta', icon: 'play', value: true }, { label: 'Avsluta', value: false }], cancel: false })
+        .then(function (yes) { if (yes) self.playNext(true); else self.exit(); });
+      return;
+    }
     var c = this.cur(), d = this.duration();
     if (d) NS.api.progress(snap(Object.assign({}, this.item, { dur: Math.round(d) })), Math.max(c, d), d).catch(function () {});
     delete NS.state.progress[this.item.k];
@@ -484,17 +563,21 @@
     this.nextOn = true;
     var left = 10;
     var bar = h('i', { style: 'width:0%' });
-    var btn = h('div', { class: 'btn focus cd', onclick: function () { self.playNext(); } }, [NS.icon('play'), 'Spela nu', bar]);
+    var btn = h('div', { class: 'btn focus cd', onclick: function () { self.playNext(true); } }, [NS.icon('play'), 'Spela nu', bar]);
+    var credits = h('div', { class: 'btn', onclick: function () { self.nextDismissed = true; self.hideNext(); } }, 'Titta på eftertexterna');
+    this.nextBtns = [btn, credits];
+    this.nextI = 0;
     this.nextEl.innerHTML = '';
     this.nextEl.appendChild(h('div', { class: 'nl', text: 'Nästa avsnitt' }));
     this.nextEl.appendChild(h('div', { class: 'nt', text: NS.epCode(nx) + '  ' + nx.n }));
-    this.nextEl.appendChild(h('div', { class: 'btns' }, [btn]));
+    this.nextEl.appendChild(h('div', { class: 'btns' }, [btn, credits]));
     this.nextEl.classList.add('on');
     clearInterval(this.nextT);
     this.nextT = setInterval(function () {
+      if (self.video.paused) return; // the countdown waits while paused
       left -= 0.25;
       bar.style.width = Math.min(100, (10 - left) * 10) + '%';
-      if (left <= 0) { clearInterval(self.nextT); self.playNext(); }
+      if (left <= 0) { clearInterval(self.nextT); self.playNext(false); }
     }, 250);
   };
   Player.prototype.hideNext = function () {
@@ -535,7 +618,10 @@
     var it = this.item;
     this.ttl.innerHTML = '';
     if (this.live) return;
-    if (it.t === 'episode') {
+    if (it.t === 'catchup') {
+      this.ttl.appendChild(h('b', { text: it.n }));
+      this.ttl.appendChild(h('span', { text: it.sn + '  ·  ' + NS.fmtClock(it.cu.start * 1000) + '–' + NS.fmtClock((it.cu.start + it.cu.dur * 60) * 1000) }));
+    } else if (it.t === 'episode') {
       this.ttl.appendChild(h('b', { text: it.sn || it.n }));
       this.ttl.appendChild(h('span', { text: NS.epCode(it) + '  ' + it.n }));
     } else {
@@ -591,8 +677,8 @@
   /** Re-apply the language the viewer picked last time. */
   Player.prototype.autoTracks = function () {
     if (this.autoDone === this.item.k) return;
-    var pref = NS.store.get('subLang', '');
-    var apref = NS.store.get('audioLang', '');
+    var pref = NS.store.get(NS.pkey('subLang'), NS.profile && NS.profile.kids ? '' : '');
+    var apref = NS.store.get(NS.pkey('audioLang'), NS.profile && NS.profile.kids ? 'Svenska' : '');
     var o = this.trackOptions();
     var applied = false;
     if (apref) {
@@ -611,9 +697,13 @@
     var self = this;
     var b = [];
     var opts = this.trackOptions();
-    if (opts.audio.length > 1 || opts.subs.length > 1) b.push({ id: 'tracks', icon: 'sub', label: 'Ljud och undertexter' });
+    b.push({ id: 'pp', icon: this.video.paused ? 'play' : 'pause', label: this.video.paused ? 'Spela' : 'Pausa' });
+    b.push({ id: 'rw', icon: 'rw', label: '10 s' });
+    b.push({ id: 'ff', icon: 'ff', label: '10 s' });
+    b.push({ id: 'tracks', icon: 'sub', label: 'Ljud och undertexter' });
     if (this.nextEp()) b.push({ id: 'next', icon: 'next', label: 'Nästa avsnitt' });
     b.push({ id: 'restart', icon: 'restart', label: 'Från början' });
+    if (this.item.t === 'catchup') b.push({ id: 'live', icon: 'live', label: 'Gå till live' });
     this.btns = b;
     this.obtns.innerHTML = '';
     this.btnEls = b.map(function (x, i) {
@@ -633,8 +723,12 @@
   Player.prototype.pressBtn = function () {
     var b = this.btns[this.bi];
     if (!b) return;
-    if (b.id === 'tracks') this.openTracks();
+    if (b.id === 'pp') { if (this.video.paused) this.playPromise(); else this.video.pause(); var self = this; setTimeout(function () { self.renderButtons(); }, 50); }
+    else if (b.id === 'rw') this.seekTo(this.cur() - 10);
+    else if (b.id === 'ff') this.seekTo(this.cur() + 10);
+    else if (b.id === 'tracks') this.openTracks();
     else if (b.id === 'next') this.playNext();
+    else if (b.id === 'live') this.toLive();
     else if (b.id === 'restart') { this.seekTo(0); this.zone = 'bar'; this.paintZone(); this.playPromise(); }
   };
 
@@ -658,6 +752,7 @@
     clearTimeout(this.scrubT);
     if (this.scrubbing === null || this.scrubbing === undefined) return;
     var t = this.scrubbing;
+    this.learnIntro(this.cur(), t);
     this.scrubbing = null;
     this.bar.classList.remove('scrub');
     if (this.nextOn && this.duration() - t > 25) this.hideNext();
@@ -683,8 +778,9 @@
         box.appendChild(e);
       });
     };
-    add('Ljud', o.audio.length > 1 ? o.audio : []);
+    add('Ljud', o.audio);
     add('Undertexter', o.subs.length > 1 ? o.subs : []);
+    if (!this.trItems.length) box.appendChild(h('p', { class: 'note', style: 'padding:2rem 0;color:var(--text-2)', text: 'Den här strömmen har inga fler ljudspår eller undertexter.' }));
     this.sideR.innerHTML = '';
     this.sideR.appendChild(h('div', { class: 'ph', text: 'Ljud och undertexter' }));
     this.sideR.appendChild(box);
@@ -700,8 +796,8 @@
   Player.prototype.pickTrack = function () {
     var t = this.trItems[this.ti];
     if (!t) return;
-    if (t.group === 'Ljud') { this.setAudio(t); NS.store.set('audioLang', t.label.split(' – ')[0]); }
-    else { this.setSub(t); NS.store.set('subLang', t.kind === 'off' ? '' : t.label.split(' ')[0]); }
+    if (t.group === 'Ljud') { this.setAudio(t); NS.store.set(NS.pkey('audioLang'), t.label.split(' – ')[0]); }
+    else { this.setSub(t); NS.store.set(NS.pkey('subLang'), t.kind === 'off' ? '' : t.label.split(' ')[0]); }
     this.closePanel();
   };
   Player.prototype.setAudio = function (t, silent) {
@@ -802,6 +898,45 @@
   };
 
   /* ------------------------------------------------------------ live: zapping & channel list */
+  /** Catch-up: start the programme that is on now from its beginning (when the channel has an archive). */
+  Player.prototype.restartProgramme = function () {
+    var e = NS.epgFor(this.item.id);
+    if (!this.item.arc || !e || !e.now) { NS.toast('Kanalen har inget arkiv att spola tillbaka i', 'info'); return; }
+    NS.router.replace(new Player({ item: NS.catchupItem(this.item, e.now, this.list) }));
+  };
+  /** Catch-up: how far one may go (a programme still on air can't go past "now"). */
+  Player.prototype.cuMax = function () {
+    var cu = this.item.cu;
+    if (!cu) return 0;
+    var aired = Date.now() / 1000 - cu.start - 30;
+    return Math.max(0, Math.min(cu.dur * 60 - 5, aired));
+  };
+  Player.prototype.cuLiveNow = function () { var cu = this.item.cu; return cu && Date.now() / 1000 < cu.start + cu.dur * 60; };
+  /** Catch-up: after a new start, wait until the exact second is loaded, then jump there. */
+  Player.prototype.cuCatch = function () {
+    if (!this.cuSeek) return;
+    var v = this.video;
+    var end = 0;
+    try { if (v.buffered.length) end = v.buffered.end(v.buffered.length - 1); } catch (e) { /* ignore */ }
+    if (end >= this.cuSeek + 1) {
+      try { v.currentTime = this.cuSeek; } catch (e) { /* ignore */ }
+      this.cuSeek = 0;
+      this.buffering(false);
+      if (v.paused && this._cuHeld) { this._cuHeld = false; this.playPromise(); }
+    } else if (this.played && !v.paused) { v.pause(); this._cuHeld = true; this.buffering(true); }
+  };
+
+  /** Yellow (or 0): jump back to the channel you watched before. */
+  Player.prototype.lastChannel = function () {
+    if (!this.prevCh) { NS.toast('Ingen tidigare kanal ännu', 'info'); return; }
+    this.tune(this.prevCh);
+  };
+  /** From an archived programme back to the channel's live broadcast. */
+  Player.prototype.toLive = function () {
+    var it = this.item;
+    NS.router.replace(new Player({ item: it.ch, list: it.chList || [it.ch], cat: it.ch.cat }));
+  };
+
   Player.prototype.zap = function (dir) {
     if (this.list.length < 2) return;
     var id = this.item.id;
@@ -811,6 +946,7 @@
   };
   Player.prototype.tune = function (it, list) {
     if (list) this.list = list;
+    if (this.item && this.item.id !== it.id) this.prevCh = this.item;
     this.play(it, 0);
     var self = this;
     this.zapEl.innerHTML = '';
@@ -957,6 +1093,7 @@
   Player.prototype.hideError = function () { this.errShown = false; this.errEl.classList.remove('on'); };
   Player.prototype.retry = function () {
     this.hideError();
+    if (this.item.t === 'catchup') { this.play(this.item, this.cur()); return; }
     this.si = 0;
     if (!this.sources) return this.play(this.item, this.start);
     this.startSource(this.live ? 0 : this.cur() || this.start);
@@ -965,6 +1102,14 @@
   /* ------------------------------------------------------------ keys */
   Player.prototype.onKey = function (a, e) {
     var v = this.video;
+    this.autoCount = 0;
+    if (this.skipOn && a === 'ok' && !this.panel && !this.nextOn && (!this.osdOn || (this.zone === 'bar' && (this.scrubbing === null || this.scrubbing === undefined)))) { this.skipIntro(); return; }
+    if (this.nextOn && (a === 'left' || a === 'right')) {
+      this.nextI = a === 'right' ? 1 : 0;
+      this.nextBtns.forEach(function (b, i) { b.classList.toggle('focus', i === this.nextI); }, this);
+      return;
+    }
+    if (this.nextOn && a === 'ok') { if (this.nextI === 1) { this.nextDismissed = true; this.hideNext(); } else this.playNext(true); return; }
     if (this.errShown) {
       if (a === 'left' || a === 'right') { this.errI = 1 - this.errI; this.errBtns.forEach(function (b, i) { b.classList.toggle('focus', i === this.errI); }, this); }
       else if (a === 'ok') { if (this.errI === 0) this.retry(); else this.exit(); }
@@ -1002,18 +1147,19 @@
       if (a === 'up' || a === 'chup') this.zap(1);
       else if (a === 'down' || a === 'chdn') this.zap(-1);
       else if (a === 'ok' || a === 'left') this.openChannels();
-      else if (a === 'right') {
-        var o = this.trackOptions();
-        if (o.audio.length > 1 || o.subs.length > 1) this.openTracks(); else this.showOsd();
-      } else if (a === 'back') this.exit();
+      else if (a === 'right') this.openTracks();
+      else if (a === 'yellow' || a === 'num0' && !this.numBuf) { this.lastChannel(); }
+      else if (a === 'back') this.exit();
       else if (a.indexOf('num') === 0) this.numKey(a.slice(3));
-      else if (a === 'info' || a === 'blue') { if (this.osdOn) this.hideOsd(); else this.showOsd(); }
+      else if (a === 'info' || a === 'blue') { NS.router.push(new NS.Guide({ cat: this.cat, player: this })); }
+      else if (a === 'green') { var it0 = this.item; NS.toggleList(it0).then(function () { NS.state.dirty = true; }); }
+      else if (a === 'red') this.restartProgramme();
       return;
     }
 
     // VOD
     if (this.nextOn) {
-      if (a === 'ok') { this.playNext(); return; }
+      if (a === 'ok') { this.playNext(true); return; }
       if (a === 'back') { this.nextDismissed = true; this.hideNext(); return; }
     }
     if (a === 'back') {
@@ -1046,6 +1192,45 @@
     this.showOsd(true);
   };
 
+  /* ------------------------------------------------------------ skip intro (learned per series) */
+  // When someone jumps 30–150 s forward during the first 6 minutes of an episode, remember it as the intro
+  // and offer "Hoppa över intro" at the same spot in the next episodes.
+  Player.prototype.learnIntro = function (from, to) {
+    var it = this.item, self = this;
+    if (it.t !== 'episode' || !it.sid) return;
+    var jump = to - from;
+    // jumped back shortly after skipping: the intro guess was wrong
+    if (this.skippedAt && Date.now() - this.skippedAt < 20000 && jump < -15) {
+      this.skippedAt = 0;
+      NS.api.post('api/intro/' + encodeURIComponent(it.sid), { bad: true }).then(function (r) { NS.introCache[it.sid] = r && r.to ? r : null; }).catch(function () {});
+      return;
+    }
+    if (from > 420 || jump < 20 || jump > 180) return;
+    NS.api.post('api/intro/' + encodeURIComponent(it.sid), { from: from, to: to }).then(function (r) { NS.introCache[it.sid] = r && r.to ? r : null; self.introTick(); }).catch(function () {});
+  };
+  Player.prototype.introTick = function () {
+    var it = this.item, self = this;
+    if (it.t !== 'episode' || !it.sid || !this.skipEl) return;
+    if (!(it.sid in NS.introCache)) {
+      NS.introCache[it.sid] = null;
+      NS.api.get('api/intro/' + encodeURIComponent(it.sid)).then(function (r) { NS.introCache[it.sid] = r && r.to ? r : null; }).catch(function () {});
+      return;
+    }
+    var iv = NS.introCache[it.sid];
+    var c = this.cur();
+    var on = !!iv && c >= iv.from && c < iv.to - 3 && !this.introDone;
+    if (on !== this.skipOn) { this.skipOn = on; this.skipEl.classList.toggle('on', on); }
+  };
+  Player.prototype.skipIntro = function () {
+    var iv = NS.introCache[this.item.sid];
+    if (!iv) return;
+    this.introDone = true;
+    this.skippedAt = Date.now();
+    this.skipOn = false;
+    this.skipEl.classList.remove('on');
+    this.seekTo(iv.to);
+  };
+
   /* ------------------------------------------------------------ touch controls (phones/tablets) */
   Player.prototype.touchUi = function () {
     var self = this;
@@ -1069,13 +1254,15 @@
     }
     this.tPlay = btn('tplay', 'pause', function () { if (self.video.paused) self.playPromise(); else self.video.pause(); }, 'Spela/pausa');
     var mid = this.live
-      ? [btn('tside', 'up', function () { self.zap(1); }, 'Föregående kanal'), this.tPlay, btn('tside', 'down', function () { self.zap(-1); }, 'Nästa kanal')]
+      ? [btn('tside', 'up', function () { self.zap(1); }, 'Nästa kanal'), this.tPlay, btn('tside', 'down', function () { self.zap(-1); }, 'Föregående kanal')]
       : [btn('tside', 'rw', function () { self.seekTo(self.cur() - 10); }, 'Bakåt 10 s'), this.tPlay, btn('tside', 'ff', function () { self.seekTo(self.cur() + 10); }, 'Framåt 10 s')];
     this.osd.appendChild(h('div', { class: 'tmid' }, mid));
     if (this.live) {
       this.osd.appendChild(h('div', { class: 'tlive' }, [
         h('button', { class: 'btn', onclick: function (e) { e.stopPropagation(); self.openChannels(); } }, [NS.icon('episodes'), 'Kanaler']),
-        h('button', { class: 'btn', onclick: function (e) { e.stopPropagation(); self.openTracks(); } }, [NS.icon('sub'), 'Ljud'])
+        h('button', { class: 'btn', onclick: function (e) { e.stopPropagation(); self.openTracks(); } }, [NS.icon('sub'), 'Ljud']),
+        this.item.arc ? h('button', { class: 'btn', onclick: function (e) { e.stopPropagation(); self.restartProgramme(); } }, [NS.icon('restart'), 'Starta om']) : null,
+        h('button', { class: 'btn', onclick: function (e) { e.stopPropagation(); if (NS.mOpenLive) NS.mOpenLive(self.cat); else self.exit(); } }, [NS.icon('episodes'), 'Tv-guide'])
       ]));
     }
     var sync = function () { self.tPlay.innerHTML = ''; self.tPlay.appendChild(NS.icon(self.video.paused ? 'play' : 'pause')); };
@@ -1103,12 +1290,22 @@
       this.bar.addEventListener('mousedown', down);
       window.addEventListener('mousemove', move);
       window.addEventListener('mouseup', up);
+      this._winOff = function () { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
     }
     // channel list: tap the arrows to switch category, tap outside to close
     this.side.addEventListener('click', function (e) {
       var arr = e.target.closest && e.target.closest('.arr');
       if (arr) { var r = arr.getBoundingClientRect(); self.switchCat(e.clientX < r.left + r.width / 2 ? -1 : 1); }
     });
+    // phones: go full screen sideways right away (we are still inside the tap that started playback)
+    var portrait = window.innerHeight > window.innerWidth;
+    if (portrait && (el.requestFullscreen || el.webkitRequestFullscreen) && !/[?&]nofs/.test(location.search)) {
+      try {
+        var fr = (el.requestFullscreen || el.webkitRequestFullscreen).call(el);
+        if (fr && fr.then) fr.then(function () { if (screen.orientation && screen.orientation.lock) screen.orientation.lock('landscape').catch(function () {}); }).catch(function () {});
+      } catch (e) { /* not allowed: controls still work in portrait */ }
+    }
+    this.showOsd();
     var closer = function (e) { if (self.panel && !(e.target.closest && e.target.closest('.panel-side, .tlive, .obtns'))) { e.stopPropagation(); self.closePanel(); } };
     el.addEventListener('click', closer, true);
   };

@@ -3,18 +3,18 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0c111c">
+<meta name="theme-color" content="#000000">
 <title>Inställningar</title>
 <link rel="preload" href="fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
 <style>
 @font-face { font-family: 'Inter'; src: url('fonts/inter-latin-wght-normal.woff2') format('woff2'); font-weight: 100 900; font-display: swap; }
 @font-face { font-family: 'Inter'; src: url('fonts/inter-latin-ext-wght-normal.woff2') format('woff2'); font-weight: 100 900; font-display: swap; unicode-range: U+0100-02AF, U+1E00-1EFF; }
 :root {
-  --natt: #0c111c; --skymning: #172031; --skymning-2: #222d42; --is: #eef3f8; --frost: #93a1b5; --frost-dim: #64728a;
+  --natt: #000000; --skymning: #141414; --skymning-2: #2a2a2a; --is: #ffffff; --frost: #a3a3a3; --frost-dim: #6d6d6d;
   --gron: #4ff0b4; --violett: #8f7bff; --fel: #ff8a96; --aurora: linear-gradient(90deg, var(--gron), var(--violett));
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { background: var(--natt); color: var(--is); font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; font-size: 16px; line-height: 1.5; -webkit-font-smoothing: antialiased; padding: 0 16px calc(110px + env(safe-area-inset-bottom)); }
+body { background: var(--natt); color: var(--is); font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; font-size: 16px; line-height: 1.5; -webkit-font-smoothing: antialiased; padding: 0 16px 0; }
 main { max-width: 640px; margin: 0 auto; }
 header { display: flex; align-items: center; gap: 12px; padding: 28px 0 8px; }
 header svg { width: 34px; height: 34px; flex: none; }
@@ -63,6 +63,8 @@ input:focus, select:focus { border-color: var(--violett); }
 .prof .av { width: 48px; height: 48px; border-radius: 12px; border: 0; flex: none; font: inherit; font-weight: 800; font-size: 20px; color: var(--natt); cursor: pointer; }
 .prof input[type=text] { flex: 1; min-width: 0; }
 .prof .kid { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 11px; color: var(--frost); }
+.prof .lock { width: 40px; height: 40px; border-radius: 50%; border: 1.5px solid var(--skymning-2); background: transparent; color: var(--frost); font-size: 16px; cursor: pointer; flex: none; }
+.prof .lock.on { background: var(--is); color: var(--natt); border-color: var(--is); }
 .prof .rm { width: 40px; height: 40px; border-radius: 50%; border: 0; background: transparent; color: var(--frost); font-size: 22px; cursor: pointer; flex: none; }
 details { margin-top: 12px; }
 summary { cursor: pointer; font-weight: 650; color: #c9d3df; padding: 10px 0; }
@@ -82,14 +84,14 @@ summary { cursor: pointer; font-weight: 650; color: #c9d3df; padding: 10px 0; }
 .steps li { margin-top: 8px; }
 .steps code, .addr { font-family: inherit; font-weight: 700; color: var(--is); background: var(--natt); padding: 2px 8px; border-radius: 6px; word-break: break-all; }
 .addr { display: block; padding: 12px 14px; margin-top: 10px; font-size: 17px; border: 1.5px solid var(--skymning-2); }
-.savebar { position: fixed; left: 0; right: 0; bottom: 0; padding: 14px 16px calc(14px + env(safe-area-inset-bottom)); background: linear-gradient(0deg, var(--natt) 70%, rgba(12,17,28,0)); display: flex; justify-content: center; }
+.savebar { position: sticky; margin: 24px -16px 0; bottom: 0; padding: 14px 16px calc(14px + env(safe-area-inset-bottom)); background: linear-gradient(0deg, var(--natt) 70%, rgba(0,0,0,0)); display: flex; justify-content: center; }
 .savebar .inner { width: 100%; max-width: 640px; display: flex; gap: 12px; align-items: center; }
 .savebar .btn { flex: 1; height: 54px; font-size: 17px; }
 .status { font-size: 14px; color: var(--frost); min-height: 20px; margin-top: 8px; }
 .spin { display: inline-block; width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--skymning-2); border-top-color: var(--gron); animation: s .8s linear infinite; vertical-align: -2px; margin-right: 8px; }
 @keyframes s { to { transform: rotate(360deg); } }
 .hidden { display: none !important; }
-.pin { position: fixed; inset: 0; background: rgba(6,9,15,.92); display: flex; align-items: center; justify-content: center; padding: 24px; z-index: 10; }
+.pin { position: fixed; inset: 0; background: rgba(0,0,0,.92); display: flex; align-items: center; justify-content: center; padding: 24px; z-index: 10; }
 .pin .box { width: 100%; max-width: 360px; background: var(--skymning); border-radius: 18px; padding: 24px; }
 </style>
 </head>
@@ -133,7 +135,7 @@ summary { cursor: pointer; font-weight: 650; color: #c9d3df; padding: 10px 0; }
 
   <section>
     <h2>Profiler</h2>
-    <p class="sub">Varje profil får egen lista och egen historik. Barnprofiler visar bara barnkategorier.</p>
+    <p class="sub">Varje profil får egen lista och egen historik. Barnprofiler visar bara barnkategorier. Låset ger profilen en PIN-kod.</p>
     <div id="profList"></div>
     <div class="row" style="margin-top:14px"><button type="button" class="btn small" id="addProf">Lägg till profil</button></div>
   </section>
@@ -286,14 +288,32 @@ summary { cursor: pointer; font-weight: 650; color: #c9d3df; padding: 10px 0; }
       kid.className = 'kid';
       kid.innerHTML = '<span class="sw"><input type="checkbox"' + (p.kids ? ' checked' : '') + '><i></i></span>Barn';
       kid.querySelector('input').onchange = function (e) { p.kids = e.target.checked; };
+      var lock = document.createElement('button');
+      lock.type = 'button';
+      var locked = p.pin !== undefined ? !!p.pin : !!p.hasPin;
+      lock.className = 'lock' + (locked ? ' on' : '');
+      lock.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="' + (locked ? 'M8 11V8a4 4 0 0 1 8 0v3' : 'M8 11V8a4 4 0 0 1 7.5-2') + '"/></svg>';
+      lock.title = locked ? 'PIN-kod satt – klicka för att ändra eller ta bort' : 'Lägg till PIN-kod (4 siffror)';
+      lock.onclick = function () {
+        var v = window.prompt(locked ? 'Ny PIN-kod (4 siffror), eller lämna tomt för att ta bort koden' : 'Välj en PIN-kod med 4 siffror för ' + (p.name || 'profilen'), '');
+        if (v === null) return;
+        v = v.replace(/\D/g, '');
+        if (v && v.length !== 4) { window.alert('PIN-koden måste vara exakt 4 siffror.'); return; }
+        p.pin = v; renderProfiles();
+      };
       var rm = document.createElement('button');
       rm.type = 'button'; rm.className = 'rm'; rm.textContent = '×'; rm.title = 'Ta bort profil';
       rm.disabled = profiles.length < 2;
       rm.onclick = function () { profiles.splice(i, 1); renderProfiles(); };
-      row.appendChild(av); row.appendChild(name); row.appendChild(kid); row.appendChild(rm);
+      row.appendChild(av); row.appendChild(name); row.appendChild(kid); row.appendChild(lock); row.appendChild(rm);
       box.appendChild(row);
     });
     $('addProf').disabled = profiles.length >= 8;
+    var kids = profiles.some(function (p) { return p.kids; });
+    var lockedAdult = profiles.some(function (p) { return !p.kids && (p.pin !== undefined ? p.pin : p.hasPin); });
+    var warn = $('profWarn');
+    if (!warn) { warn = document.createElement('p'); warn.id = 'profWarn'; warn.className = 'sub'; warn.style.color = 'var(--fel)'; box.parentNode.insertBefore(warn, box.nextSibling); }
+    warn.textContent = kids && !lockedAdult ? 'Tips: ge minst en vuxenprofil en PIN-kod (låset), annars kan barnen byta till den profilen fritt.' : '';
   }
   $('addProf').onclick = function () {
     profiles.push({ id: 'p' + Date.now().toString(36), name: '', color: COLORS[profiles.length % COLORS.length], kids: false });
@@ -307,7 +327,8 @@ summary { cursor: pointer; font-weight: 650; color: #c9d3df; padding: 10px 0; }
       source: source,
       xtream: { server: $('xServer').value.trim(), username: $('xUser').value.trim(), password: $('xPass').value },
       m3u: { url: $('mUrl').value.trim(), epgUrl: $('mEpg').value.trim() },
-      profiles: profiles.filter(function (p) { return p.name.trim(); }),
+      // the PIN is only sent when it was changed here; otherwise the server keeps the old one
+      profiles: profiles.filter(function (p) { return p.name.trim(); }).map(function (p) { var o = { id: p.id, name: p.name, color: p.color, kids: p.kids }; if (p.pin !== undefined) o.pin = p.pin; return o; }),
       options: {
         appName: $('appName').value.trim(), hideAdult: $('hideAdult').checked, cleanNames: $('cleanNames').checked,
         liveFormat: $('liveFormat').value, maxRes: $('maxRes').value, previews: $('previews').value, directPlay: $('directPlay').value, audioMode: $('audioMode').value, userAgent: $('ua').value.trim(),
@@ -449,7 +470,7 @@ summary { cursor: pointer; font-weight: 650; color: #c9d3df; padding: 10px 0; }
     $('ua').value = o.userAgent || '';
     $('epgUrl').value = o.epgUrl || '';
     $('kidsPattern').value = o.kidsPattern || '';
-    profiles = (cfg.profiles || []).map(function (p) { return { id: p.id, name: p.name, color: p.color, kids: p.kids }; });
+    profiles = (cfg.profiles || []).map(function (p) { return { id: p.id, name: p.name, color: p.color, kids: p.kids, hasPin: p.hasPin }; });
     renderProfiles();
     setSource(cfg.source || 'xtream');
   }

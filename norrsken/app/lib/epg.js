@@ -66,7 +66,7 @@ class Epg {
 
   /** Stream-parse an XMLTV file (plain or gzipped). Keeps a window around now. */
   async load(url, { wanted, ua, timeout = 600000, now = Date.now() } = {}) {
-    const from = now - 3 * 3600e3;
+    const from = now - 3 * 86400e3; // three days back, for catch-up
     const to = now + 36 * 3600e3;
     const map = new Map();
     let count = 0;

@@ -412,3 +412,159 @@ video.pv.on { opacity: 1; }
 .player .tap-play { position: absolute; z-index: 9; left: 50%; top: 50%; width: 16rem; height: 16rem; margin: -8rem 0 0 -8rem; border-radius: 50%; border: 0; background: rgba(255,255,255,.92); color: #111; font-size: 7rem; display: grid; place-items: center; cursor: pointer; }
 html.m .player .unmute { right: 16px; bottom: calc(110px + env(safe-area-inset-bottom)); }
 html.m .player .tap-play { width: 84px; height: 84px; margin: -42px 0 0 -42px; font-size: 40px; }
+
+/* ------------------------------------------------------------ round 1 polish */
+/* detail: deep scroll to "more like this", clearer focus, readable episodes */
+.detail .rowsonly { transition: transform 420ms var(--ease); }
+.detail .dinfo { transition: opacity 300ms var(--ease); }
+.detail.deep .dinfo, .detail.deep .dbg { opacity: 0 !important; }
+.detail .btn { background: rgba(255,255,255,.18); color: var(--white); }
+.detail .btn.focus { background: var(--white); color: #111; transform: scale(1.05); }
+.k-episode .card .etxt b { color: var(--white); font-size: 2.5rem; }
+.k-episode .card .etxt span { color: #bcbcbc; font-size: 2.1rem; }
+/* top 10: readable numbers, title under the row */
+.k-top10 .card .num { color: #000; -webkit-text-stroke: .45rem #8c8c8c; font-weight: 900; }
+.k-top10 .card.focus .num { -webkit-text-stroke-color: #e6e6e6; }
+/* active nav pill only when focus is elsewhere: a quiet underline instead of a second pill */
+.topnav .nv.active { background: transparent; color: var(--white); font-weight: 800; box-shadow: inset 0 -.35rem 0 rgba(255,255,255,.85); border-radius: 0; height: 4.4rem; padding: 0 1.6rem; margin: 0 1.4rem; }
+.topnav .nv.active.focus { background: var(--white); color: #111; box-shadow: none; border-radius: 3rem; height: 6rem; padding: 0 3rem; margin: 0; }
+/* menus and PIN */
+.menu-box { width: 70rem; }
+.menu-list { display: flex; flex-direction: column; gap: 1rem; margin-top: 3rem; }
+.menu-list .btn { justify-content: flex-start; width: 100%; background: rgba(255,255,255,.08); }
+.menu-list .btn.focus { background: var(--white); color: #111; }
+.menu-cancel { margin-top: 2.4rem; text-align: center; color: var(--muted); font-size: 2.2rem; cursor: pointer; }
+.pin-box { width: 64rem; text-align: center; }
+.pin-msg { margin-top: 1rem; }
+.pin-dots { display: flex; justify-content: center; gap: 2.4rem; margin: 3.4rem 0; }
+.pin-dots i { width: 2.6rem; height: 2.6rem; border-radius: 50%; border: .3rem solid var(--white); }
+.pin-dots i.on { background: var(--white); }
+.pin-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.2rem; }
+.pin-key { height: 8rem; font-size: 3.4rem; width: 100%; }
+.pin-input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+.shake { animation: shake 360ms; }
+@keyframes shake { 20%, 60% { transform: translateX(-1.4rem); } 40%, 80% { transform: translateX(1.4rem); } }
+.profiles .p-gear .av { background: rgba(255,255,255,.1); color: var(--white); font-size: 8rem; }
+/* category pills on the films/series pages */
+.k-pill .card .frame { border: .2rem solid rgba(255,255,255,.22); }
+
+/* ------------------------------------------------------------ category grid */
+.grid-head { position: absolute; left: var(--x); top: 6rem; display: flex; align-items: baseline; gap: 2rem; z-index: 5; }
+.grid-head h1 { font-size: 5.2rem; font-weight: 900; letter-spacing: -0.02em; }
+.grid-count { color: var(--muted); font-size: 2.4rem; }
+.grid-page { top: 21rem; }
+.grid-info { position: absolute; left: var(--x); right: var(--x); top: 13.4rem; z-index: 5; display: flex; align-items: baseline; gap: 2rem; white-space: nowrap; overflow: hidden; }
+.grid-info b { font-size: 2.8rem; font-weight: 800; overflow: hidden; text-overflow: ellipsis; }
+.grid-info .meta { font-size: 2.2rem; }
+.grid-page .card.focus .frame { outline: .4rem solid var(--white); outline-offset: .3rem; }
+.grid-page .k-poster .card .badge { opacity: 1; }
+
+/* ------------------------------------------------------------ tv guide */
+.guide { background: var(--bg); }
+.gd-top { position: absolute; left: var(--x); right: var(--x); top: 4.4rem; display: flex; align-items: center; gap: 4rem; }
+.gd-top h1 { font-size: 4.4rem; font-weight: 900; letter-spacing: -0.02em; white-space: nowrap; }
+.gd-pills { display: flex; gap: .8rem; overflow: hidden; }
+.gd-pills .nv { height: 5.4rem; padding: 0 2.6rem; border-radius: 2.7rem; display: flex; align-items: center; font-size: 2.3rem; font-weight: 600; color: var(--text-2); white-space: nowrap; }
+.gd-pills .nv.active { background: var(--pill); color: var(--white); }
+.gd-pills .nv.focus { background: var(--white); color: #111; }
+.gd-info { position: absolute; left: var(--x); right: 40rem; top: 14rem; height: 20rem; }
+.gd-info h2 { font-size: 4.6rem; font-weight: 900; letter-spacing: -0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gd-info .meta { margin-top: 1.2rem; }
+.gd-info p { margin-top: 1.4rem; font-size: 2.4rem; color: var(--text-2); max-width: 110rem; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.gd-grid { position: absolute; left: var(--x); right: var(--x); top: 36rem; bottom: 8rem; }
+.gd-ruler { position: absolute; left: 0; right: 0; top: 0; height: 4rem; }
+.gd-ruler span { position: absolute; top: 0; font-size: 2rem; color: var(--muted); font-variant-numeric: tabular-nums; padding-left: .6rem; border-left: .2rem solid rgba(255,255,255,.2); }
+.gd-body { position: absolute; left: 0; right: 0; top: 5rem; bottom: 0; overflow: hidden; }
+.gd-row { position: absolute; left: 0; right: 0; height: 9.6rem; }
+.gd-ch { position: absolute; left: 0; top: 0; width: 33rem; height: 100%; display: flex; align-items: center; gap: 1.4rem; padding: 0 1.4rem; border-radius: 1rem; background: rgba(255,255,255,.04); }
+.gd-row.active .gd-ch { background: rgba(255,255,255,.12); }
+.gd-ch .n { width: 4.4rem; text-align: right; font-size: 2.2rem; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; }
+.gd-ch .l { width: 9rem; height: 5.6rem; display: grid; place-items: center; flex: none; }
+.gd-ch .l img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.gd-ch .l b { font-size: 1.8rem; text-align: center; }
+.gd-ch .nm { flex: 1; min-width: 0; font-size: 2.1rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gd-ch .fav { color: #f5c518; font-size: 2.2rem; }
+.gd-lane { position: absolute; left: 34rem; right: 0; top: 0; bottom: 0; overflow: hidden; }
+.gd-p { position: absolute; top: 0; bottom: 0; border-radius: 1rem; background: rgba(255,255,255,.07); padding: 1.4rem 1.6rem; overflow: hidden; }
+.gd-p b { display: block; font-size: 2.3rem; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gd-p span { display: block; font-size: 1.9rem; color: var(--muted); margin-top: .4rem; white-space: nowrap; }
+.gd-p.live { background: rgba(255,255,255,.13); }
+.gd-p.past { opacity: .55; }
+.gd-p.empty { color: var(--muted); font-size: 2rem; display: flex; flex-direction: column; justify-content: center; }
+.gd-p.focus { background: var(--white); color: #111; opacity: 1; }
+.gd-p.focus span { color: #444; }
+.gd-prog { position: absolute; left: 0; bottom: 0; height: .5rem; background: var(--red); }
+.gd-now { position: absolute; top: 4rem; bottom: 0; width: .3rem; background: var(--red); z-index: 2; pointer-events: none; }
+.gd-hint { position: absolute; left: var(--x); bottom: 2.4rem; display: flex; gap: 4rem; font-size: 2.1rem; color: var(--muted); }
+.gd-hint kbd { font: inherit; font-weight: 800; color: var(--white); margin-right: 1rem; }
+.gd-hint kbd.g { color: #3ccf4e; }
+
+/* player: controls inside the TV safe area */
+.osd .bar { bottom: 23rem; }
+.osd .times { bottom: 17.4rem; }
+.osd .obtns { bottom: 8rem; }
+.osd .obtns .btn.focus { transform: scale(1.06); }
+.skip-intro { position: absolute; right: 12rem; bottom: 28rem; z-index: 8; display: none; }
+.skip-intro.on { display: inline-flex; }
+.player .zap { display: none; }
+
+/* ---- round 2: bigger channel logos ---- */
+.k-live .card .logo { top: 2.6rem; width: 30rem; height: 13rem; margin-left: -15rem; filter: drop-shadow(0 .4rem 1.2rem rgba(0,0,0,.45)); }
+.k-live .card .lnow { font-size: 2.2rem; }
+.gd-arc { display: inline-flex; vertical-align: -0.2em; margin-right: .6rem; color: var(--text-2); }
+.gd-arc svg { width: 1.8rem; height: 1.8rem; }
+.gd-ch .l { width: 12rem; height: 6.8rem; }
+.seen-badge { position: absolute; left: 1.2rem; top: 1.2rem; display: inline-flex; align-items: center; gap: .6rem; padding: .4rem 1rem; border-radius: .6rem; background: rgba(0,0,0,.72); font-size: 1.6rem; font-weight: 700; }
+.seen-badge svg { width: 1.8rem; height: 1.8rem; color: #3ccf4e; }
+.card .qbadge { position: absolute; right: 1rem; top: 1rem; padding: .2rem .8rem; border-radius: .5rem; background: rgba(0,0,0,.7); border: .15rem solid rgba(255,255,255,.5); font-size: 1.5rem; font-weight: 800; letter-spacing: .05em; }
+/* round 3: the backdrop/preview fades in from the left instead of starting at a hard edge */
+.detail .dbg-left { position: absolute; z-index: 1; left: 0; top: 0; width: 100%; height: 82rem; pointer-events: none;
+  background: linear-gradient(90deg, var(--bg) 0%, var(--bg) 27%, rgba(5,5,5,.88) 36%, rgba(5,5,5,.45) 50%, rgba(5,5,5,0) 66%); }
+.detail .dinfo { z-index: 2; }
+/* secondary buttons stay readable on bright artwork */
+.detail .dbtns .btn:not(.focus), .billboard .btn:not(.focus) { background: rgba(38,38,38,.78); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); color: #fff; }
+/* round 3: billboard buttons always visible under the text, focus on the button rather than the whole card */
+.billboard .txt .hint { position: static; margin-top: 3.2rem; opacity: 1; display: flex; gap: 1.4rem; }
+.billboard.focus::after { opacity: 0; }
+.billboard .hint .btn.focus { background: var(--white); color: #111; }
+.billboard.focus .hint .btn.focus { transform: scale(1.06); box-shadow: 0 0 0 .4rem rgba(255,255,255,.35); }
+.billboard .txt { bottom: 5rem; }
+/* round 3: a clearly focused seek bar */
+.osd .bar { transition: height 150ms; }
+.osd .bar.focus { height: 1.6rem; margin-bottom: -.3rem; }
+.osd .bar.focus .knob { transform: scale(1.45); box-shadow: 0 0 0 .5rem rgba(255,255,255,.85); }
+.osd .bar.focus .bubble { display: block; }
+.osd .obtns .btn:not(.focus) { background: rgba(255,255,255,.12); color: #fff; }
+.gd-pv { position: absolute; right: var(--x); top: 3rem; width: 46rem; height: 25.9rem; border-radius: 1.4rem; overflow: hidden; background: #111; box-shadow: 0 1rem 3rem rgba(0,0,0,.5); }
+.gd-pv .gd-pvlogo { position: absolute; left: 25%; top: 25%; width: 50%; height: 50%; object-fit: contain; }
+.gd-pv video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.gd-info { right: 52rem; }
+.gd-top { right: 52rem; }
+.menu-head { display: flex; align-items: center; gap: 2rem; }
+.menu-thumb { width: 9rem; height: 13.5rem; object-fit: cover; border-radius: .8rem; flex: none; }
+.grid-page { bottom: 0; overflow: hidden; padding-top: 1rem; }
+.gd-ruler span.day { color: var(--white); font-weight: 800; text-transform: capitalize; }
+.gd-info .tag svg { width: 1.8rem; height: 1.8rem; vertical-align: -.25em; }
+.gd-info .tag.off { opacity: .6; }
+.detail .ep-hint { position: absolute; z-index: 30; right: var(--x); bottom: 3rem; font-size: 2rem; color: var(--text-2); opacity: 0; transition: opacity 200ms; }
+.detail .ep-hint kbd { display: inline-block; padding: .2rem .8rem; border-radius: .5rem; background: rgba(255,255,255,.16); color: #fff; font: inherit; font-weight: 700; }
+.detail.eps-focus .ep-hint { opacity: 1; }
+/* ---- round 4: legibility over video, layout fixes ---- */
+.osd .top { height: 30rem; background: linear-gradient(180deg, rgba(0,0,0,.85) 0%, rgba(0,0,0,.45) 55%, rgba(0,0,0,0) 100%); }
+.osd .bottom { height: 58rem; background: linear-gradient(0deg, rgba(0,0,0,.95) 0%, rgba(0,0,0,.8) 30%, rgba(0,0,0,.45) 60%, rgba(0,0,0,0) 100%); }
+.osd .obtns .btn:not(.focus) { background: rgba(255,255,255,.14); }
+.osd .chan { align-items: center; }
+.osd .chan .clogo img { max-width: 80%; max-height: 72%; object-fit: contain; }
+.osd .hint { color: #c9c9c9; }
+.panel-side { background: rgba(12,12,12,.97); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); }
+.panel-side.right { background: rgba(12,12,12,.97); }
+.chlist .ci .prog { width: 100%; }
+.rowinfo.t10 .desc { -webkit-line-clamp: 1; }
+.rowinfo.t10 .big { font-size: 3.2rem; }
+.billboard.focus .hint .btn.focus { box-shadow: none; transform: scale(1.06); }
+.k-episode .card:not(.focus) .etxt b { opacity: .85; }
+.k-episode .card .etxt span { color: #c4c4c4; }
+.detail.deep .dbg, .detail.deep .dpv { opacity: .2 !important; }
+.detail.deep::before { content: ''; position: absolute; inset: 0; z-index: 1; background: rgba(0,0,0,.55); pointer-events: none; }
+.gd-bell svg, .gd-arc svg { width: 1.8rem; height: 1.8rem; }
+.grid-page { -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 2.4rem); mask-image: linear-gradient(180deg, transparent 0, #000 2.4rem); padding-bottom: 1rem; }

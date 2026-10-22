@@ -7,7 +7,14 @@
     NS.status = st;
     if (st.appName) document.title = st.appName;
     var profiles = st.profiles || [];
-    if (profiles.length === 1) {
+    // the kids profile stays on after a restart: leaving it always needs a parent's PIN
+    var last = profiles.filter(function (p) { return p.id === NS.store.get('profile', ''); })[0];
+    if (last && last.kids && profiles.length > 1) {
+      NS.profile = last;
+      NS.loadState().then(function () { NS.router.reset(new NS.Browse('home')); });
+      return;
+    }
+    if (profiles.length === 1 && !profiles[0].hasPin) {
       NS.profile = profiles[0];
       NS.loadState().then(function () { NS.router.reset(new NS.Browse('home')); });
     } else {
@@ -30,6 +37,9 @@
       var top = NS.router.top();
       if (top && top.rows && top.rows.refreshLive) top.rows.refreshLive();
     }, 60000);
+    setInterval(function () { NS.checkReminders(); }, 20000);
+    // pick up reminders set on other devices
+    setInterval(function () { if (NS.profile) NS.api.state().then(function (st) { NS.state.reminders = st.reminders || []; }).catch(function () {}); }, 120000);
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', NS.boot);

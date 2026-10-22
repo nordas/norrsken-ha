@@ -88,6 +88,9 @@ class Catalog {
     this.status.epgCount = this.epg.count;
     this.info = new LRU(800, 6 * 3600e3);
     this.shortEpg = new LRU(3000, 15 * 60e3);
+    this.people = new Map(Object.entries(store.readCache('people') || {}));
+    this._peopleTried = new Set();
+    this.fullEpg = new Map();
     this.lists = new Map();
     this.epIndex = new Map(); // episodeId → { u?, ext, sid }
     this.raw = null;
@@ -110,6 +113,8 @@ class Catalog {
   async load({ force = false } = {}) {
     if (this._loading) return this._loading;
     this._loading = (async () => {
+      // yield first: if everything below ran synchronously, the "finally" would clear _loading before it is even set
+      await null;
       if (!this.cfg.configured) return;
       const st = this.status;
       st.loading = true;
@@ -137,6 +142,7 @@ class Catalog {
         this._loading = null;
       }
       if (this.data) this.loadEpg({ force }).catch(() => {});
+      if (this.data) this.startPeopleIndex();
     })();
     return this._loading;
   }
@@ -148,6 +154,8 @@ class Catalog {
     const acct = await x.api('', {}, 30000);
     if (!acct || !acct.user_info || +acct.user_info.auth === 0) throw new Error('Inloggningen misslyckades – kontrollera användarnamn och lösenord');
     const out = { source: 'xtream', live: {}, movie: {}, series: {} };
+    out.tz = str(acct.server_info && acct.server_info.timezone);
+    out.maxConn = +(acct.user_info && acct.user_info.max_connections) || 0;
     const cats = (list) => arr(list).map(c => ({ id: str(c.category_id), name: str(c.category_name) }));
 
     this.stage('Hämtar kanaler…');
@@ -171,7 +179,7 @@ class Catalog {
     out.series.items = arr(await x.api('get_series', {}, 300000)).map(s => ({
       id: str(s.series_id), n: str(s.name), img: str(s.cover), cat: str(s.category_id),
       r: num(s.rating), add: +s.last_modified || 0, y: yearOf(s.releaseDate || s.release_date || s.year),
-      g: str(s.genre), p: str(s.plot), bd: firstOf(s.backdrop_path),
+      g: str(s.genre), p: str(s.plot), bd: firstOf(s.backdrop_path), c: (str(s.cast) + ' ' + str(s.director)).trim(),
     })).filter(i => i.id);
     return out;
   }
@@ -242,7 +250,7 @@ class Catalog {
     const opts = this.opts;
     let kidsRe = KIDS_RE;
     if (opts.kidsPattern) { try { kidsRe = new RegExp(opts.kidsPattern, 'i'); } catch (_) { /* keep default */ } }
-    const data = {};
+    const data = { tz: raw.tz || '', maxConn: raw.maxConn || 0 };
     for (const type of TYPES) {
       const src = raw[type] || { cats: [], items: [] };
       const d = { cats: [], items: [], byId: new Map(), byCat: new Map(), catById: new Map() };
@@ -259,12 +267,22 @@ class Catalog {
         it.k = PREFIX[type] + ':' + it.id;
         let n = cleanName(r.n, opts.cleanNames);
         if (type === 'movie' || type === 'series') {
-          const sy = splitYear(n);
+          const sy = splitYear(stripQuality(n) || n);
           n = sy.n;
           if (!it.y && sy.y) it.y = sy.y;
         }
         it.n = n || r.n || 'Okänd';
         it._f = fold(it.n);
+        if (it.c !== undefined) { if (it.c) this.people.set(PREFIX[type] + ':' + it.id, fold(it.c)); delete it.c; }
+        if (type === 'movie' || type === 'series') {
+          // quality from the name or the category ("4K", "UHD", "FHD"...), and a key that ignores it, to group versions
+          const catName = (src.cats || []).find(c => c.id === it.cat);
+          const q = qualityOf(r.n + ' ' + (catName ? catName.name : ''));
+          if (q) it.q = q;
+          it.n = stripQuality(it.n) || it.n;
+          it._f = fold(it.n);
+          it._nk = it._f.replace(/[^a-z0-9]+/g, ' ').trim() + '|' + (it.y || '');
+        }
         if (!d.catById.has(it.cat)) {
           const cat = { id: it.cat || '_', name: 'Övrigt', raw: 'Övrigt', adult: false, kids: false };
           it.cat = cat.id;
@@ -274,6 +292,7 @@ class Catalog {
         d.byId.set(it.id, it);
         d.items.push(it);
         d.byCat.get(it.cat).push(it);
+        if (it._nk) { const g = d.byNorm || (d.byNorm = new Map()); if (!g.has(it._nk)) g.set(it._nk, []); g.get(it._nk).push(it); }
       }
       if (type === 'live') {
         const hasNum = d.items.some(i => i.num);
@@ -307,6 +326,17 @@ class Catalog {
   }
 
   invalidate() { this.lists.clear(); }
+
+  /** Other versions (quality, language) of the same film or series, best quality first. */
+  versions(type, id, prof) {
+    const d = this.data && this.data[type];
+    const it = d && d.byId.get(id);
+    if (!it || !it._nk || !d.byNorm) return [];
+    const vis = new Set(this.visibleCats(type, prof).map(c => c.id));
+    return (d.byNorm.get(it._nk) || []).filter(x => vis.has(x.cat))
+      .map(x => ({ id: x.id, k: x.k, q: x.q || '', cat: (d.catById.get(x.cat) || {}).name || '', ext: x.ext }))
+      .sort((a, b) => (Q_RANK[b.q] || 0) - (Q_RANK[a.q] || 0));
+  }
 
   list(type, cat, prof) {
     const d = this.data && this.data[type];
@@ -356,12 +386,31 @@ class Catalog {
         const f = it._f;
         let ok = true;
         for (const t of tokens) if (f.indexOf(t) < 0) { ok = false; break; }
-        if (!ok) continue;
-        const score = f.startsWith(full) ? 0 : (' ' + f).indexOf(' ' + tokens[0]) >= 0 ? 1 : 2;
+        let score;
+        if (ok) score = f.startsWith(full) ? 0 : (' ' + f).indexOf(' ' + tokens[0]) >= 0 ? 1 : 2;
+        else {
+          // also find titles by genre and by actors/director
+          const more = fold(it.g || '') + ' ' + (this.people.get(it.k) || '');
+          if (!more.trim() || !tokens.every(t => more.indexOf(t) >= 0)) continue;
+          score = 3;
+          const byGenre = tokens.every(t => fold(it.g || '').indexOf(t) >= 0);
+          hits.push([score, it, byGenre ? 'genre' : 'people']);
+          continue;
+        }
         hits.push([score, it]);
       }
+      if (hits.length < 5) {
+        // forgive one typo per word ("malmfälen", "kebnekase") when the exact search finds little
+        const have = new Set(hits.map(x => x[1]));
+        for (const it of this.list(type, 'all', prof)) {
+          if (have.has(it)) continue;
+          const words = it._f.split(/[^a-z0-9]+/).filter(Boolean);
+          if (tokens.every(t => words.some(w => w.startsWith(t) || (t.length >= 4 && [0, 1, -1].some(dl => near1(t, w.slice(0, t.length + dl))))))) hits.push([5, it]);
+          if (hits.length > limit * 2) break;
+        }
+      }
       hits.sort((a, b) => a[0] - b[0] || a[1].n.length - b[1].n.length);
-      out[type] = hits.slice(0, limit).map(h => h[1]);
+      out[type] = dedupe(hits.map(h => (h[2] ? Object.assign({}, h[1], { why: h[2] }) : h[1]))).slice(0, limit);
     }
     return out;
   }
@@ -398,8 +447,31 @@ class Catalog {
       } catch (e) { /* fall back to basic item */ }
     }
     this.info.set(key, res);
+    if (res.cast || res.dir) this.people.set(key, fold((res.cast || '') + ' ' + (res.dir || '')));
     return res;
   }
+
+  /**
+   * Actors and directors for films only come with each film's details. Look them up slowly in the background
+   * (one request every few seconds, paused while anything plays) so search by actor works for the whole library.
+   */
+  startPeopleIndex() {
+    if (this._peopleT || this.cfg.source !== 'xtream') return;
+    let n = 0;
+    const step = async () => {
+      this._peopleT = setTimeout(step, 3000);
+      if (this._peopleT.unref) this._peopleT.unref();
+      if (!this.data || (this.isBusy && this.isBusy())) return;
+      const it = this.data.movie.items.find(x => !this.people.has(x.k) && !this._peopleTried.has(x.k));
+      if (!it) { clearTimeout(this._peopleT); this._peopleT = null; this.savePeople(); return; }
+      this._peopleTried.add(it.k);
+      try { await this.movieInfo(it.id); } catch (_) { /* skip */ }
+      if (++n % 40 === 0) this.savePeople();
+    };
+    this._peopleT = setTimeout(step, 30000);
+    if (this._peopleT.unref) this._peopleT.unref();
+  }
+  savePeople() { try { this.store.writeCache('people', Object.fromEntries(this.people)); } catch (_) { /* ignore */ } }
 
   async seriesInfo(id) {
     const it = this.get('series', id);
@@ -452,6 +524,25 @@ class Catalog {
     }
     this.info.set(key, res);
     return res;
+  }
+
+  /** May this profile watch it? (kids profiles only see kids categories) */
+  allowed(type, id, prof) {
+    let t = type, it;
+    if (type === 'episode') { const e = this.epIndex.get(String(id)); if (!e) return false; t = 'series'; it = this.get('series', e.sid); }
+    else it = this.get(type, id);
+    if (!it) return false;
+    return this.visibleCats(t, prof).some(c => c.id === it.cat);
+  }
+
+  /** Catch-up (Xtream timeshift): replay a programme that already started. */
+  timeshiftUrl(id, startSec, durMin) {
+    if (this.cfg.source !== 'xtream' || !startSec) return null;
+    const it = this.get('live', id);
+    if (!it || !it.arc) return null;
+    const stamp = tsStamp(startSec * 1000, this.data && this.data.tz);
+    const x = this.xtream();
+    return { primary: x.base + '/timeshift/' + x.seg() + '/' + Math.max(1, Math.round(durMin)) + '/' + stamp + '/' + id + '.ts', timeshift: true };
   }
 
   /** Provider URL for something playable. */
@@ -542,14 +633,56 @@ class Catalog {
     return out;
   }
 
-  async channelGuide(id, hours = 12) {
+  /** Programmes for one channel; reaches back as far as the channel's archive (max 3 days) so catch-up works. */
+  async channelGuide(id, hours = 12, backHours = 0) {
     const it = this.get('live', id);
     if (!it) return [];
     const now = Date.now();
-    if (it.epg && this.epg.has(it.epg)) return this.epg.range(it.epg, now - 3600e3, now + hours * 3600e3);
+    const back = Math.max(1, Math.min(72, backHours || (it.arc ? it.arc * 24 : 1))) * 3600e3;
+    if (it.epg && this.epg.has(it.epg)) return this.epg.range(it.epg, now - back, now + hours * 3600e3);
+    if (this.cfg.source === 'xtream') {
+      const c = this.fullEpg.get(id);
+      if (c && now - c.at < 20 * 60e3 && c.list.length) return c.list.filter(p => p.e > now - back);
+      if (!c || now - c.at >= 20 * 60e3) try {
+        const r = await this.xtream().api('get_simple_data_table', { stream_id: id }, 15000);
+        const list = arr(r && r.epg_listings).map(p => ({
+          t: b64decode(p.title), d: b64decode(p.description),
+          s: (+p.start_timestamp || Date.parse(p.start)) * (p.start_timestamp ? 1000 : 1),
+          e: (+p.stop_timestamp || Date.parse(p.end || p.stop)) * (p.stop_timestamp ? 1000 : 1),
+          a: +p.has_archive ? 1 : 0,
+        })).filter(p => p.s && p.e && p.e > now - 72 * 3600e3 && p.s < now + 36 * 3600e3).sort((a, b) => a.s - b.s);
+        if (this.fullEpg.size > 600) this.fullEpg.delete(this.fullEpg.keys().next().value);
+        this.fullEpg.set(id, { at: now, list });
+        if (list.length) return list.filter(p => p.e > now - back);
+      } catch (_) { this.fullEpg.set(id, { at: now, list: [] }); /* fall back to the short epg */ }
+    }
     await this.nowNext([id]);
     return this.shortEpg.get(id) || [];
   }
+}
+
+/** True when a and b differ by at most one letter (missing, extra or swapped for another). */
+function near1(a, b) {
+  if (a === b) return true;
+  if (Math.abs(a.length - b.length) > 1) return false;
+  let i = 0, j = 0, diff = 0;
+  while (i < a.length || j < b.length) {
+    if (i < a.length && j < b.length && a[i] === b[j]) { i++; j++; continue; }
+    if (++diff > 1) return false;
+    if (a.length > b.length) i++; else if (b.length > a.length) j++; else { i++; j++; }
+  }
+  return true;
+}
+
+/** One entry per title (other qualities are reachable as versions on the detail page). */
+function dedupe(list) {
+  const seen = new Set();
+  const out = [];
+  for (const it of list) {
+    if (it && it._nk) { if (seen.has(it._nk)) continue; seen.add(it._nk); }
+    out.push(it);
+  }
+  return out;
 }
 
 function pickNowNext(list, now) {
@@ -563,6 +696,32 @@ function pickNowNext(list, now) {
   return { now: cur, next };
 }
 
+const Q_RANK = { '4K': 4, FHD: 3, HD: 2, SD: 1 };
+function qualityOf(s) {
+  s = String(s || '');
+  if (/\b(4K|UHD|2160p?)\b/i.test(s)) return '4K';
+  if (/\b(FHD|1080p?)\b/i.test(s)) return 'FHD';
+  if (/\b(HD|720p?)\b/.test(s)) return 'HD';
+  if (/\bSD\b/.test(s)) return 'SD';
+  return '';
+}
+function stripQuality(n) {
+  return String(n || '').replace(/[\[(]?\b(4K|UHD|2160p?|FHD|1080p?|720p?|HEVC|H\.?265|HDR10?\+?|HDR|DV|Dolby Vision)\b[\])]?/gi, ' ')
+    .replace(/\s*[-|]\s*$/, '').replace(/\s{2,}/g, ' ').trim();
+}
+
+/** Xtream timeshift wants the start in the provider's own time zone: YYYY-MM-DD:HH-MM. */
+function tsStamp(ms, tz) {
+  let parts;
+  try {
+    parts = new Intl.DateTimeFormat('en-GB', { timeZone: tz || undefined, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+      .formatToParts(new Date(ms)).reduce((o, x) => { o[x.type] = x.value; return o; }, {});
+  } catch (_) {
+    return tsStamp(ms, undefined);
+  }
+  return parts.year + '-' + parts.month + '-' + parts.day + ':' + parts.hour + '-' + parts.minute;
+}
+
 function safeExt(e) { return /^[a-z0-9]{2,5}$/i.test(String(e || '')) ? String(e).toLowerCase() : ''; }
 
-module.exports = { Catalog, Xtream, normServer, xtreamFromM3uUrl, ADULT_RE, KIDS_RE, PREFIX };
+module.exports = { dedupe, Catalog, Xtream, tsStamp, qualityOf, stripQuality, Q_RANK, normServer, xtreamFromM3uUrl, ADULT_RE, KIDS_RE, PREFIX };

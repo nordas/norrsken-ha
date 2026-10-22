@@ -190,7 +190,7 @@
     this.txt = h('div', { class: 'txt' });
     this.el.appendChild(this.txt);
     this.hint = h('div', { class: 'hint' });
-    this.el.appendChild(this.hint);
+    this.sel = 0;
     this.el.addEventListener('click', function () { if (onOk) onOk(self.item); });
     this.height = 65;
   }
@@ -202,9 +202,12 @@
     t.appendChild(h('h1', { class: it.n.length > 22 ? 'long' : null, text: it.n }));
     t.appendChild(NS.metaEl(it));
     if (it.p) t.appendChild(h('div', { class: 'desc', text: it.p }));
+    // the buttons always show, under the text like on the streaming apps; left/right picks between them
     this.hint.innerHTML = '';
-    this.hint.appendChild(h('div', { class: 'btn focus' }, [NS.icon('play'), it.t === 'series' ? 'Spela upp serie' : 'Spela']));
-    this.hint.appendChild(h('div', { class: 'btn' }, [NS.icon('info'), 'Mer info']));
+    this.btnEls = [h('div', { class: 'btn' }, [NS.icon('play'), it.t === 'series' ? 'Spela upp serie' : 'Spela']), h('div', { class: 'btn' }, [NS.icon('info'), 'Mer info'])];
+    this.btnEls.forEach(function (b) { this.hint.appendChild(b); }, this);
+    t.appendChild(this.hint);
+    this.paintBtns();
     this.setArt(it.bd || it.img, !it.bd);
   };
   Billboard.prototype.setArt = function (u, maybePoster) {
@@ -224,7 +227,11 @@
     };
     im.src = NS.imgSrc(u);
   };
-  Billboard.prototype.focus = function (on) { this.el.classList.toggle('focus', on); };
+  Billboard.prototype.focus = function (on) { this.el.classList.toggle('focus', on); if (!on) this.sel = 0; this.paintBtns(); };
+  Billboard.prototype.paintBtns = function () {
+    var self = this;
+    (this.btnEls || []).forEach(function (b, i) { b.classList.toggle('focus', i === self.sel); });
+  };
   NS.Billboard = Billboard;
 
   /* ================================================================ ROWS */
@@ -263,6 +270,7 @@
         var ep = item.t === 'episode';
         f.appendChild(h('div', { class: 'xt' }, [h('small', {}, [NS.icon('aurora'), ep ? NS.epCode(item) + ' ' + item.n : NS.kindLabel(item)]), h('b', { text: ep ? item.sn || item.n : item.n })]));
         if (item.r > 0) f.appendChild(h('div', { class: 'badge' }, [NS.icon('star'), (Math.round(item.r * 10) / 10).toFixed(1)]));
+        if (item.q === '4K') f.appendChild(h('div', { class: 'qbadge', text: '4K' }));
         if (item.add && Date.now() / 1000 - item.add < 10 * 86400) c.appendChild(h('div', { class: 'nbadge', text: item.t === 'series' ? 'Nytt' : 'Ny' }));
         NS.itemColor(item).then(function (col) {
           xbg.style.background = 'linear-gradient(120deg, ' + NS.rgba(col, 1) + ' 0%, ' + NS.rgba(col.map(function (v) { return Math.round(v * 0.35); }), 1) + ' 70%)';
@@ -271,7 +279,12 @@
       }
       var pr = NS.state.progress[item.k];
       var pos = item.pos || (pr && pr.pos) || 0, dur = item.dur || (pr && pr.dur) || 0;
-      if (dur && pos > 0) f.appendChild(NS.progEl(pos / dur * 100));
+      if (dur && pos > 0) {
+        f.appendChild(NS.progEl(pos / dur * 100));
+        // a progress bar says more than the rating here, and they would overlap
+        var bdg = f.querySelector('.badge');
+        if (bdg) bdg.remove();
+      }
       return c;
     }
     if (kind === 'continue') {
@@ -312,8 +325,9 @@
       if (item.img) f.appendChild(NS.pic(item.img, 'cover'));
       f.appendChild(h('div', { class: 'play' }, NS.icon('play')));
       var p2 = NS.state.progress[item.k];
-      if (p2 && p2.dur && p2.pos > 0) f.appendChild(NS.progEl(p2.pos / p2.dur * 100));
-      c.appendChild(h('div', { class: 'etxt' }, [h('b', { text: item.ep + '. ' + item.n }), h('span', { text: (item.dur ? NS.fmtDur(item.dur) + '   ' : '') + (item.p || '') })]));
+      if (NS.isSeen(item.k) && !(p2 && p2.pos > 0)) { f.appendChild(NS.progEl(100)); f.appendChild(h('div', { class: 'seen-badge' }, [NS.icon('check'), 'Sedd'])); }
+      else if (p2 && p2.dur && p2.pos > 0) f.appendChild(NS.progEl(p2.pos / p2.dur * 100));
+      c.appendChild(h('div', { class: 'etxt' }, [h('b', { text: item.ep + '. ' + item.n }), h('span', { text: [item.dur ? NS.fmtDur(item.dur) : '', item.p || ''].filter(Boolean).join('  ·  ') })]));
       return c;
     }
     return c;
@@ -431,14 +445,14 @@
     });
     var deep = scroll && this.r >= 1 && !!this.o.onDeep;
     var sy = 0;
-    if (scroll && this.r >= 0 && this.rows[this.r]) sy = this.rows[this.r].y - 1 + (deep ? 8 : 0);
+    if (scroll && this.r >= 0 && this.rows[this.r]) sy = Math.max(0, this.rows[this.r].y - 1 + (deep ? 8 : 0) - (this.o.lead || 0));
     this.inner.style.transform = 'translateY(' + (-sy) + 'rem)';
     if (this.o.onDeep) this.o.onDeep(deep);
     if (this.bb) { this.bb.el.classList.toggle('gone', this.r >= 0 && scroll); this.bb.focus(this.hasFocus && this.r < 0); }
     this.rows.forEach(function (R, i) {
       R.el.style.transform = 'translateY(' + R.y + 'rem)';
       R.el.classList.toggle('active', i === self.r);
-      R.el.classList.toggle('gone', scroll && i < self.r);
+      R.el.classList.toggle('gone', scroll && i < self.r && (!self.o.lead || R.y + R.k.h < sy));
       var near = i >= self.r - 1 && i <= self.r + 3;
       if (near) self.renderRow(R, i === self.r); else if (R.rendered) self.unrenderRow(R);
     });
@@ -460,6 +474,9 @@
   RowsView.prototype.setInfo = function (it, extra) {
     var el = this.infoEl;
     var d = extra ? Object.assign({}, it, extra) : it;
+    var R0 = this.currentRow();
+    var topTen = !!(R0 && R0.def.kind === 'top10');
+    el.classList.toggle('t10', topTen);
     var build = function () {
       el.innerHTML = '';
       if (!d) return;
@@ -478,6 +495,8 @@
         else if (d.dur && d.pos) el.appendChild(h('div', { class: 'desc', style: 'color:var(--text-2)', text: NS.left(d.pos, d.dur) }));
         return;
       }
+      // Top 10 cards don't expand, so the title goes into the details instead
+      if (topTen) el.appendChild(h('div', { class: 'big', text: d.n }));
       el.appendChild(NS.metaEl(d, { kind: true }));
       if (d.pos && d.dur) el.appendChild(h('div', { class: 'desc', style: 'color:var(--text-2)', text: NS.left(d.pos, d.dur) }));
       else if (d.p) el.appendChild(h('div', { class: 'desc', text: d.p }));
@@ -635,7 +654,12 @@
     if (this.r < 0) {
       if (a === 'down' && this.rows.length) { this.r = 0; this.layout(); this.emitFocus(); return true; }
       if (a === 'up') { if (this.o.onUp) this.o.onUp(); return true; }
-      if (a === 'ok') { if (this.o.onSelect) this.o.onSelect(this.bb.item, { id: 'billboard' }, -1); return true; }
+      if (a === 'left' || a === 'right') { this.bb.sel = a === 'right' ? 1 : 0; this.bb.paintBtns(); return true; }
+      if (a === 'ok') {
+        if (this.bb.sel === 0 && this.o.onPlay) this.o.onPlay(this.bb.item, { id: 'billboard' });
+        else if (this.o.onSelect) this.o.onSelect(this.bb.item, { id: 'billboard' }, -1);
+        return true;
+      }
       if (a === 'play' || a === 'playpause') { if (this.o.onPlay) this.o.onPlay(this.bb.item); return true; }
       return a === 'left' || a === 'right';
     }
