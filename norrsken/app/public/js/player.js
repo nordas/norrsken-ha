@@ -92,7 +92,12 @@
     // media events
     var on = function (ev, fn) { v.addEventListener(ev, fn); };
     on('playing', function () { self.buffering(false); self.errShown = false; self.played = true; self.lastMove = Date.now(); });
-    on('waiting', function () { self.buffering(true); });
+    on('waiting', function () {
+      self.buffering(true);
+      var b = 0;
+      try { var bb = v.buffered; for (var i = 0; i < bb.length; i++) if (v.currentTime >= bb.start(i) - 0.5 && v.currentTime <= bb.end(i)) b = bb.end(i) - v.currentTime; } catch (e) { /* ignore */ }
+      NS.diag('buffrar vid ' + Math.round(self.cur()) + ' s, buffert framåt ' + b.toFixed(1) + ' s, motor ' + (self.hls ? (window.ManagedMediaSource && !window.MediaSource ? 'hls.js/MMS' : 'hls.js') : self.mp ? 'mpegts' : self.kind));
+    });
     on('stalled', function () { self.buffering(true); });
     on('canplay', function () { self.buffering(false); });
     on('pause', function () { self.renderButtons(); });
@@ -333,12 +338,6 @@
     var src = this.sources[this.si];
     this.offset = at || 0;
     var url = NS.remuxUrl(src.url, this.offset, this.audioIdx, this.safeMode);
-    // Safari (iPhone, iPad, Mac) plays HLS best with its own player
-    if (v.canPlayType('application/vnd.apple.mpegurl') && /Apple/.test(navigator.vendor || '')) {
-      v.src = url;
-      this.playPromise();
-      return;
-    }
     if (window.Hls && window.Hls.isSupported()) {
       var hls = this.hls = new window.Hls({
         enableWorker: true, startPosition: 0, maxBufferLength: 60, maxMaxBufferLength: 180, backBufferLength: 60,
@@ -347,6 +346,18 @@
       });
       hls.on(window.Hls.Events.ERROR, function (ev, d) { self.onHlsError(d); });
       hls.on(window.Hls.Events.MANIFEST_PARSED, function () { self.playPromise(); });
+      // how fast segments reach this device (the server side is measured in the add-on log)
+      var fl = { n: 0, bytes: 0, ms: 0, slow: 0 };
+      hls.on(window.Hls.Events.FRAG_LOADED, function (ev, d) {
+        try {
+          var st = d.frag.stats || d.stats || {};
+          var ms = (st.loading && st.loading.end - st.loading.start) || (st.tload - st.trequest) || 0;
+          var by = st.total || st.loaded || 0;
+          fl.n++; fl.bytes += by; fl.ms += ms;
+          if (ms > (d.frag.duration || 4) * 1000) fl.slow++;
+          if (fl.n === 3 || fl.n % 20 === 0) NS.diag('bitar ' + fl.n + ': ' + (fl.bytes * 8 / Math.max(1, fl.ms) / 1000).toFixed(1) + ' Mbit/s till enheten, ' + fl.slow + ' långsammare än realtid, buffert ' + Math.round((function () { try { return v.buffered.end(v.buffered.length - 1) - v.currentTime; } catch (e) { return 0; } })()) + ' s');
+        } catch (e) { /* ignore */ }
+      });
       hls.loadSource(url);
       hls.attachMedia(v);
       return;
@@ -389,6 +400,7 @@
   };
 
   Player.prototype.onHlsError = function (d) {
+    NS.diag('hls-fel ' + d.type + '/' + d.details + (d.fatal ? ' (avbröt)' : '') + (d.response && d.response.code ? ' http ' + d.response.code : ''));
     if (!d || !d.fatal) return;
     var self = this;
     var H = window.Hls;

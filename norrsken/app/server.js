@@ -760,6 +760,12 @@ route('GET', '/subs', (req, res, q) => {
   ff.subs(req, res, url, { s: +q.get('s') || 0, ss: Math.max(0, +q.get('ss') || 0), ua: catalog.ua() });
 });
 
+route('POST', '/api/diag', async (req, res) => {
+  const b = await readBody(req);
+  console.log('[spelare ' + String(b.d || '?').slice(0, 20) + ']', String(b.m || '').replace(/[\r\n]/g, ' ').slice(0, 300));
+  ok(res, { ok: true });
+});
+
 route('POST', '/api/refresh', async (req, res) => {
   catalog.load({ force: true });
   ok(res, { ok: true });

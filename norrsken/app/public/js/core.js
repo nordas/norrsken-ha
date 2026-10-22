@@ -463,6 +463,15 @@
     if (k === 1) return 'i morgon';
     return d.toLocaleDateString('sv-SE', { weekday: 'short', day: 'numeric', month: 'short' });
   };
+  /** Playback diagnostics into the add-on log (so buffering on a phone or TV can be seen from Home Assistant). */
+  var diagN = 0, diagT = 0;
+  NS.diag = function (msg) {
+    var now = Date.now();
+    if (now - diagT > 60000) { diagN = 0; diagT = now; }
+    if (++diagN > 30) return;
+    var dev = /iPhone|iPad/.test(navigator.userAgent) ? 'iPhone/iPad' : /Android/.test(navigator.userAgent) ? 'Android' : /Macintosh/.test(navigator.userAgent) ? (/Chrome/.test(navigator.userAgent) ? 'Mac Chrome' : 'Mac Safari') : /Titan|SmartTV|Web0S|Tizen|TV/i.test(navigator.userAgent) ? 'TV' : 'webbläsare';
+    try { NS.api.post('api/diag', { d: dev, m: String(msg).slice(0, 300) }).catch(function () {}); } catch (e) { /* ignore */ }
+  };
   NS.isSeen = function (k) { return !!(NS.state.seen && NS.state.seen[k]); };
   NS.markSeen = function (item, on) {
     on = on !== false;
