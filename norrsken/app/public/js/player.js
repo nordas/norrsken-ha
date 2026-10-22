@@ -358,12 +358,42 @@
           if (fl.n === 3 || fl.n % 20 === 0) NS.diag('bitar ' + fl.n + ': ' + (fl.bytes * 8 / Math.max(1, fl.ms) / 1000).toFixed(1) + ' Mbit/s till enheten, ' + fl.slow + ' långsammare än realtid, buffert ' + Math.round((function () { try { return v.buffered.end(v.buffered.length - 1) - v.currentTime; } catch (e) { return 0; } })()) + ' s');
         } catch (e) { /* ignore */ }
       });
+      this.airUrl = url;
+      // iPhone/iPad (ManagedMediaSource): give Safari a plain HLS source too, before attaching, so AirPlay is offered
+      if (window.ManagedMediaSource && window.WebKitPlaybackTargetAvailabilityEvent) {
+        var old = v.querySelector('source.air');
+        if (old) old.remove();
+        var so = document.createElement('source');
+        so.className = 'air'; so.type = 'application/x-mpegURL'; so.src = new URL(url, location.href).href;
+        v.appendChild(so);
+        v.disableRemotePlayback = false;
+      }
       hls.loadSource(url);
       hls.attachMedia(v);
       return;
     }
     v.src = url;
+    this.airUrl = url;
     this.playPromise();
+  };
+
+  /** AirPlay (iPhone/iPad/Mac Safari): the Apple TV fetches the stream itself, so it gets a full address. */
+  Player.prototype.airplay = function () {
+    var v = this.video;
+    try {
+      v.disableRemotePlayback = false;
+      v.setAttribute('x-webkit-airplay', 'allow');
+      var src = this.airUrl || (this.sources && this.sources[this.si] && this.sources[this.si].url) || '';
+      if (src && this.hls) {
+        // with hls.js (ManagedMediaSource) Safari needs a plain HLS source to hand over
+        var abs = new URL(src, location.href).href;
+        var el = v.querySelector('source.air') || document.createElement('source');
+        el.className = 'air'; el.type = 'application/x-mpegURL'; el.src = abs;
+        if (!el.parentNode) v.appendChild(el);
+      }
+      if (v.webkitShowPlaybackTargetPicker) v.webkitShowPlaybackTargetPicker();
+      else NS.toast('AirPlay finns i Safari på iPhone, iPad och Mac', 'info');
+    } catch (e) { NS.toast('AirPlay gick inte att starta', 'info'); }
   };
 
   Player.prototype.playPromise = function () {
@@ -486,6 +516,13 @@
       var rel = t - this.offset;
       var v = this.video, inBuf = false;
       try { for (var i = 0; i < v.seekable.length; i++) if (rel >= v.seekable.start(i) && rel <= v.seekable.end(i) - 1) inBuf = true; } catch (e) { /* ignore */ }
+      // also anywhere the server has already converted (it runs far ahead): no restart, no waiting
+      if (!inBuf && this.hls && rel >= 0) {
+        try {
+          var lv = this.hls.levels[Math.max(0, this.hls.currentLevel)];
+          if (lv && lv.details && rel < lv.details.totalduration - 2) inBuf = true;
+        } catch (e) { /* ignore */ }
+      }
       if (inBuf && rel >= 0) { try { v.currentTime = rel; } catch (e) { /* ignore */ } }
       else {
         this.buffering(true);
@@ -1272,6 +1309,12 @@
     };
     this.osd.appendChild(btn('tclose', 'back', function () { self.exit(); }, 'Stäng'));
     if (el.requestFullscreen || el.webkitRequestFullscreen) {
+      if (window.WebKitPlaybackTargetAvailabilityEvent) {
+        var air = btn('tair', 'airplay', function () { self.airplay(); }, 'AirPlay');
+        air.style.display = 'none';
+        this.osd.appendChild(air);
+        this.video.addEventListener('webkitplaybacktargetavailabilitychanged', function (e) { air.style.display = e.availability === 'available' ? '' : 'none'; });
+      }
       this.osd.appendChild(btn('tfs', 'fs', function () {
         var d = document;
         if (d.fullscreenElement || d.webkitFullscreenElement) (d.exitFullscreen || d.webkitExitFullscreen).call(d);
