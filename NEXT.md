@@ -1,4 +1,4 @@
-# Norrsken – överlämning (version 1.8.6, 22 okt 2026)
+# Norrsken – överlämning (version 1.8.7, 22 okt 2026)
 
 ## Läge just nu
 - Home Assistant (VM i VMware Fusion på iMacen, 192.168.85.51) slutade svara efter uppdatering till 1.8.5. Kolla först:
@@ -11,7 +11,7 @@
 - iPhone (hls.js via ManagedMediaSource) får 27–65 Mbit/s och buffrar bara vid start/spolning.
 - Väntan = omstart av konvertering vid spolning (1.8.5: hopp inom konverterat område utan omstart) + leverantören svarar trögt (0,07–0,2×) efter stora hopp.
 - Safari med inbyggd HLS-spelare blev sämre (backat i 1.8.4).
-- AirPlay-knappen syntes inte i 1.8.5 (iPhone saknar elementhelskärm; hls.js rensar <source>). Rättat i 1.8.6 – otestat på riktig iPhone/Apple TV.
+- AirPlay-knappen syntes inte i 1.8.5 (iPhone saknar elementhelskärm; hls.js rensar <source>). Knappen syns i 1.8.6 men gav bara ljud (hls.js/MMS). 1.8.7 byter till Safaris egna HLS-spelare vid AirPlay och tillbaka efteråt – otestat.
 - HA hängde vid uppdatering till 1.8.5 (Supervisor/DNS-timeouts ~18:17). 1.8.5 ändrade bara frontend; tillägget låg på 6 % RAM efteråt → troligen lokalt bygge + omstart, inte en läcka.
 - Otestat:, tv:n (Titan OS) efter 1.8.x, 4K på iMac efter "HEVC orört först" (1.8.1).
 
