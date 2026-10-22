@@ -155,6 +155,8 @@
     // Always cancel a request still in flight too, or it would start playing behind whatever is now on top.
     this.reqId = {};
     this.waitStart = false;
+    clearTimeout(this.airT);
+    this.airNative = false;
     if (!this.suspended) this.resumeAt = this.live ? 0 : this.sources ? this.cur() : this.start;
     if (this.sources) this.saveProgress();
     this.teardown();
@@ -166,7 +168,7 @@
     if (this.tok) { try { var u = 'rx/stop?t=' + encodeURIComponent(this.tok); if (navigator.sendBeacon) navigator.sendBeacon(u); else NS.api.post(u, {}); } catch (e) { /* ignore */ } }
     this.timers.forEach(clearInterval);
     clearInterval(this.clk);
-    clearTimeout(this.osdT); clearTimeout(this.scrubT); clearTimeout(this.numT); clearInterval(this.nextT); clearTimeout(this.zapT);
+    clearTimeout(this.osdT); clearTimeout(this.scrubT); clearTimeout(this.numT); clearInterval(this.nextT); clearTimeout(this.zapT); clearTimeout(this.airT);
     document.removeEventListener('nsk-epg', this._epg);
     if (this._winOff) this._winOff();
     this.stopSubs();
@@ -264,6 +266,8 @@
     if (this.mp) { try { this.mp.pause(); this.mp.unload(); this.mp.detachMediaElement(); this.mp.destroy(); } catch (e) { /* ignore */ } this.mp = null; }
     try { v.pause(); } catch (e) { /* ignore */ }
     v.removeAttribute('src');
+    // a left-over AirPlay <source> would otherwise be loaded by load() below: a second stream nobody watches
+    [].slice.call(v.querySelectorAll('source')).forEach(function (s) { s.remove(); });
     try { v.load(); } catch (e) { /* ignore */ }
   };
 
@@ -284,6 +288,8 @@
     }
     var src = this.sources[this.si];
     var v = this.video;
+    this.airNative = false;
+    clearTimeout(this.airT);
     this.teardown();
     this.kind = src.kind;
     this.netRetry = 0;
@@ -393,16 +399,40 @@
     } catch (e) { /* ignore */ }
   };
 
-  /** AirPlay (iPhone/iPad/Mac Safari): the Apple TV fetches the stream itself, so it gets a full address. */
+  /**
+   * AirPlay (iPhone/iPad/Mac Safari). Through hls.js (ManagedMediaSource) Safari only sends the sound, so switch
+   * to Safari's own HLS player first: it hands the stream's address to the Apple TV, which then fetches the picture
+   * itself. Back to hls.js when AirPlay ends (or if no Apple TV was picked).
+   */
   Player.prototype.airplay = function () {
-    var v = this.video;
+    var self = this, v = this.video;
+    if (!v.webkitShowPlaybackTargetPicker) { NS.toast('AirPlay finns i Safari på iPhone, iPad och Mac', 'info'); return; }
     try {
-      v.disableRemotePlayback = false;
-      v.setAttribute('x-webkit-airplay', 'allow');
-      this.addAirSource();
-      if (v.webkitShowPlaybackTargetPicker) v.webkitShowPlaybackTargetPicker();
-      else NS.toast('AirPlay finns i Safari på iPhone, iPad och Mac', 'info');
+      var src = this.airUrl || (this.sources && this.sources[this.si] && this.sources[this.si].url) || '';
+      if (this.hls && src && !this.airNative) {
+        var rel = v.currentTime || 0;
+        try { this.hls.destroy(); } catch (e) { /* ignore */ }
+        this.hls = null;
+        this.airNative = true;
+        [].slice.call(v.querySelectorAll('source')).forEach(function (s) { s.remove(); });
+        v.disableRemotePlayback = false;
+        v.setAttribute('x-webkit-airplay', 'allow');
+        v.src = new URL(src, location.href).href;
+        var seek = function () { v.removeEventListener('loadedmetadata', seek); if (rel > 1 && !self.live) { try { v.currentTime = rel; } catch (e) { /* ignore */ } } };
+        v.addEventListener('loadedmetadata', seek);
+        this.playPromise();
+        clearTimeout(this.airT);
+        this.airT = setTimeout(function () { if (self.airNative && !v.webkitCurrentPlaybackTargetIsWireless) self.airBack(); }, 30000);
+      }
+      v.webkitShowPlaybackTargetPicker();
     } catch (e) { NS.toast('AirPlay gick inte att starta', 'info'); }
+  };
+  /** AirPlay ended: back to hls.js on the phone, where it was. */
+  Player.prototype.airBack = function () {
+    if (!this.airNative || this.suspended) return;
+    this.airNative = false;
+    clearTimeout(this.airT);
+    this.startSource(this.live ? 0 : this.cur());
   };
 
   Player.prototype.playPromise = function () {
@@ -1339,6 +1369,11 @@
       var air = btn('tair', 'airplay', function () { self.airplay(); }, 'AirPlay');
       this.osd.appendChild(air);
       this.video.addEventListener('webkitplaybacktargetavailabilitychanged', function (e) { air.classList.toggle('dim', e.availability !== 'available'); });
+      this.video.addEventListener('webkitcurrentplaybacktargetiswirelesschanged', function () {
+        var on = !!self.video.webkitCurrentPlaybackTargetIsWireless;
+        air.classList.toggle('on', on);
+        if (on) clearTimeout(self.airT); else if (self.airNative) self.airBack();
+      });
     }
     if (!(el.requestFullscreen || el.webkitRequestFullscreen)) el.classList.add('nofs');
     else {

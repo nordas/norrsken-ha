@@ -330,3 +330,4 @@ html.m .dialog .box::before { content: ''; display: block; width: 36px; height: 
 .player.touch .tair { right: 58px; top: calc(10px + env(safe-area-inset-top)); font-size: 22px; }
 .player.touch.nofs .tair { right: 10px; }
 .player.touch .tair.dim { opacity: .45; }
+.player.touch .tair.on { color: #4da3ff; }
