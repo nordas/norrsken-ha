@@ -65,21 +65,23 @@
       this.lbar = h('div', { class: 'bar tsbar' }, [h('div', { class: 'rail2' }, [this.lPlayed]), this.lKnob, this.lBubble]);
       this.ltA = h('span'); this.ltB = h('span');
       this.ltimes = h('div', { class: 'times tsbar' }, [this.ltA, this.ltB]);
-      this.lLive = h('button', { class: 'tslive', 'aria-label': 'Titta live', onclick: function (e) { e.stopPropagation(); self.goLive(); } }, [h('span', { text: 'Titta live' }), h('span', { class: 'arr', text: '→' })]);
-      this.lrow = h('div', { class: 'tsrow' }, [this.lbar, this.lLive]);
+      this.lLive = h('button', { class: 'tslive-pill', 'aria-label': 'Live', onclick: function (e) { e.stopPropagation(); self.goLive(); } }, [h('i'), 'Live']);
+      this.lrow = h('div', { class: 'tsrow' }, [this.ltA, this.lbar, this.lLive]);
       this.osd.appendChild(this.lrow);
-      this.osd.appendChild(this.ltimes);
       // controls under the bar, like TV4 Play: pause, 10 s back and forward, sound and subtitles
       var lb = function (icon, label, fn) { return h('button', { class: 'btn', 'aria-label': label || icon, onclick: function (e) { e.stopPropagation(); fn(); self.showOsd(); } }, [NS.icon(icon), label || '']); };
       this.lPP = lb('pause', '', function () { self.livePlayPause(); });
       this.lSubB = lb('sub', '', function () { self.openTracks(); });
       this.lAudB = lb('audio', '', function () { self.openTracks(); });
+      this.lGo = h('button', { class: 'tsgo', onclick: function (e) { e.stopPropagation(); self.goLive(); } }, ['Titta live', h('span', { class: 'arr', text: ' →' })]);
       this.lctl = h('div', { class: 'lctl' }, [
         this.lPP,
         lb('rw', '', function () { self.seekRec(self.recPos() - 10); }),
         lb('ff', '', function () { self.seekRec(self.recPos() + 10); }),
+        h('div', { class: 'lspace' }),
         this.lAudB,
-        this.lSubB
+        this.lSubB,
+        this.lGo
       ]);
       this.osd.appendChild(this.lctl);
       this.lDrag = false;
@@ -1386,8 +1388,8 @@
     var pct = Math.min(100, Math.max(0, t / len * 100));
     this.lPlayed.style.width = pct + '%'; this.lKnob.style.left = pct + '%'; this.lBubble.style.left = pct + '%';
     this.lBubble.textContent = NS.fmtTime(t);
-    this.ltA.textContent = NS.fmtTime(t);
-    this.ltB.textContent = '−' + NS.fmtTime(Math.max(0, len - t));
+    // the clock time of that point in the recording, as on TV4 Play
+    this.ltA.textContent = NS.fmtClock(this.tshift ? this.tshift.at + t * 1000 : Date.now());
   };
   /** Go to a point in the recording: while playing the picture jumps there, while paused the next play starts there. */
   Player.prototype.seekRec = function (t) {

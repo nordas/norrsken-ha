@@ -612,9 +612,15 @@ html.m .player .tap-play { width: 84px; height: 84px; margin: -42px 0 0 -42px; f
 .player.behind .osd .chan .live-dot { opacity: .45; }
 /* live TV: seek bar of the recording, only while behind live or paused on it */
 .osd .tsrow, .osd .times.tsbar { display: none; }
-.player.lshift .osd .tsrow { display: flex; align-items: center; gap: 2.4rem; position: absolute; left: 12rem; right: 12rem; bottom: 30rem; }
+.player.lshift .osd .tsrow { display: flex; align-items: center; gap: 2rem; position: absolute; left: 2.5rem; right: 3rem; bottom: 30rem; }
+.osd .tsrow > span { flex: none; font-size: 2.4rem; font-weight: 700; font-variant-numeric: tabular-nums; color: #fff; }
+.osd .tslive-pill { flex: none; display: inline-flex; align-items: center; gap: .8rem; height: 3.6rem; padding: 0 1.6rem; border: 0; border-radius: 2rem; background: var(--red); color: #fff; font: inherit; font-size: 2.2rem; font-weight: 800; cursor: pointer; }
+.osd .tslive-pill i { width: .9rem; height: .9rem; border-radius: 50%; background: #fff; display: inline-block; }
+.osd .lctl .lspace { flex: 1; }
+.osd .tsgo { flex: none; height: 6.4rem; padding: 0 1.6rem; border: 0; background: none; color: #fff; font: inherit; font-size: 2.4rem; font-weight: 700; cursor: pointer; }
+.osd .tsgo .arr { font-weight: 700; }
 .player .osd .tsrow .bar.tsbar { position: relative; left: auto; right: auto; bottom: auto; flex: 1; }
-.osd .lctl { position: absolute; left: 12rem; bottom: 3.6rem; display: none; gap: 1.6rem; }
+.osd .lctl { position: absolute; left: 3rem; right: 3rem; bottom: 3.6rem; display: none; gap: 1.6rem; }
 .player.lshift .osd .lctl { display: flex; }
 .player.lshift .osd .hint { display: none; }
 .osd .lctl .btn { height: 6.4rem; font-size: 2.3rem; padding: 0 2.6rem; background: rgba(255,255,255,.14); }
