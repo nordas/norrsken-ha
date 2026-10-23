@@ -70,13 +70,16 @@
       this.osd.appendChild(this.lrow);
       this.osd.appendChild(this.ltimes);
       // controls under the bar, like TV4 Play: pause, 10 s back and forward, sound and subtitles
-      var lb = function (icon, label, fn) { return h('button', { class: 'btn', 'aria-label': label, onclick: function (e) { e.stopPropagation(); fn(); self.showOsd(); } }, [NS.icon(icon), label || '']); };
+      var lb = function (icon, label, fn) { return h('button', { class: 'btn', 'aria-label': label || icon, onclick: function (e) { e.stopPropagation(); fn(); self.showOsd(); } }, [NS.icon(icon), label || '']); };
       this.lPP = lb('pause', '', function () { self.livePlayPause(); });
+      this.lSubB = lb('sub', '', function () { self.openTracks(); });
+      this.lAudB = lb('audio', '', function () { self.openTracks(); });
       this.lctl = h('div', { class: 'lctl' }, [
         this.lPP,
         lb('rw', '', function () { self.seekRec(self.recPos() - 10); }),
         lb('ff', '', function () { self.seekRec(self.recPos() + 10); }),
-        lb('sub', 'Ljud och undertexter', function () { self.openTracks(); })
+        this.lAudB,
+        this.lSubB
       ]);
       this.osd.appendChild(this.lctl);
       this.lDrag = false;
@@ -917,7 +920,9 @@
     b.push({ id: 'pp', icon: this.video.paused ? 'play' : 'pause', label: this.video.paused ? 'Spela' : 'Pausa' });
     b.push({ id: 'rw', icon: 'rw', label: '10 s' });
     b.push({ id: 'ff', icon: 'ff', label: '10 s' });
-    b.push({ id: 'tracks', icon: 'sub', label: 'Ljud och undertexter' });
+    var L = this.trackLabels();
+    b.push({ id: 'subs', icon: 'sub', label: L.sub });
+    if (L.audioCount > 1) b.push({ id: 'audio', icon: 'audio', label: L.audio });
     if (this.nextEp()) b.push({ id: 'next', icon: 'next', label: 'Nästa avsnitt' });
     b.push({ id: 'restart', icon: 'restart', label: 'Från början' });
     if (this.item.t === 'catchup') b.push({ id: 'live', icon: 'live', label: 'Gå till live' });
@@ -943,7 +948,7 @@
     if (b.id === 'pp') { if (this.video.paused) this.playPromise(); else this.video.pause(); var self = this; setTimeout(function () { self.renderButtons(); }, 50); }
     else if (b.id === 'rw') this.seekTo(this.cur() - 10);
     else if (b.id === 'ff') this.seekTo(this.cur() + 10);
-    else if (b.id === 'tracks') this.openTracks();
+    else if (b.id === 'tracks' || b.id === 'subs' || b.id === 'audio') this.openTracks();
     else if (b.id === 'next') this.playNext();
     else if (b.id === 'live') this.toLive();
     else if (b.id === 'restart') { this.seekTo(0); this.zone = 'bar'; this.paintZone(); this.playPromise(); }
@@ -1025,6 +1030,8 @@
     }
     else { this.setSub(t); NS.setPref('sub', t.kind === 'off' ? '' : t.code || ''); }
     this.closePanel();
+    this.paintTrackBtns();
+    if (!this.live) this.renderButtons();
   };
   Player.prototype.setAudio = function (t, silent) {
     var self = this;
@@ -1331,6 +1338,25 @@
     this.showOsd();
     NS.toast('Live', 'live');
   };
+  /** Short labels of the sound and subtitle that play now (for the icon buttons). */
+  Player.prototype.trackLabels = function () {
+    var o = this.trackOptions();
+    var a = o.audio.find(function (t) { return t.on; });
+    var s = o.subs.find(function (t) { return t.on; });
+    return {
+      audio: a ? a.label.split(' – ')[0] : '',
+      audioCount: o.audio.length,
+      sub: s && s.kind !== 'off' ? s.label.split(' ')[0] : 'Inga undertexter'
+    };
+  };
+  /** The sound and subtitle icons show what is on now: the label sits next to the icon, as on TV4 Play. */
+  Player.prototype.paintTrackBtns = function () {
+    if (!this.lSubB) return;
+    var L = this.trackLabels();
+    this.lSubB.lastChild.textContent = L.sub;
+    this.lAudB.style.display = L.audioCount > 1 ? '' : 'none';
+    this.lAudB.lastChild.textContent = L.audio;
+  };
   /** Where we are in the recording, and how much has been recorded (seconds). */
   Player.prototype.recPos = function () {
     var ts = this.tshift;
@@ -1349,6 +1375,7 @@
     this.el.classList.toggle('lshift', rec);
     if (!rec) return;
     if (this.lPP) { var pausedNow = !ts.playing || this.video.paused; this.lPP.innerHTML = ''; this.lPP.appendChild(NS.icon(pausedNow ? 'play' : 'pause')); }
+    this.paintTrackBtns();
     if (this.lDrag) return;
     var pos = this.recPos(), len = this.recLen();
     this.lShow(pos, len);

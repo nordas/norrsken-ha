@@ -55,6 +55,7 @@
     settings: '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2.2"/><circle cx="9" cy="17" r="2.2"/>',
     play: '<path d="M7 4.5v15l12.5-7.5z"/>',
     pause: '<path d="M7 4.5h3.5v15H7zM13.5 4.5H17v15h-3.5z"/>',
+    audio: '<path d="M4 9.5v5h3.6L12.5 19V5L7.6 9.5H4z"/><path d="M15.5 8.6a5 5 0 0 1 0 6.8l-1.1-1.2a3.4 3.4 0 0 0 0-4.4zM18.3 6a8.6 8.6 0 0 1 0 12l-1.1-1.2a7 7 0 0 0 0-9.6z"/>',
     plus: '<path d="M12 5v14M5 12h14"/>',
     check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
     restart: '<path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3M4.5 4v4h4"/>',
