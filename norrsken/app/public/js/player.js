@@ -65,7 +65,7 @@
       this.lbar = h('div', { class: 'bar tsbar' }, [h('div', { class: 'rail2' }, [this.lPlayed]), this.lKnob, this.lBubble]);
       this.ltA = h('span'); this.ltB = h('span');
       this.ltimes = h('div', { class: 'times tsbar' }, [this.ltA, this.ltB]);
-      this.lLive = h('button', { class: 'tslive-pill', 'aria-label': 'Live', onclick: function (e) { e.stopPropagation(); self.goLive(); } }, [h('i'), 'Live']);
+      this.lLive = h('button', { class: 'tslive-pill', 'aria-label': 'Live', onclick: function (e) { e.stopPropagation(); if (self.tshift) self.goLive(); } }, [h('i'), 'Live']);
       this.lrow = h('div', { class: 'tsrow' }, [this.ltA, this.lbar, this.lLive]);
       this.osd.appendChild(this.lrow);
       // controls under the bar, like TV4 Play: pause, 10 s back and forward, sound and subtitles
@@ -173,7 +173,8 @@
 
     if (this.live) {
       this.lbar.addEventListener('pointerdown', function (e) {
-        if (!self.tshift || self.tshift.mode !== 'rec') return;
+        // no recording yet: pressing the bar pauses, the recording starts and the bar works from then on
+        if (!self.tshift || self.tshift.mode !== 'rec') { self.livePlayPause(false); e.preventDefault(); return; }
         self.lDrag = true; self.lbar.classList.add('scrub'); self.showOsd(true);
         self.lPreview = self.lFrac(e) * self.recLen();
         self.lShow(self.lPreview);
@@ -209,7 +210,7 @@
     this.every(500, function () { if (self.cuSeek) self.cuCatch(); });
     this.every(15000, function () { self.saveProgress(); });
     if (this.live) this.every(30000, function () { NS.needEpg([self.item.id]); });
-    if (this.live) this.every(1000, function () { if (self.tshift || self.livePausedAt) self.paintTshift(); });
+    if (this.live) this.every(1000, function () { if (self.tshift || self.livePausedAt) self.paintTshift(); self.paintLBar(); });
   };
   Player.prototype.every = function (ms, fn) { this.timers.push(setInterval(fn, ms)); };
   Player.prototype.deactivate = function () {
@@ -784,6 +785,7 @@
   };
   Player.prototype.showOsd = function (sticky) {
     var self = this;
+    if (this.live) sticky = false; // live TV: the controls always leave by themselves after 5 s without a touch
     var was = this.osdOn;
     this.osdOn = true;
     if (!was) this.liftCues();
@@ -1372,15 +1374,21 @@
   };
   /** Paint the seek bar of the recording (hidden unless we are behind live or paused on a recording). */
   Player.prototype.paintLBar = function () {
+    if (!this.live) return;
     var ts = this.tshift;
     var rec = !!(ts && ts.mode === 'rec' && ts.url);
-    this.el.classList.toggle('lshift', rec);
-    if (!rec) return;
-    if (this.lPP) { var pausedNow = !ts.playing || this.video.paused; this.lPP.innerHTML = ''; this.lPP.appendChild(NS.icon(pausedNow ? 'play' : 'pause')); }
+    // on live TV the bar and the controls are always there, as on TV4 Play
+    this.el.classList.add('lshift');
+    if (this.lPP) { var pausedNow = rec ? !ts.playing || this.video.paused : this.video.paused; this.lPP.innerHTML = ''; this.lPP.appendChild(NS.icon(pausedNow ? 'play' : 'pause')); }
     this.paintTrackBtns();
     if (this.lDrag) return;
-    var pos = this.recPos(), len = this.recLen();
-    this.lShow(pos, len);
+    if (!rec) {
+      // watching live: the knob sits at the end, the clock shows now
+      this.lShow(1, 1);
+      this.ltA.textContent = NS.fmtClock(Date.now());
+      return;
+    }
+    this.lShow(this.recPos(), this.recLen());
   };
   /** Show a point on the seek bar: knob, bubble and both times. */
   Player.prototype.lShow = function (t, len) {
