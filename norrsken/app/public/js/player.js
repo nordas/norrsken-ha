@@ -65,7 +65,7 @@
       this.lbar = h('div', { class: 'bar tsbar' }, [h('div', { class: 'rail2' }, [this.lPlayed]), this.lKnob, this.lBubble]);
       this.ltA = h('span'); this.ltB = h('span');
       this.ltimes = h('div', { class: 'times tsbar' }, [this.ltA, this.ltB]);
-      this.lLive = h('button', { class: 'btn golive', onclick: function (e) { e.stopPropagation(); self.goLive(); } }, [NS.icon('live'), 'Titta live']);
+      this.lLive = h('button', { class: 'tslive', 'aria-label': 'Titta live', onclick: function (e) { e.stopPropagation(); self.goLive(); } }, [h('span', { text: 'Titta live' }), h('span', { class: 'arr', text: '→' })]);
       this.lrow = h('div', { class: 'tsrow' }, [this.lbar, this.lLive]);
       this.osd.appendChild(this.lrow);
       this.osd.appendChild(this.ltimes);
