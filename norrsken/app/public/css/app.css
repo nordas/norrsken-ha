@@ -610,6 +610,14 @@ html.m .player .tap-play { width: 84px; height: 84px; margin: -42px 0 0 -42px; f
 .osd .tshift .ts-note { color: var(--text-2); }
 .osd .tshift .ts-key { display: inline-flex; align-items: center; gap: 1rem; padding-left: 2rem; border-left: 1px solid rgba(255,255,255,.2); font-weight: 700; }
 .player.behind .osd .chan .live-dot { opacity: .45; }
+/* live TV: seek bar of the recording, only while behind live or paused on it */
+.osd .tsrow, .osd .times.tsbar { display: none; }
+.player.lshift .osd .tsrow { display: flex; align-items: center; gap: 2.4rem; position: absolute; left: 12rem; right: 12rem; bottom: 30rem; }
+.player .osd .tsrow .bar.tsbar { position: relative; left: auto; right: auto; bottom: auto; flex: 1; }
+.osd .tsrow .golive { height: 6.4rem; font-size: 2.3rem; padding: 0 2.8rem; flex: none; }
+.player.lshift .osd .times.tsbar { display: flex; bottom: 24.4rem; }
+.osd .bar.tsbar.scrub .bubble { display: block; }
+.player.mouse .osd.on .bar.tsbar { cursor: pointer; }
 .player.mouse .osd.on .tshift { pointer-events: auto; cursor: pointer; }
 .player.mouse .mpp { left: auto; right: 12rem; top: auto; bottom: 7rem; }
 

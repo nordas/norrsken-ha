@@ -58,6 +58,18 @@
       // paused live TV / watching behind live: how far behind, and how to get back
       this.tsEl = h('div', { class: 'tshift' });
       this.osd.appendChild(this.tsEl);
+      // a seek bar for the recording (TV4 Play style): drag to go back or forward inside what has been recorded
+      this.lPlayed = h('div', { class: 'played' });
+      this.lKnob = h('div', { class: 'knob' });
+      this.lBubble = h('div', { class: 'bubble' });
+      this.lbar = h('div', { class: 'bar tsbar' }, [h('div', { class: 'rail2' }, [this.lPlayed]), this.lKnob, this.lBubble]);
+      this.ltA = h('span'); this.ltB = h('span');
+      this.ltimes = h('div', { class: 'times tsbar' }, [this.ltA, this.ltB]);
+      this.lLive = h('button', { class: 'btn golive', onclick: function (e) { e.stopPropagation(); self.goLive(); } }, [NS.icon('live'), 'Titta live']);
+      this.lrow = h('div', { class: 'tsrow' }, [this.lbar, this.lLive]);
+      this.osd.appendChild(this.lrow);
+      this.osd.appendChild(this.ltimes);
+      this.lDrag = false;
       this.freezeEl = h('canvas', { class: 'freeze' });
       el.insertBefore(this.freezeEl, el.firstChild.nextSibling);
     } else {
@@ -144,6 +156,24 @@
       self.fail(err ? (err.code === 4 ? 'Formatet stöds inte av den här skärmen' : 'Mediafel ' + err.code) : 'Mediafel');
     });
 
+    if (this.live) {
+      this.lbar.addEventListener('pointerdown', function (e) {
+        if (!self.tshift || self.tshift.mode !== 'rec') return;
+        self.lDrag = true; self.lbar.classList.add('scrub'); self.showOsd(true);
+        self.lPreview = self.lFrac(e) * self.recLen();
+        self.lShow(self.lPreview);
+        e.preventDefault();
+      });
+      this._lMove = function (e) { if (!self.lDrag) return; self.lPreview = self.lFrac(e) * self.recLen(); self.lShow(self.lPreview); };
+      this._lUp = function () {
+        if (!self.lDrag) return;
+        self.lDrag = false; self.lbar.classList.remove('scrub');
+        self.seekRec(self.lPreview);
+        self.showOsd();
+      };
+      window.addEventListener('pointermove', this._lMove);
+      window.addEventListener('pointerup', this._lUp);
+    }
     this._epg = function () { if (self.live) { self.renderChan(); if (self.panel === 'channels') self.paintChannels(); } };
     document.addEventListener('nsk-epg', this._epg);
   }
@@ -195,6 +225,7 @@
     clearTimeout(this.osdT); clearTimeout(this.scrubT); clearTimeout(this.numT); clearInterval(this.nextT); clearTimeout(this.zapT); clearTimeout(this.airT);
     document.removeEventListener('nsk-epg', this._epg);
     if (this._winOff) this._winOff();
+    if (this._lMove) { window.removeEventListener('pointermove', this._lMove); window.removeEventListener('pointerup', this._lUp); }
     if (this.tshift) this.endTshift();
     this.stopSubs();
     this.teardown();
@@ -1290,6 +1321,51 @@
     this.showOsd();
     NS.toast('Live', 'live');
   };
+  /** Where we are in the recording, and how much has been recorded (seconds). */
+  Player.prototype.recPos = function () {
+    var ts = this.tshift;
+    if (!ts || ts.mode !== 'rec') return 0;
+    return ts.playing ? this.video.currentTime || 0 : ts.pos || 0;
+  };
+  Player.prototype.recLen = function () {
+    var ts = this.tshift;
+    if (!ts || ts.mode !== 'rec') return 0;
+    return Math.max(ts.sec || 0, this.recPos() + 1);
+  };
+  /** Paint the seek bar of the recording (hidden unless we are behind live or paused on a recording). */
+  Player.prototype.paintLBar = function () {
+    var ts = this.tshift;
+    var rec = !!(ts && ts.mode === 'rec' && ts.url);
+    this.el.classList.toggle('lshift', rec);
+    if (!rec || this.lDrag) return;
+    var pos = this.recPos(), len = this.recLen();
+    this.lShow(pos, len);
+  };
+  /** Show a point on the seek bar: knob, bubble and both times. */
+  Player.prototype.lShow = function (t, len) {
+    len = len || this.recLen() || 1;
+    var pct = Math.min(100, Math.max(0, t / len * 100));
+    this.lPlayed.style.width = pct + '%'; this.lKnob.style.left = pct + '%'; this.lBubble.style.left = pct + '%';
+    this.lBubble.textContent = NS.fmtTime(t);
+    this.ltA.textContent = NS.fmtTime(t);
+    this.ltB.textContent = '−' + NS.fmtTime(Math.max(0, len - t));
+  };
+  /** Go to a point in the recording: while playing the picture jumps there, while paused the next play starts there. */
+  Player.prototype.seekRec = function (t) {
+    var ts = this.tshift;
+    if (!ts || ts.mode !== 'rec' || !ts.url) return;
+    t = Math.max(0, Math.min(t, this.recLen() - 2));
+    if (!ts.playing) { ts.pos = t; this.paintLBar(); this.paintTshift(); return; }
+    try { this.video.currentTime = t; } catch (e) { /* ignore: the picture stays where it was */ }
+    this.buffering(true);
+    this.paintLBar();
+  };
+  /** Pointer position on the seek bar as a share of the recording. */
+  Player.prototype.lFrac = function (e) {
+    var r = this.lbar.getBoundingClientRect();
+    return r.width ? Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) : 0;
+  };
+
   /** The paused / behind-live line in the live OSD. */
   Player.prototype.paintTshift = function () {
     var el = this.tsEl;
@@ -1300,6 +1376,7 @@
     el.classList.toggle('on', on);
     this.el.classList.toggle('behind', !!(ts && ts.playing));
     if (this.liveBtn) this.liveBtn.style.display = ts ? '' : 'none';
+    this.paintLBar();
     if (!on) return;
     var self = this;
     var behind = 0;
@@ -1313,8 +1390,8 @@
     else if (ts && ts.mode === 'rec') note = ts.full ? 'Inspelningen är full (' + ts.max + ' min)' : ts.url ? (paused ? 'Spelar in medan du pausar · högst ' + ts.max + ' min' : 'Spelas in · högst ' + ts.max + ' min') : 'Startar inspelningen…';
     else if (this.livePausedAt) note = 'Bilden står still';
     if (note) el.appendChild(h('span', { class: 'ts-note', text: note }));
-    if (ts && ts.playing) el.appendChild(h('span', { class: 'ts-key' }, [h('kbd', { text: '▶▶' }), 'Gå till live']));
-    el.onclick = function (e) { e.stopPropagation(); if (ts && ts.playing && e.target.closest && e.target.closest('.ts-key')) self.goLive(); else self.livePlayPause(); };
+    el.onclick = function (e) { e.stopPropagation(); self.livePlayPause(); };
+    this.paintLBar();
   };
 
   /** Watching a paused channel from its archive and the programme ended: go on with the next one, still behind live. */
@@ -1554,6 +1631,7 @@
       return;
     }
     if (this.live) {
+      if (this.tshift && this.tshift.mode === 'rec' && (a === 'left' || a === 'right')) { this.seekRec(this.recPos() + (a === 'left' ? -10 : 10)); this.showOsd(); return; }
       if (a === 'up' || a === 'chup') this.zap(1);
       else if (a === 'down' || a === 'chdn') this.zap(-1);
       else if (a === 'ok' || a === 'left') this.openChannels();
