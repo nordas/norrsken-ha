@@ -101,9 +101,19 @@ function xmltv(now) {
   for (const [, , epg] of CH) {
     x += `  <channel id="${epg}"><display-name>${epg}</display-name></channel>\n`;
   }
+  // hockey for the favourite-team billboard: Luleå – Färjestad on now on two sport channels (2.5 h from the
+  // half hour before now), a re-run of it elsewhere, and Brynäs – Skellefteå starting within the hour
+  const special = {
+    'vsp.se': { from: 1, slots: 5, t: 'SHL: Luleå Hockey - Färjestad BK', d: 'Ishockey, SHL. Direktsändning från Coop Norrbotten Arena.' },
+    'tv4sport.se': { from: 1, slots: 5, t: 'Ishockey: Luleå - Färjestad', d: 'SHL-matchen direkt.' },
+    'es1.se': { from: 1, slots: 2, t: 'Hockey: Luleå - Färjestad (repris)', d: 'Matchen från i går.' },
+    'vfb.se': { from: 3, slots: 5, t: 'SHL: Brynäs IF - Skellefteå AIK', d: 'Ishockey.' },
+  };
   CH.forEach(([, , epg], ci) => {
+    const sp = special[epg];
     for (let i = 0; i < 24; i++) {
       const s = start + i * 1800e3;
+      if (sp && i === sp.from) { x += `  <programme start="${fmt(s)}" stop="${fmt(s + sp.slots * 1800e3)}" channel="${epg}"><title lang="sv">${sp.t}</title><desc lang="sv">${sp.d}</desc></programme>\n`; i += sp.slots - 1; continue; }
       const t = titles[(i + ci) % titles.length];
       x += `  <programme start="${fmt(s)}" stop="${fmt(s + 1800e3)}" channel="${epg}"><title lang="en">${t} (en)</title><title lang="sv">${t}</title><desc lang="sv">Beskrivning av ${t} &amp; mer.</desc></programme>\n`;
     }

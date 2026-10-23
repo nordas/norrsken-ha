@@ -76,7 +76,7 @@
      */
     start: function (it, host, opts) {
       this.stop();
-      if (!it || !host || mode() === 'off') return;
+      if (!it || !host || mode() === 'off' || it.t === 'ext') return;
       opts = opts || {};
       var self = this;
       var job = cur = { it: it, host: host, opts: opts, stopped: false };

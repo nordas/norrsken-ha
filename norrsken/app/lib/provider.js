@@ -330,6 +330,19 @@ class Catalog {
   /** Series id for an episode id we have seen in a season list. */
   epSeries(id) { const e = this.epIndex.get(String(id)); return e ? e.sid : null; }
 
+  /** The film or series with this title (and year, ±1) in the library, if any – for "Finns i Norrsken". */
+  byTitle(type, name, year, prof) {
+    const d = this.data && this.data[type];
+    if (!d || !d.byNorm || !name) return null;
+    const base = fold(stripQuality(name) || name).replace(/[^a-z0-9]+/g, ' ').trim();
+    const vis = prof ? new Set(this.visibleCats(type, prof).map(c => c.id)) : null;
+    for (const y of year ? [year, year - 1, year + 1, ''] : ['']) {
+      const hit = (d.byNorm.get(base + '|' + y) || []).find(x => !vis || vis.has(x.cat));
+      if (hit) return hit;
+    }
+    return null;
+  }
+
   /** Other versions (quality, language) of the same film or series, best quality first. */
   versions(type, id, prof) {
     const d = this.data && this.data[type];
@@ -446,6 +459,7 @@ class Catalog {
           ext: str(md.container_extension) || it.ext,
           trailer: str(info.youtube_trailer),
           age: str(info.age || info.mpaa_rating),
+          tmdb: str(info.tmdb_id || info.tmdb) || '',
         };
       } catch (e) { /* fall back to basic item */ }
     }
@@ -514,6 +528,7 @@ class Catalog {
         p: str(info.plot) || it.p, g: str(info.genre) || it.g, cast: str(info.cast), dir: str(info.director),
         y: it.y || yearOf(info.releaseDate || info.release_date), r: it.r || num(info.rating),
         bd: firstOf(info.backdrop_path) || it.bd, img: it.img || str(info.cover), trailer: str(info.youtube_trailer),
+        tmdb: str(info.tmdb || info.tmdb_id) || '',
         seasons,
       };
     } else {

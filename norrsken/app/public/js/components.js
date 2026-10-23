@@ -103,7 +103,10 @@
   NS.Ambient = Ambient;
 
   /* ================================================================ META */
-  NS.kindLabel = function (it) { return it.t === 'series' ? 'Serie' : it.t === 'movie' ? 'Film' : it.t === 'episode' ? 'Avsnitt' : 'Live'; };
+  NS.kindLabel = function (it) {
+    if (it.t === 'ext') return (it.mt === 'tv' ? 'Serie' : 'Film') + (it.svc && it.svc.length ? ' på ' + NS.svcName(it.svc[0]) : '');
+    return it.t === 'series' ? 'Serie' : it.t === 'movie' ? 'Film' : it.t === 'episode' ? 'Avsnitt' : 'Live';
+  };
   NS.metaEl = function (it, opts) {
     opts = opts || {};
     var m = h('div', { class: 'meta' });
@@ -210,6 +213,44 @@
     this.paintBtns();
     this.setArt(it.bd || it.img, !it.bd);
   };
+  /**
+   * The favourite team's match, like TV4 Play: "Live nu: Luleå – Färjestad" on top of the start page.
+   * OK switches to the channel; the second button opens the guide (live) or sets a reminder (soon).
+   */
+  Billboard.prototype.showSport = function (m) {
+    var it = Object.assign({}, m.ch, { sport: m });
+    this.item = it;
+    this.el.classList.add('sport');
+    this.el.classList.toggle('soon', m.state !== 'live');
+    var c = m.team.col || ['#c8102e', '#111'];
+    this.art.style.background = 'radial-gradient(70% 120% at 88% 30%, ' + c[0] + 'cc 0%, ' + c[0] + '33 45%, transparent 70%), linear-gradient(115deg, #0c0d10 0%, #121419 52%, ' + c[0] + '55 100%)';
+    if (this.ice) this.ice.remove();
+    // the teams, big and quiet behind the text (no club logos: the names carry it)
+    this.ice = h('div', { class: 'ice' }, [h('span', { text: m.home || m.team.short }), h('i', { text: m.away ? '–' : '' }), h('span', { text: m.away || '' })]);
+    this.art.appendChild(this.ice);
+    var t = this.txt;
+    t.innerHTML = '';
+    var live = m.state === 'live';
+    t.appendChild(h('div', { class: 'kind' }, [live ? h('span', { class: 'live-pill', text: 'Live nu' }) : h('span', { class: 'soon-pill', text: 'Börjar ' + NS.fmtClock(m.s) }), m.team.name]));
+    t.appendChild(h('h1', { class: m.title.length > 22 ? 'long' : null, text: m.title }));
+    var meta = h('div', { class: 'meta' });
+    var logo = h('span', { class: 'chlogo' });
+    if (m.ch.img) logo.appendChild(NS.pic(m.ch.img, '', function () { logo.remove(); }));
+    meta.appendChild(logo);
+    meta.appendChild(h('span', { text: m.ch.n }));
+    meta.appendChild(h('span', { text: NS.fmtClock(m.s) + '–' + NS.fmtClock(m.e) }));
+    if (m.chans && m.chans.length > 1) meta.appendChild(h('span', { class: 'soft', text: 'på ' + m.chans.length + ' kanaler' }));
+    t.appendChild(meta);
+    if (live) t.appendChild(h('div', { class: 'sprog' }, NS.progEl(NS.livePct(m))));
+    if (m.d) t.appendChild(h('div', { class: 'desc', text: m.d }));
+    this.hint.innerHTML = '';
+    var rem = !live && NS.hasReminder(m.ch.id, m.s);
+    this.btnEls = [h('div', { class: 'btn' }, [NS.icon('play'), live ? 'Titta nu' : 'Byt till kanalen']),
+      h('div', { class: 'btn' }, live ? [NS.icon('episodes'), 'Tv-guide'] : [NS.icon(rem ? 'check' : 'bell'), rem ? 'Påminnelse satt' : 'Påminn mig'])];
+    this.btnEls.forEach(function (b) { this.hint.appendChild(b); }, this);
+    t.appendChild(this.hint);
+    this.paintBtns();
+  };
   Billboard.prototype.setArt = function (u, maybePoster) {
     if (!u || u === this.artUrl) return;
     this.artUrl = u;
@@ -271,6 +312,7 @@
         f.appendChild(h('div', { class: 'xt' }, [h('small', {}, [NS.icon('aurora'), ep ? NS.epCode(item) + ' ' + item.n : NS.kindLabel(item)]), h('b', { text: ep ? item.sn || item.n : item.n })]));
         if (item.r > 0) f.appendChild(h('div', { class: 'badge' }, [NS.icon('star'), (Math.round(item.r * 10) / 10).toFixed(1)]));
         if (item.q === '4K') f.appendChild(h('div', { class: 'qbadge', text: '4K' }));
+        if (item.t === 'ext' && item.svc) f.appendChild(NS.svcChips(item.svc.slice(0, 2), 'on-card'));
         if (item.add && Date.now() / 1000 - item.add < 10 * 86400) c.appendChild(h('div', { class: 'nbadge', text: item.t === 'series' ? 'Nytt' : 'Ny' }));
         NS.itemColor(item).then(function (col) {
           xbg.style.background = 'linear-gradient(120deg, ' + NS.rgba(col, 1) + ' 0%, ' + NS.rgba(col.map(function (v) { return Math.round(v * 0.35); }), 1) + ' 70%)';

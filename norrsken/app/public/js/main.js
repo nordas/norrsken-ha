@@ -5,6 +5,7 @@
 
   NS.start = function (st) {
     NS.status = st;
+    NS.loadServices();
     if (st.appName) document.title = st.appName;
     var profiles = st.profiles || [];
     // the kids profile stays on after a restart: leaving it always needs a parent's PIN

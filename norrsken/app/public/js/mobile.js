@@ -32,6 +32,7 @@
     if (dur && pos > 0) f.appendChild(NS.progEl(pos / dur * 100));
     if (it.add && Date.now() / 1000 - it.add < 10 * 86400) f.appendChild(h('span', { class: 'm-new', text: it.t === 'series' ? 'Nytt' : 'Ny' }));
     if (it.q === '4K') f.appendChild(h('span', { class: 'm-q', text: '4K' }));
+    if (it.t === 'ext' && it.svc) f.appendChild(NS.svcChips(it.svc.slice(0, 2), 'on-card'));
     c.appendChild(f);
     if (opts.caption) c.appendChild(h('div', { class: 'm-cap', text: opts.caption }));
     return c;
@@ -76,6 +77,7 @@
   NS.mLongPress = longPress;
 
   function open(it, row) {
+    if (it.t === 'ext') { NS.router.push(new MExtDetail(it)); return; }
     if (it.t === 'live') { NS.playItem(it, { list: (row && row.items) || [it], cat: (row && row.cat) || null }); return; }
     if (row && row.id === 'cw') { NS.playItem(it, { start: it.upnext ? 0 : it.pos || 0 }); return; }
     if (it.t === 'episode') { NS.playItem(it, { start: NS.resumePos(it) }); return; }
@@ -226,6 +228,7 @@
       if (tok !== self._tok) return;
       self.body.innerHTML = '';
       var feat = res.featured || [];
+      if (res.sport && res.sport.ch) self.body.appendChild(sportCard(res.sport));
       if (feat.length && page !== 'live' && page !== 'mylist') self.body.appendChild(self.hero(feat[Math.floor(Math.random() * Math.min(6, feat.length))]));
       var who = NS.profile ? NS.profile.name : '';
       (res.rows || []).forEach(function (r) {
@@ -256,6 +259,9 @@
       self.body.innerHTML = '';
       var chips = h('div', { class: 'm-chips m-live-cats' });
       var list = h('div', { class: 'm-chlist' });
+      var spot = h('div');
+      self.body.appendChild(spot);
+      NS.api.get('api/sport').then(function (r) { if (r.match && r.match.ch && tok === self._tok) spot.appendChild(sportCard(r.match)); }).catch(function () {});
       self.body.appendChild(chips);
       self.body.appendChild(list);
       var show = function (id) {
@@ -371,6 +377,31 @@
   MChannel.prototype.activate = function (first) { if (first) top0(); else restoreY(this); };
   MChannel.prototype.deactivate = function () { saveY(this); };
 
+  /** The favourite team's match on top of the start page: tap to switch to the channel. */
+  function sportCard(m) {
+    var live = m.state === 'live';
+    var c = (m.team.col || ['#c8102e'])[0];
+    var logo = h('span', { class: 'm-sport-logo' });
+    if (m.ch.img) logo.appendChild(NS.pic(m.ch.img, '', function () { logo.remove(); }));
+    var go = function () { NS.playItem(m.ch, { list: m.chans || [m.ch], cat: m.ch.cat }); };
+    var rem = !live && NS.hasReminder(m.ch.id, m.s);
+    var second = live ? null : h('button', { class: 'm-btn ghost', onclick: function (e) {
+      e.stopPropagation();
+      var on = NS.toggleReminder(m.ch, { s: m.s, t: m.title });
+      second.innerHTML = ''; second.appendChild(NS.icon(on ? 'check' : 'bell')); second.appendChild(document.createTextNode(on ? 'Påminnelse satt' : 'Påminn mig'));
+    } }, [NS.icon(rem ? 'check' : 'bell'), rem ? 'Påminnelse satt' : 'Påminn mig']);
+    var el = h('section', { class: 'm-sport' + (live ? ' live' : ''), style: 'background:radial-gradient(90% 140% at 100% 0%, ' + c + 'bb 0%, ' + c + '22 55%, transparent 80%), #121318' }, [
+      h('div', { class: 'm-sport-top' }, [live ? h('span', { class: 'live-pill', text: 'Live nu' }) : h('span', { class: 'soon-pill', text: 'Börjar ' + NS.fmtClock(m.s) }), h('span', { text: m.team.name })]),
+      h('h2', { text: m.title }),
+      h('div', { class: 'm-sport-meta' }, [logo, h('span', { text: m.ch.n + '  ·  ' + NS.fmtClock(m.s) + '–' + NS.fmtClock(m.e) })]),
+      live ? NS.progEl(NS.livePct(m)) : null,
+      h('div', { class: 'm-sport-btns' }, [h('button', { class: 'm-btn', onclick: function (e) { e.stopPropagation(); go(); } }, [NS.icon('play'), live ? 'Titta nu' : 'Byt till kanalen']), second])
+    ]);
+    el.addEventListener('click', go);
+    return el;
+  }
+  NS.mSportCard = sportCard;
+
   MBrowse.prototype.hero = function (it) {
     var art = h('div', { class: 'm-hero-art' });
     var img = it.img || it.bd;
@@ -431,6 +462,11 @@
     NS.infoFor(item).then(function (info) {
       self.info = info;
       self.render();
+      if (info.tmdb && NS.svc.enabled && !(NS.profile && NS.profile.kids)) {
+        NS.api.get('api/services/where/' + (item.t === 'series' ? 'tv' : 'movie') + '/' + info.tmdb).then(function (r) {
+          if (r.svc && r.svc.length) { self.svcWhere = r.svc; self.render(); }
+        }).catch(function () {});
+      }
       if (self.opts.autoplay) { self.opts.autoplay = false; self.play(false); return; }
       self.preview();
     }).catch(function () { /* basic info only */ });
@@ -478,6 +514,7 @@
     var b = h('div', { class: 'm-d-body' });
     b.appendChild(h('div', { class: 'm-kind' }, [NS.icon('aurora'), NS.kindLabel(d)]));
     b.appendChild(h('h1', { text: d.n }));
+    if (this.svcWhere) b.appendChild(h('div', { class: 'm-svc-line' }, [h('span', { text: 'Finns även på' }), NS.svcChips(this.svcWhere)]));
     b.appendChild(h('p', { class: 'm-d-meta', text: [d.y, d.t === 'movie' && d.dur ? NS.fmtDur(d.dur) : '', d.seasons ? (d.seasons.length === 1 ? '1 säsong' : d.seasons.length + ' säsonger') : '', d.r > 0 ? '★ ' + (Math.round(d.r * 10) / 10).toFixed(1) : '', d.age || ''].filter(Boolean).join('  •  ') }));
     var label = 'Spela', sub = '', prog = 0;
     if (d.t === 'movie') {
@@ -584,6 +621,14 @@
     var self = this;
     var rec = NS.store.get(NS.pkey('searches'), []);
     this.res.innerHTML = '';
+    if (NS.svc.enabled) {
+      var sug = h('div');
+      NS.api.get('api/services/suggest', 30000).then(function (x) {
+        if (self.input.value.trim() || !x || !x.items || !x.items.length) return;
+        sug.appendChild(rowEl({ id: 's-svc', title: 'Föreslaget på dina tjänster', kind: 'poster', items: x.items }));
+      }).catch(function () {});
+      setTimeout(function () { if (!self.input.value.trim()) self.res.appendChild(sug); }, 0);
+    }
     var box = h('div', { class: 'm-recent' });
     if (rec.length) {
       box.appendChild(h('h2', {}, ['Senaste sökningar', h('button', { class: 'm-link', onclick: function () { NS.store.set(NS.pkey('searches'), []); self.idle(); }, text: 'Rensa' })]));
@@ -603,6 +648,18 @@
     var q = this.input.value.trim();
     this.res.innerHTML = '';
     if (!q) { this.idle(); return; }
+    var extBox = h('div');
+    if (NS.svc.enabled) {
+      NS.api.get('api/services/search?q=' + encodeURIComponent(q)).then(function (x) {
+        if (self.input.value.trim() !== q || !x.items || !x.items.length) return;
+        var grid = h('div', { class: 'm-grid' });
+        x.items.forEach(function (it) { var c = poster(it, { caption: it.n + (it.y ? ' (' + it.y + ')' : '') }); c.addEventListener('click', function () { self.remember(q); open(it); }); grid.appendChild(c); });
+        extBox.innerHTML = '';
+        extBox.appendChild(h('section', { class: 'm-row' }, [h('h2', { text: 'På dina tjänster' }), grid]));
+        var empty = self.res.querySelector('.m-empty');
+        if (empty) empty.remove();
+      }).catch(function () {});
+    }
     NS.api.search(q).then(function (r) {
       if (self.input.value.trim() !== q) return;
       self.res.innerHTML = '';
@@ -618,9 +675,54 @@
         r[x[0]].forEach(function (it) { var c = poster(it, { caption: it.n + (it.y ? ' (' + it.y + ')' : '') }); c.addEventListener('click', function () { self.remember(q); open(it); }); grid.appendChild(c); });
         self.res.appendChild(h('section', { class: 'm-row' }, [h('h2', { text: x[1] }), grid]));
       });
-      if (!r.live.length && !r.movie.length && !r.series.length && !r.people.length) self.res.appendChild(h('div', { class: 'm-empty' }, [h('h2', { text: 'Inga träffar' }), h('p', { text: 'Inget matchar ”' + q + '”. Prova ett kortare ord.' })]));
+      if (!r.live.length && !r.movie.length && !r.series.length && !r.people.length && !extBox.childNodes.length) self.res.appendChild(h('div', { class: 'm-empty' }, [h('h2', { text: 'Inga träffar' }), h('p', { text: 'Inget matchar ”' + q + '”' + (NS.svc.enabled ? ' i biblioteket. Letar på dina tjänster…' : '. Prova ett kortare ord.') })]));
+      self.res.appendChild(extBox);
     }).catch(function () {});
   };
+
+  /* ---------------------------------------------------------------- a title on a streaming service */
+  /** On Netflix/Max/Disney+/Prime: the buttons open the service's app on the title (or its search). */
+  function MExtDetail(item) {
+    var self = this;
+    this.item = item;
+    this.el = h('div', { class: 'screen m-screen m-detail' });
+    this.art = h('div', { class: 'm-d-art' });
+    this.el.appendChild(this.art);
+    this.box = h('div', { class: 'm-d-wrap' });
+    this.el.appendChild(this.box);
+    this.dhead = h('header', { class: 'm-dhead' }, [h('button', { class: 'm-icon m-back', 'aria-label': 'Tillbaka', onclick: NS.mBack }, NS.icon('back')), h('span', { class: 'm-dhead-t', text: item.n })]);
+    this.el.appendChild(this.dhead);
+    this._onScroll = function () { if (NS.router.top() === self) self.dhead.classList.toggle('solid', (window.scrollY || 0) > 160); };
+    window.addEventListener('scroll', this._onScroll, { passive: true });
+    this.render();
+    NS.api.get('api/services/title/' + item.mt + '/' + item.id).then(function (d) { self.item = Object.assign({}, item, d); self.render(); }).catch(function () {});
+  }
+  MExtDetail.prototype.render = function () {
+    var d = this.item;
+    this.art.innerHTML = '';
+    if (d.bd || d.img) this.art.appendChild(NS.pic(d.bd || d.img, 'm-img' + (d.bd ? '' : ' m-contain')));
+    else this.art.style.background = NS.fallbackBg(d.n);
+    var b = h('div', { class: 'm-d-body' });
+    b.appendChild(h('div', { class: 'm-kind' }, [NS.icon('aurora'), d.mt === 'tv' ? 'Serie' : 'Film']));
+    b.appendChild(h('h1', { text: d.n }));
+    b.appendChild(h('p', { class: 'm-d-meta', text: [d.y, d.dur ? NS.fmtDur(d.dur) : '', d.seasons ? (d.seasons === 1 ? '1 säsong' : d.seasons + ' säsonger') : '', d.r > 0 ? '★ ' + d.r.toFixed(1) : ''].filter(Boolean).join('  •  ') }));
+    if (d.svc && d.svc.length) b.appendChild(h('div', { class: 'm-svc-line' }, [h('span', { text: 'Finns på' }), NS.svcChips(d.svc)]));
+    if (d.local) b.appendChild(h('button', { class: 'm-btn', onclick: function () { NS.router.push(new MDetail(d.local)); } }, [NS.icon('play'), 'Spela i ' + ((NS.status && NS.status.appName) || 'Norrsken')]));
+    (d.links || []).forEach(function (l, i) {
+      // a plain link: on the phone it opens the service's own app when it is installed
+      b.appendChild(h('a', { class: 'm-btn' + (d.local || i ? ' ghost' : ''), href: l.url, target: '_blank', rel: 'noopener' }, [NS.icon('link'), 'Öppna i ' + l.name]));
+    });
+    if (d.because) b.appendChild(h('p', { class: 'm-d-cast', text: d.because }));
+    if (d.p) b.appendChild(h('p', { class: 'm-d-desc', text: d.p }));
+    if (d.cast) b.appendChild(h('p', { class: 'm-d-cast' }, [h('b', { text: 'Medverkande: ' }), d.cast]));
+    if (d.g) b.appendChild(h('p', { class: 'm-d-cast' }, [h('b', { text: 'Genrer: ' }), d.g]));
+    if (d.svc && d.svc.length) b.appendChild(h('p', { class: 'm-jw', text: 'Uppgifter om tjänster från JustWatch via TMDB' }));
+    this.box.innerHTML = '';
+    this.box.appendChild(b);
+  };
+  MExtDetail.prototype.activate = function (first) { if (first) top0(); else restoreY(this); };
+  MExtDetail.prototype.deactivate = function () { saveY(this); };
+  MExtDetail.prototype.destroy = function () { window.removeEventListener('scroll', this._onScroll); };
 
   /* ---------------------------------------------------------------- "Mitt": profile, my list, settings */
   function MMe() {
@@ -645,6 +747,15 @@
       } }, [h('span', { class: 'm-prof-av', style: 'background:' + q.color, text: q.name.charAt(0).toUpperCase() }), h('span', { text: 'Byt till ' + q.name }), q.hasPin ? h('span', { class: 'm-lock' }, NS.icon('lock')) : null]));
     });
     if (list.childNodes.length) body.appendChild(list);
+    // the profile's own choices (kept on the server, so the TV gets them too)
+    var teamV = h('span', { class: 'm-set-v' }), subV = h('span', { class: 'm-set-v' });
+    var paintSet = function () { teamV.textContent = NS.teamName(NS.pref('team')); subV.textContent = NS.pref('sub') ? NS.langName(NS.pref('sub')) : 'Av'; };
+    body.appendChild(h('div', { class: 'm-sets' }, [
+      h('button', { class: 'm-set', onclick: function () { NS.pickTeam().then(function (ch) { if (ch) { NS.state.dirty = true; paintSet(); } }); } }, [NS.icon('live'), h('span', { text: 'Favoritlag' }), teamV, NS.icon('right')]),
+      h('button', { class: 'm-set', onclick: function () { NS.pickSubLang().then(function (ch) { if (ch) paintSet(); }); } }, [NS.icon('sub'), h('span', { text: 'Undertexter' }), subV, NS.icon('right')])
+    ]));
+    paintSet();
+    NS.loadTeams().then(paintSet);
     this.rows = h('div');
     body.appendChild(this.rows);
     var st = NS.status || {};
@@ -719,6 +830,7 @@
 
   NS.Browse = MBrowse;
   NS.Detail = MDetail;
+  NS.ExtDetail = MExtDetail;
   NS.Search = MSearch;
   NS.MMe = MMe;
 })();

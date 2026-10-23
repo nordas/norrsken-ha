@@ -53,7 +53,13 @@
       this.osd.appendChild(this.chan);
       this.osd.appendChild(h('div', { class: 'hint', style: 'top:auto;bottom:3rem' }, [
         h('span', {}, [h('kbd', { text: 'OK' }), 'Kanallista']), h('span', {}, [h('kbd', { text: '▲▼' }), 'Byt kanal']), h('span', {}, [h('kbd', { text: '0–9' }), 'Kanalnummer']), h('span', {}, [h('kbd', { text: 'Info' }), 'Tv-guide']), h('span', {}, [h('kbd', { text: '▶' }), 'Ljud/text']), h('span', {}, [h('kbd', { style: 'color:#f5d33c', text: '●' }), 'Förra kanalen']),
-        h('span', {}, [h('kbd', { style: 'color:#3ccf4e', text: '●' }), 'Favorit']), this.item.arc ? h('span', {}, [h('kbd', { style: 'color:#e5242b', text: '●' }), 'Starta om']) : null]));
+        h('span', {}, [h('kbd', { style: 'color:#3ccf4e', text: '●' }), 'Favorit']), this.item.arc ? h('span', {}, [h('kbd', { style: 'color:#e5242b', text: '●' }), 'Starta om']) : null,
+        h('span', {}, [h('kbd', { text: '⏯' }), 'Pausa'])]));
+      // paused live TV / watching behind live: how far behind, and how to get back
+      this.tsEl = h('div', { class: 'tshift' });
+      this.osd.appendChild(this.tsEl);
+      this.freezeEl = h('canvas', { class: 'freeze' });
+      el.insertBefore(this.freezeEl, el.firstChild.nextSibling);
     } else {
       this.bar = h('div', { class: 'bar' });
       this.bufEl = h('div', { class: 'buf' });
@@ -113,7 +119,10 @@
     });
     on('loadedmetadata', function () {
       if (self.kind === 'file' && self.pendingSeek > 0) { try { v.currentTime = self.pendingSeek; } catch (e) { /* ignore */ } self.pendingSeek = 0; }
+      // the screen's own player may list the file's sound tracks (Safari, many TVs): offer them right away
+      if (self.nativeAudio()) { self.autoTracks(); self.renderButtons(); }
     });
+    try { if (v.audioTracks && v.audioTracks.addEventListener) v.audioTracks.addEventListener('addtrack', function () { if (self.nativeAudio()) self.autoTracks(); }); } catch (e) { /* ignore */ }
     on('ended', function () { self.onEnded(); });
     on('error', function () {
       if (self.kind === 'hls' && self.hls) return; // hls.js reports its own errors
@@ -144,7 +153,9 @@
     var self = this;
     this.clk = NS.clock(this.clockEl);
     if (!first) {
-      if (this.suspended && !this.skipResume) { this.suspended = false; this.play(this.item, this.resumeAt || 0); }
+      // paused live TV (recording or archive spot): come back still paused, with the frozen picture, and go on from there
+      if (this.suspended && !this.skipResume && this.live && this.tshift) { this.suspended = false; if (this.freezeEl && this.freezeEl.width) this.freezeEl.classList.add('on'); this.buffering(false); this.paintTshift(); this.showOsd(true); }
+      else if (this.suspended && !this.skipResume) { this.suspended = false; this.play(this.item, this.resumeAt || 0); }
       this.skipResume = false;
       return;
     }
@@ -153,12 +164,27 @@
     this.every(500, function () { if (self.cuSeek) self.cuCatch(); });
     this.every(15000, function () { self.saveProgress(); });
     if (this.live) this.every(30000, function () { NS.needEpg([self.item.id]); });
+    if (this.live) this.every(1000, function () { if (self.tshift || self.livePausedAt) self.paintTshift(); });
   };
   Player.prototype.every = function (ms, fn) { this.timers.push(setInterval(fn, ms)); };
   Player.prototype.deactivate = function () {
     clearInterval(this.clk);
-    // something opened on top (guide, another player): stop streaming so we don't hold a second provider connection
-    if (this.sources) { this.resumeAt = this.live ? 0 : this.cur(); this.saveProgress(); this.teardown(); this.suspended = true; }
+    // something opened on top (guide, another player): stop streaming so we don't hold a second provider connection.
+    // Always cancel a request still in flight too, or it would start playing behind whatever is now on top.
+    this.reqId = {};
+    this.waitStart = false;
+    clearTimeout(this.airT);
+    this.airNative = false;
+    if (!this.suspended) this.resumeAt = this.live ? 0 : this.sources ? this.cur() : this.start;
+    if (this.sources) this.saveProgress();
+    if (this.live && this.tshift) {
+      // the recording goes on while the guide is open; remember where we were in it and keep the picture
+      clearTimeout(this.lpT);
+      var ts = this.tshift, v = this.video;
+      if (ts.playing) { ts.pos = v.currentTime || 0; ts.playing = false; this.snapFrame(); }
+    }
+    this.teardown();
+    this.suspended = true;
   };
   Player.prototype.destroy = function () {
     this.saveProgress(true);
@@ -166,9 +192,10 @@
     if (this.tok) { try { var u = 'rx/stop?t=' + encodeURIComponent(this.tok); if (navigator.sendBeacon) navigator.sendBeacon(u); else NS.api.post(u, {}); } catch (e) { /* ignore */ } }
     this.timers.forEach(clearInterval);
     clearInterval(this.clk);
-    clearTimeout(this.osdT); clearTimeout(this.scrubT); clearTimeout(this.numT); clearInterval(this.nextT); clearTimeout(this.zapT);
+    clearTimeout(this.osdT); clearTimeout(this.scrubT); clearTimeout(this.numT); clearInterval(this.nextT); clearTimeout(this.zapT); clearTimeout(this.airT);
     document.removeEventListener('nsk-epg', this._epg);
     if (this._winOff) this._winOff();
+    if (this.tshift) this.endTshift();
     this.stopSubs();
     this.teardown();
     if (this.chanRows) this.chanRows = null;
@@ -178,6 +205,7 @@
   /* ------------------------------------------------------------ loading */
   Player.prototype.play = function (item, start) {
     var self = this;
+    if (this.tshift) this.endTshift();
     this.item = item;
     this.start = start || 0;
     this.offset = 0;
@@ -248,6 +276,9 @@
           if (req !== self.reqId) return;
           self.probe = p;
           if (p.dur) self.dur = p.dur;
+          // the file's default sound track (not always the first): what plays directly, and what the converter starts with
+          var di = (p.audio || []).findIndex(function (a) { return a.def; });
+          if (di > 0 && (self.waitStart || self.kind !== 'remux')) self.audioIdx = p.audio[di].i;
           self.autoTracks();
           self.renderButtons();
           if (self.waitStart) go();
@@ -264,11 +295,15 @@
     if (this.mp) { try { this.mp.pause(); this.mp.unload(); this.mp.detachMediaElement(); this.mp.destroy(); } catch (e) { /* ignore */ } this.mp = null; }
     try { v.pause(); } catch (e) { /* ignore */ }
     v.removeAttribute('src');
+    // a left-over AirPlay <source> would otherwise be loaded by load() below: a second stream nobody watches
+    [].slice.call(v.querySelectorAll('source')).forEach(function (s) { s.remove(); });
     try { v.load(); } catch (e) { /* ignore */ }
   };
 
   Player.prototype.startSource = function (at) {
     var self = this;
+    if (this.suspended) return;
+    if (this.live && this.tshift && this.tshift.url) { this.startRec(this.tshift.playing ? this.video.currentTime || 0 : 0); return; }
     if (this.item.t === 'catchup') {
       // the archive URL is fixed to its start time: a retry/reload asks for a new one at the current position
       // (moving on to the next source of the same request is fine; reloading the same one is not)
@@ -283,6 +318,8 @@
     }
     var src = this.sources[this.si];
     var v = this.video;
+    this.airNative = false;
+    clearTimeout(this.airT);
     this.teardown();
     this.kind = src.kind;
     this.netRetry = 0;
@@ -344,7 +381,8 @@
     var src = this.sources[this.si];
     this.offset = at || 0;
     var url = NS.remuxUrl(src.url, this.offset, this.audioIdx, this.safeMode);
-    if (window.Hls && window.Hls.isSupported()) {
+    // during AirPlay Safari's own player keeps going (a new sound track or position too): hls.js would send only sound
+    if (window.Hls && window.Hls.isSupported() && !this.airNative) {
       var hls = this.hls = new window.Hls({
         enableWorker: true, startPosition: 0, maxBufferLength: 60, maxMaxBufferLength: 180, backBufferLength: 60,
         manifestLoadingTimeOut: 60000, manifestLoadingMaxRetry: 1, levelLoadingTimeOut: 30000, fragLoadingTimeOut: 60000,
@@ -365,41 +403,67 @@
         } catch (e) { /* ignore */ }
       });
       this.airUrl = url;
-      // iPhone/iPad (ManagedMediaSource): give Safari a plain HLS source too, before attaching, so AirPlay is offered
-      if (window.ManagedMediaSource && window.WebKitPlaybackTargetAvailabilityEvent) {
-        var old = v.querySelector('source.air');
-        if (old) old.remove();
-        var so = document.createElement('source');
-        so.className = 'air'; so.type = 'application/x-mpegURL'; so.src = new URL(url, location.href).href;
-        v.appendChild(so);
-        v.disableRemotePlayback = false;
-      }
+      // iPhone/iPad (ManagedMediaSource): hls.js clears all <source> children and turns remote playback off when it
+      // attaches, so the plain HLS source for AirPlay has to be added after that, next to hls.js's own source
+      hls.on(window.Hls.Events.MEDIA_ATTACHED, function () { if (self.hls === hls) self.addAirSource(); });
       hls.loadSource(url);
       hls.attachMedia(v);
       return;
     }
-    v.src = url;
+    v.src = this.airNative ? new URL(url, location.href).href : url;
     this.airUrl = url;
     this.playPromise();
   };
 
-  /** AirPlay (iPhone/iPad/Mac Safari): the Apple TV fetches the stream itself, so it gets a full address. */
-  Player.prototype.airplay = function () {
+  /** With hls.js in Safari: a plain HLS <source> after hls.js's own, which is what AirPlay hands to the Apple TV. */
+  Player.prototype.addAirSource = function () {
     var v = this.video;
+    if (!window.WebKitPlaybackTargetAvailabilityEvent || !this.hls) return;
+    var src = this.airUrl || (this.sources && this.sources[this.si] && this.sources[this.si].url) || '';
+    if (!src) return;
     try {
       v.disableRemotePlayback = false;
       v.setAttribute('x-webkit-airplay', 'allow');
+      var el = v.querySelector('source.air') || document.createElement('source');
+      el.className = 'air'; el.type = 'application/x-mpegURL'; el.src = new URL(src, location.href).href;
+      if (!el.parentNode) v.appendChild(el);
+    } catch (e) { /* ignore */ }
+  };
+
+  /**
+   * AirPlay (iPhone/iPad/Mac Safari). Through hls.js (ManagedMediaSource) Safari only sends the sound, so switch
+   * to Safari's own HLS player first: it hands the stream's address to the Apple TV, which then fetches the picture
+   * itself. Back to hls.js when AirPlay ends (or if no Apple TV was picked).
+   */
+  Player.prototype.airplay = function () {
+    var self = this, v = this.video;
+    if (!v.webkitShowPlaybackTargetPicker) { NS.toast('AirPlay finns i Safari på iPhone, iPad och Mac', 'info'); return; }
+    try {
       var src = this.airUrl || (this.sources && this.sources[this.si] && this.sources[this.si].url) || '';
-      if (src && this.hls) {
-        // with hls.js (ManagedMediaSource) Safari needs a plain HLS source to hand over
-        var abs = new URL(src, location.href).href;
-        var el = v.querySelector('source.air') || document.createElement('source');
-        el.className = 'air'; el.type = 'application/x-mpegURL'; el.src = abs;
-        if (!el.parentNode) v.appendChild(el);
+      if (this.hls && src && !this.airNative) {
+        var rel = v.currentTime || 0;
+        try { this.hls.destroy(); } catch (e) { /* ignore */ }
+        this.hls = null;
+        this.airNative = true;
+        [].slice.call(v.querySelectorAll('source')).forEach(function (s) { s.remove(); });
+        v.disableRemotePlayback = false;
+        v.setAttribute('x-webkit-airplay', 'allow');
+        v.src = new URL(src, location.href).href;
+        var seek = function () { v.removeEventListener('loadedmetadata', seek); if (rel > 1 && !self.live) { try { v.currentTime = rel; } catch (e) { /* ignore */ } } };
+        v.addEventListener('loadedmetadata', seek);
+        this.playPromise();
+        clearTimeout(this.airT);
+        this.airT = setTimeout(function () { if (self.airNative && !v.webkitCurrentPlaybackTargetIsWireless) self.airBack(); }, 30000);
       }
-      if (v.webkitShowPlaybackTargetPicker) v.webkitShowPlaybackTargetPicker();
-      else NS.toast('AirPlay finns i Safari på iPhone, iPad och Mac', 'info');
+      v.webkitShowPlaybackTargetPicker();
     } catch (e) { NS.toast('AirPlay gick inte att starta', 'info'); }
+  };
+  /** AirPlay ended: back to hls.js on the phone, where it was. */
+  Player.prototype.airBack = function () {
+    if (!this.airNative || this.suspended) return;
+    this.airNative = false;
+    clearTimeout(this.airT);
+    this.startSource(this.live ? 0 : this.cur());
   };
 
   Player.prototype.playPromise = function () {
@@ -481,7 +545,7 @@
 
   Player.prototype.watchdog = function () {
     var v = this.video;
-    if (this.errShown || !this.sources || this.tapEl) return;
+    if (this.suspended || this.errShown || !this.sources || this.tapEl) return;
     // never got going on this source: try the next one instead of spinning forever
     if (!this.played && Date.now() - (this.srcStart || 0) > (this.kind === 'remux' ? 30000 : 15000)) {
       console.log('[norrsken] source', this.si, this.kind, 'did not start, trying next');
@@ -584,8 +648,9 @@
   };
 
   Player.prototype.onEnded = function () {
+    if (this.live && this.tshift) { this.goLive(); return; }
     if (this.live) { this.startSource(0); return; }
-    if (this.item.t === 'catchup') { this.toLive(); return; }
+    if (this.item.t === 'catchup') { this.cuEnded(); return; }
     this.saveProgress(true);
     if (this.nextEp()) this.playNext();
     else this.exit();
@@ -665,9 +730,17 @@
     else this.el.classList.remove('buffering');
   };
 
+  /** Subtitles move up while the controls are showing, so the buttons never cover them. */
+  Player.prototype.liftCues = function () {
+    var tr = this.track, line = this.osdOn && !this.live ? -7 : -3;
+    if (!tr || !tr.cues) return;
+    for (var i = 0; i < tr.cues.length; i++) if (tr.cues[i].line !== line) { try { tr.cues[i].line = line; } catch (e) { /* ignore */ } }
+  };
   Player.prototype.showOsd = function (sticky) {
     var self = this;
+    var was = this.osdOn;
     this.osdOn = true;
+    if (!was) this.liftCues();
     this.osd.classList.add('on');
     this.tick();
     clearTimeout(this.osdT);
@@ -681,6 +754,7 @@
   };
   Player.prototype.hideOsd = function () {
     this.osdOn = false;
+    this.liftCues();
     this.osd.classList.remove('on');
     if (!this.live) { this.zone = 'bar'; this.paintZone(); }
   };
@@ -726,39 +800,70 @@
   Player.prototype.trackOptions = function () {
     var o = { audio: [], subs: [] };
     var hls = this.hls;
+    var self = this;
+    var pa = this.probe && this.probe.audio || [];
+    var chNote = function (n) { return n > 2 ? n === 6 ? '5.1' : n === 8 ? '7.1' : n + ' kanaler' : ''; };
+    var nat = this.nativeAudio();
     if (hls && hls.audioTracks && hls.audioTracks.length > 1) {
-      o.audio = hls.audioTracks.map(function (t, i) { return { kind: 'hls', i: i, label: t.name || t.lang || 'Ljud ' + (i + 1), on: hls.audioTrack === i }; });
-    } else if (this.probe && this.probe.audio.length > 1) {
-      var self = this;
-      o.audio = this.probe.audio.map(function (t) { return { kind: 'ff', i: t.i, label: t.label + (t.title && t.title !== t.label ? ' – ' + t.title : ''), note: t.ch > 2 ? t.ch === 6 ? '5.1' : t.ch + ' kanaler' : '', on: self.audioIdx === t.i }; });
+      o.audio = hls.audioTracks.map(function (t, i) { return { kind: 'hls', i: i, label: t.name || NS.langName(NS.langCode(t.lang)) || 'Ljud ' + (i + 1), code: NS.langCode(t.lang || t.name), on: hls.audioTrack === i }; });
+    } else if (nat) {
+      // the screen plays the file itself and can switch its sound tracks: instant, no conversion
+      var same = pa.length === nat.length;
+      o.audio = Array.prototype.map.call(nat, function (t, i) {
+        var p = same ? pa[i] : null;
+        var code = NS.langCode(p ? p.lang : t.language || t.label);
+        var label = p ? p.label + (p.title && p.title !== p.label ? ' – ' + p.title : '') : (NS.langName(code) || t.label || 'Ljud ' + (i + 1));
+        return { kind: 'native', i: i, label: label, code: code, note: p ? chNote(p.ch) : '', on: !!t.enabled };
+      });
+    } else if (pa.length > 1) {
+      o.audio = pa.map(function (t) { return { kind: 'ff', i: t.i, label: t.label + (t.title && t.title !== t.label ? ' – ' + t.title : ''), code: NS.langCode(t.lang || t.label), note: chNote(t.ch), on: self.audioIdx === t.i }; });
     }
     var sub = this.sub;
     o.subs.push({ kind: 'off', i: -1, label: 'Av', on: !sub });
     if (hls && hls.subtitleTracks && hls.subtitleTracks.length) {
-      hls.subtitleTracks.forEach(function (t, i) { o.subs.push({ kind: 'hls', i: i, label: t.name || t.lang || 'Undertext ' + (i + 1), on: !!sub && sub.kind === 'hls' && sub.i === i }); });
+      hls.subtitleTracks.forEach(function (t, i) { o.subs.push({ kind: 'hls', i: i, label: t.name || NS.langName(NS.langCode(t.lang)) || 'Undertext ' + (i + 1), code: NS.langCode(t.lang || t.name), forced: !!t.forced, on: !!sub && sub.kind === 'hls' && sub.i === i }); });
     }
     if (this.probe && this.tok) {
       this.probe.subs.filter(function (s) { return s.text; }).forEach(function (s) {
-        o.subs.push({ kind: 'ff', i: s.i, label: s.label + (s.forced ? ' (tvingad)' : '') + (s.title && s.title !== s.label ? ' – ' + s.title : ''), on: !!sub && sub.kind === 'ff' && sub.i === s.i });
+        o.subs.push({ kind: 'ff', i: s.i, label: s.label + (s.forced ? ' (tvingad)' : '') + (s.title && s.title !== s.label ? ' – ' + s.title : ''), code: NS.langCode(s.lang || s.label), forced: !!s.forced, on: !!sub && sub.kind === 'ff' && sub.i === s.i });
       });
     }
     return o;
   };
 
-  /** Re-apply the language the viewer picked last time. */
+  /** The screen's own list of sound tracks, when it has one and it is in charge (a file or HLS played without hls.js). */
+  Player.prototype.nativeAudio = function () {
+    var at = this.video.audioTracks;
+    if (this.hls || !at || at.length < 2 || this.kind === 'remux') return null;
+    return at;
+  };
+  /** Language of the sound that plays now. */
+  Player.prototype.curAudioCode = function () {
+    var on = this.trackOptions().audio.find(function (t) { return t.on; });
+    if (on) return on.code;
+    var pa = this.probe && this.probe.audio || [];
+    var a = pa.find(function (t) { return t.i === this.audioIdx; }, this) || pa[0];
+    return a ? NS.langCode(a.lang || a.label) : '';
+  };
+  /**
+   * The profile's languages: sound as picked last time (kids: Swedish), subtitles in Swedish unless the profile chose
+   * something else. Swedish speech needs no Swedish text, except the "forced" kind that only covers foreign lines.
+   */
   Player.prototype.autoTracks = function () {
     if (this.autoDone === this.item.k) return;
-    var pref = NS.store.get(NS.pkey('subLang'), NS.profile && NS.profile.kids ? '' : '');
-    var apref = NS.store.get(NS.pkey('audioLang'), NS.profile && NS.profile.kids ? 'Svenska' : '');
     var o = this.trackOptions();
+    var apref = NS.langCode(NS.pref('audio') || NS.store.get(NS.pkey('audioLang'), '')) || (NS.profile && NS.profile.kids ? 'sv' : '');
+    var spref = NS.pref('sub');
     var applied = false;
     if (apref) {
-      var a = o.audio.find(function (t) { return t.label.indexOf(apref) === 0 && !t.on; });
-      if (a) { this.setAudio(a, true); applied = true; }
+      var a = o.audio.find(function (t) { return t.code === apref; });
+      if (a && !a.on) { this.setAudio(a, true); applied = true; }
     }
-    if (pref) {
-      var s = o.subs.find(function (t) { return t.kind !== 'off' && t.label.indexOf(pref) === 0; });
-      if (s) { this.setSub(s, true); applied = true; }
+    if (spref) {
+      var speech = (a && a.code) || this.curAudioCode();
+      var cands = o.subs.filter(function (t) { return t.kind !== 'off' && t.code === spref; });
+      var s = speech === spref ? cands.find(function (t) { return t.forced; }) : (cands.find(function (t) { return !t.forced; }) || cands[0]);
+      if (s && !s.on) { this.setSub(s, true); applied = true; }
     }
     if (applied || o.subs.length > 1 || o.audio.length) this.autoDone = this.item.k;
   };
@@ -867,17 +972,43 @@
   Player.prototype.pickTrack = function () {
     var t = this.trItems[this.ti];
     if (!t) return;
-    if (t.group === 'Ljud') { this.setAudio(t); NS.store.set(NS.pkey('audioLang'), t.label.split(' – ')[0]); }
-    else { this.setSub(t); NS.store.set(NS.pkey('subLang'), t.kind === 'off' ? '' : t.label.split(' ')[0]); }
+    if (t.group === 'Ljud') {
+      this.setAudio(t);
+      if (t.code) NS.setPref('audio', t.code);
+      // foreign speech and no subtitles on: the profile's subtitle language comes on, as it does at the start
+      var spref = NS.pref('sub');
+      if (spref && t.code && t.code !== spref && (!this.sub || this.sub.forced)) {
+        var s = this.trackOptions().subs.find(function (x) { return x.kind !== 'off' && x.code === spref && !x.forced; });
+        if (s) { this.setSub(s, true); this.sub.auto = true; }
+      } else if (spref && t.code === spref && this.sub && this.sub.auto) this.setSub({ kind: 'off' }, true); // back to own language: off again
+    }
+    else { this.setSub(t); NS.setPref('sub', t.kind === 'off' ? '' : t.code || ''); }
     this.closePanel();
   };
   Player.prototype.setAudio = function (t, silent) {
-    if (t.kind === 'hls' && this.hls) { this.hls.audioTrack = t.i; return; }
+    var self = this;
+    if (t.kind === 'hls' && this.hls) { this.hls.audioTrack = t.i; if (!silent) NS.toast('Ljud: ' + t.label, 'sub'); return; }
+    if (t.kind === 'native') {
+      var at = this.nativeAudio();
+      if (at) {
+        for (var j = 0; j < at.length; j++) at[j].enabled = j === t.i;
+        this.audioIdx = (this.probe && this.probe.audio[t.i]) ? this.probe.audio[t.i].i : t.i;
+        if (!silent) NS.toast('Ljud: ' + t.label, 'sub');
+        // some TVs list the tracks but keep playing the first one: then let the server pick the track instead
+        setTimeout(function () {
+          var at2 = self.nativeAudio();
+          if (at2 && at2[t.i] && !at2[t.i].enabled && self.probe && self.probe.audio.length > 1) self.setAudio({ kind: 'ff', i: self.audioIdx, label: t.label }, true);
+        }, 1500);
+        return;
+      }
+      if (!this.probe || !this.probe.audio[t.i]) return;
+      t = { kind: 'ff', i: this.probe.audio[t.i].i, label: t.label };
+    }
     if (t.kind !== 'ff') return;
     this.audioIdx = t.i;
     // switching audio in a container the browser plays natively needs the remuxer
     var ri = this.sources.findIndex(function (s) { return s.kind === 'remux'; });
-    if (ri < 0) return;
+    if (ri < 0) { if (!silent) NS.toast('Ljudspåret kan inte bytas här: servern saknar ffmpeg', 'info'); return; }
     if (this.waitStart) { this.si = ri; return; } // not started yet: the first start uses this track
     var at = this.cur();
     this.si = ri;
@@ -888,7 +1019,7 @@
     this.stopSubs();
     if (this.hls) this.hls.subtitleTrack = -1;
     if (t.kind === 'off') { this.sub = null; if (!silent) NS.toast('Undertexter av', 'sub'); return; }
-    this.sub = { kind: t.kind, i: t.i, label: t.label };
+    this.sub = { kind: t.kind, i: t.i, label: t.label, forced: !!t.forced };
     if (t.kind === 'hls' && this.hls) { this.hls.subtitleTrack = t.i; this.hls.subtitleDisplay = true; }
     else if (t.kind === 'ff') this.startSubs(t.i, this.cur());
     if (!silent) NS.toast('Undertexter: ' + t.label, 'sub');
@@ -909,7 +1040,7 @@
     try {
       var Cue = window.VTTCue || window.TextTrackCue;
       var cue = new Cue(Math.max(0, s), e, c.text);
-      cue.line = -3;
+      cue.line = this.osdOn && !this.live ? -7 : -3;
       this.track.addCue(cue);
     } catch (err) { /* ignore bad cue */ }
   };
@@ -986,7 +1117,7 @@
   Player.prototype.cuLiveNow = function () { var cu = this.item.cu; return cu && Date.now() / 1000 < cu.start + cu.dur * 60; };
   /** Catch-up: after a new start, wait until the exact second is loaded, then jump there. */
   Player.prototype.cuCatch = function () {
-    if (!this.cuSeek) return;
+    if (!this.cuSeek || this.suspended) return;
     var v = this.video;
     var end = 0;
     try { if (v.buffered.length) end = v.buffered.end(v.buffered.length - 1); } catch (e) { /* ignore */ }
@@ -996,6 +1127,206 @@
       this.buffering(false);
       if (v.paused && this._cuHeld) { this._cuHeld = false; this.playPromise(); }
     } else if (this.played && !v.paused) { v.pause(); this._cuHeld = true; this.buffering(true); }
+  };
+
+  /**
+   * Catch-up: the archive stream ran out. The provider cuts an archive request at the length it knew about
+   * when it was asked, so in a programme still on air (or one cut short) ask again from where we are;
+   * go to the live broadcast only when we are close to "now" or the programme is over.
+   */
+  Player.prototype.cuEnded = function () {
+    var cu = this.item.cu, pos = this.cur();
+    var left = this.cuLiveNow() ? this.cuMax() - pos : cu.dur * 60 - 30 - pos;
+    // the same end again right away: the archive has nothing more for us, don't loop
+    var again = this._cuEnd !== undefined && Math.abs(pos - this._cuEnd) < 10;
+    this._cuEnd = pos;
+    if (left >= 60 && !again) { this.play(this.item, pos); return; }
+    if (this.cuLiveNow()) { this.toLive(); return; }
+    if (this.item.fromPause) { this.pauseNextProg(); return; }
+    this.exit();
+  };
+
+  /* ------------------------------------------------------------ pause live TV */
+  /**
+   * Pause on a live channel. A short pause just holds the picture. After a few seconds the stream is stopped
+   * (so it doesn't hold the provider connection) and, when you go on, you continue where you paused:
+   *  - from the channel's archive when it has one (catch-up, with its own timeline), or
+   *  - from the server's recording: it starts recording the channel when you pause and plays that back.
+   * Without either, going on after a while starts live again and says so.
+   */
+  Player.prototype.livePlayPause = function (play) {
+    var v = this.video;
+    var paused = this.tshift ? !this.tshift.playing || v.paused : v.paused;
+    if (play === null || play === undefined) play = paused;
+    if (play) this.liveResume(); else this.livePause();
+  };
+  Player.prototype.livePause = function () {
+    var self = this, v = this.video;
+    if (this.tshift && this.tshift.playing) { v.pause(); this.showOsd(true); this.paintTshift(); return; } // pausing the recording: it keeps recording
+    if (this.livePausedAt) return;
+    v.pause();
+    this.livePausedAt = Date.now();
+    this.showOsd(true);
+    this.paintTshift();
+    clearTimeout(this.lpT);
+    this.lpT = setTimeout(function () { self.freezeLive(); }, 4000);
+  };
+  Player.prototype.liveResume = function () {
+    var self = this, v = this.video;
+    clearTimeout(this.lpT);
+    var ts = this.tshift;
+    if (ts && ts.playing) { this.playPromise(); this.showOsd(); this.paintTshift(); return; }
+    if (ts && ts.mode === 'arc') {
+      // on with the archive from the paused second (a few seconds back: what the screen showed was behind live)
+      var prog = ts.prog;
+      var it = NS.catchupItem(this.item, prog, this.list);
+      it.fromPause = true;
+      var from = Math.max(0, (ts.at - prog.s) / 1000 - 8);
+      this.tshift = null;
+      this.livePausedAt = 0;
+      NS.router.replace(new Player({ item: it, start: from }));
+      return;
+    }
+    if (ts && ts.mode === 'rec') {
+      if (!ts.url) { this.buffering(true); ts.resume = true; return; } // the recording hasn't answered yet: go on when it does
+      ts.playing = true;
+      this.livePausedAt = 0;
+      this.startRec(ts.pos || 0);
+      ts.pos = 0;
+      this.paintTshift();
+      return;
+    }
+    var long = this.livePausedAt && Date.now() - this.livePausedAt > 20000;
+    this.livePausedAt = 0;
+    this.paintTshift();
+    if (long || !this.sources || !v.src && !this.hls && !this.mp) { this.startSource(0); NS.toast('Tillbaka till live', 'live'); }
+    else this.playPromise();
+    this.showOsd();
+  };
+  /** Still paused after a few seconds: keep the picture on screen, stop the stream, get ready to continue. */
+  Player.prototype.freezeLive = function () {
+    var self = this, v = this.video;
+    if (!this.live || !this.livePausedAt || !this.video.paused || this.tshift) return;
+    var st = (NS.status && NS.status.pause) || { mode: 'auto', rec: true, max: 60 };
+    if (st.mode === 'off') return;
+    var e = NS.epgFor(this.item.id);
+    var at = this.livePausedAt;
+    var arc = this.item.arc && e && e.now && e.now.s <= at;
+    if (!arc && !(st.mode === 'auto' && st.rec)) return;
+    this.snapFrame();
+    this.teardown();
+    if (arc) { this.tshift = { mode: 'arc', at: at, prog: e.now }; this.paintTshift(); return; }
+    var ts = this.tshift = { mode: 'rec', at: at, max: st.max };
+    this.paintTshift();
+    NS.api.post('api/pause/start' + NS.pq(), { id: this.item.id }).then(function (r) {
+      if (self.tshift !== ts) { NS.api.post('api/pause/' + r.id + '/stop', {}).catch(function () {}); return; }
+      ts.id = r.id; ts.url = r.url; ts.max = r.max || ts.max;
+      ts.aliveT = setInterval(function () {
+        NS.api.post('api/pause/' + ts.id + '/alive', {}).then(function (a) { ts.sec = a.sec; ts.full = a.full; self.paintTshift(); }).catch(function () { /* gone: the next play goes live */ ts.lost = true; });
+      }, 30000);
+      if (ts.resume) { ts.resume = false; self.liveResume(); }
+    }).catch(function (err) {
+      if (self.tshift !== ts) return;
+      self.tshift = null;
+      NS.toast((err && err.message) || 'Pausen kunde inte spelas in', 'info');
+      self.paintTshift();
+      if (ts.resume) self.liveResume();
+    });
+  };
+  /** Keep the current frame on screen (a canvas) while nothing streams. */
+  Player.prototype.snapFrame = function () {
+    var v = this.video, c = this.freezeEl;
+    if (!c) return;
+    try {
+      var w = v.videoWidth, hh = v.videoHeight;
+      if (w && hh) { c.width = w; c.height = hh; c.getContext('2d').drawImage(v, 0, 0, w, hh); c.classList.add('on'); }
+    } catch (err) { /* a picture from another site can't always be drawn: black then */ }
+  };
+  /** Play the server's recording of the paused channel (it keeps growing while we watch). */
+  Player.prototype.startRec = function (at) {
+    var self = this, v = this.video, ts = this.tshift;
+    if (ts.lost) { this.goLive(); return; }
+    this.teardown();
+    this.kind = 'hls';
+    this.played = false;
+    this.srcStart = Date.now();
+    this.lastMove = Date.now();
+    this.buffering(true);
+    var url = ts.url;
+    if (window.Hls && window.Hls.isSupported()) {
+      // an EVENT playlist: start where the recording starts and never jump ahead to its end
+      var hls = this.hls = new window.Hls({ enableWorker: true, startPosition: at || 0, liveSyncDurationCount: 99999, liveMaxLatencyDurationCount: Infinity,
+        maxBufferLength: 40, backBufferLength: 60, manifestLoadingTimeOut: 40000, manifestLoadingMaxRetry: 2, levelLoadingMaxRetry: 6, fragLoadingMaxRetry: 6 });
+      hls.on(window.Hls.Events.ERROR, function (ev, d) { if (d && d.fatal) { NS.diag('pausinspelning: ' + d.details); self.goLive(); } });
+      hls.on(window.Hls.Events.MANIFEST_PARSED, function () { self.playPromise(); });
+      hls.loadSource(url);
+      hls.attachMedia(v);
+    } else {
+      this.kind = 'native';
+      if (at) this.pendingSeek = at;
+      v.src = url;
+      this.playPromise();
+    }
+    var off = function () { v.removeEventListener('playing', off); self.freezeEl.classList.remove('on'); };
+    v.addEventListener('playing', off);
+  };
+  /** Leave the paused/behind state: stop the recording (or forget the archive spot). */
+  Player.prototype.endTshift = function () {
+    var ts = this.tshift;
+    clearTimeout(this.lpT);
+    this.livePausedAt = 0;
+    if (this.freezeEl) this.freezeEl.classList.remove('on');
+    if (!ts) return;
+    this.tshift = null;
+    clearInterval(ts.aliveT);
+    if (ts.id) NS.api.post('api/pause/' + ts.id + '/stop', {}).catch(function () {});
+    this.paintTshift();
+  };
+  /** ▶▶ / "Gå till live": back to the live broadcast. */
+  Player.prototype.goLive = function () {
+    if (!this.live) { if (this.item.t === 'catchup') this.toLive(); return; }
+    this.endTshift();
+    this.startSource(0);
+    this.showOsd();
+    NS.toast('Live', 'live');
+  };
+  /** The paused / behind-live line in the live OSD. */
+  Player.prototype.paintTshift = function () {
+    var el = this.tsEl;
+    if (!el) return;
+    var ts = this.tshift, v = this.video;
+    el.innerHTML = '';
+    var on = !!(ts || this.livePausedAt);
+    el.classList.toggle('on', on);
+    this.el.classList.toggle('behind', !!(ts && ts.playing));
+    if (this.liveBtn) this.liveBtn.style.display = ts ? '' : 'none';
+    if (!on) return;
+    var self = this;
+    var behind = 0;
+    if (ts && (ts.playing || ts.pos)) behind = Math.max(0, (Date.now() - ts.at) / 1000 - (ts.playing ? v.currentTime || 0 : ts.pos) - 4);
+    else behind = (Date.now() - (ts ? ts.at : this.livePausedAt)) / 1000;
+    var paused = !ts || !ts.playing || v.paused;
+    el.appendChild(h('span', { class: 'ts-state' }, [NS.icon(paused ? 'pause' : 'play'), paused ? 'Pausad' : 'Efter live']));
+    el.appendChild(h('b', { text: '−' + NS.fmtTime(behind) }));
+    var note = '';
+    if (ts && ts.mode === 'arc') note = 'Fortsätter från arkivet där du pausade';
+    else if (ts && ts.mode === 'rec') note = ts.full ? 'Inspelningen är full (' + ts.max + ' min)' : ts.url ? (paused ? 'Spelar in medan du pausar · högst ' + ts.max + ' min' : 'Spelas in · högst ' + ts.max + ' min') : 'Startar inspelningen…';
+    else if (this.livePausedAt) note = 'Bilden står still';
+    if (note) el.appendChild(h('span', { class: 'ts-note', text: note }));
+    if (ts && ts.playing) el.appendChild(h('span', { class: 'ts-key' }, [h('kbd', { text: '▶▶' }), 'Gå till live']));
+    el.onclick = function (e) { e.stopPropagation(); if (ts && ts.playing && e.target.closest && e.target.closest('.ts-key')) self.goLive(); else self.livePlayPause(); };
+  };
+
+  /** Watching a paused channel from its archive and the programme ended: go on with the next one, still behind live. */
+  Player.prototype.pauseNextProg = function () {
+    var self = this, it = this.item, end = (it.cu.start + it.cu.dur * 60) * 1000;
+    NS.api.guide(it.ch.id, 1, 6).then(function (list) {
+      var nx = (list || []).find(function (p) { return p.s >= end - 60e3 && p.s < Date.now() - 90e3; });
+      if (!nx) { self.toLive(); return; }
+      var n = NS.catchupItem(it.ch, nx, it.chList);
+      n.fromPause = true;
+      NS.router.replace(new Player({ item: n, start: 0 }));
+    }).catch(function () { self.toLive(); });
   };
 
   /** Yellow (or 0): jump back to the channel you watched before. */
@@ -1210,11 +1541,18 @@
       return;
     }
     if (a === 'playpause' || a === 'play' || a === 'pause') {
+      if (this.live) { this.livePlayPause(a === 'play' ? true : a === 'pause' ? false : null); return; }
       if (a === 'play' || (a === 'playpause' && v.paused)) this.playPromise(); else v.pause();
       this.showOsd(v.paused);
       return;
     }
 
+    if (this.live && this.tshift && (a === 'ff' || a === 'rw')) {
+      // behind live: ▶▶ back to live, ◀◀ ten seconds back in what was recorded
+      if (a === 'ff') this.goLive();
+      else if (this.tshift.playing) { try { v.currentTime = Math.max(0, v.currentTime - 10); } catch (e) { /* ignore */ } this.paintTshift(); }
+      return;
+    }
     if (this.live) {
       if (a === 'up' || a === 'chup') this.zap(1);
       else if (a === 'down' || a === 'chdn') this.zap(-1);
@@ -1322,6 +1660,15 @@
       fsb.addEventListener('click', function (e) { e.stopPropagation(); if (document.fullscreenElement) document.exitFullscreen(); else el.requestFullscreen(); });
       this.osd.appendChild(fsb);
     }
+    if (this.live) {
+      // live: a pause button (the space bar works too)
+      var pp = h('button', { class: 'mbtn mpp', 'aria-label': 'Pausa' }, NS.icon('pause'));
+      pp.addEventListener('click', function (e) { e.stopPropagation(); self.livePlayPause(); });
+      var syncPP = function () { pp.innerHTML = ''; var p0 = self.tshift ? !self.tshift.playing || self.video.paused : self.video.paused; pp.appendChild(NS.icon(p0 ? 'play' : 'pause')); };
+      this.video.addEventListener('play', syncPP);
+      this.video.addEventListener('pause', syncPP);
+      this.osd.appendChild(pp);
+    }
     // click the picture: play/pause (live: channel list); double click: full screen
     el.addEventListener('click', function (e) {
       if (e.target.closest && e.target.closest('button, .btn, .bar, .panel-side, .nextup, .perror, .ci, .ti, .skip-intro')) return;
@@ -1355,13 +1702,20 @@
       return b;
     };
     this.osd.appendChild(btn('tclose', 'back', function () { self.exit(); }, 'Stäng'));
-    if (el.requestFullscreen || el.webkitRequestFullscreen) {
-      if (window.WebKitPlaybackTargetAvailabilityEvent) {
-        var air = btn('tair', 'airplay', function () { self.airplay(); }, 'AirPlay');
-        air.style.display = 'none';
-        this.osd.appendChild(air);
-        this.video.addEventListener('webkitplaybacktargetavailabilitychanged', function (e) { air.style.display = e.availability === 'available' ? '' : 'none'; });
-      }
+    // AirPlay: iPhone Safari has no element fullscreen, so this must not depend on the fullscreen button.
+    // Always shown in Safari (the picker says itself when no Apple TV is found); dimmed while none is seen.
+    if (window.WebKitPlaybackTargetAvailabilityEvent) {
+      var air = btn('tair', 'airplay', function () { self.airplay(); }, 'AirPlay');
+      this.osd.appendChild(air);
+      this.video.addEventListener('webkitplaybacktargetavailabilitychanged', function (e) { air.classList.toggle('dim', e.availability !== 'available'); });
+      this.video.addEventListener('webkitcurrentplaybacktargetiswirelesschanged', function () {
+        var on = !!self.video.webkitCurrentPlaybackTargetIsWireless;
+        air.classList.toggle('on', on);
+        if (on) clearTimeout(self.airT); else if (self.airNative) self.airBack();
+      });
+    }
+    if (!(el.requestFullscreen || el.webkitRequestFullscreen)) el.classList.add('nofs');
+    else {
       this.osd.appendChild(btn('tfs', 'fs', function () {
         var d = document;
         if (d.fullscreenElement || d.webkitFullscreenElement) (d.exitFullscreen || d.webkitExitFullscreen).call(d);
@@ -1371,13 +1725,14 @@
         }
       }, 'Helskärm'));
     }
-    this.tPlay = btn('tplay', 'pause', function () { if (self.video.paused) self.playPromise(); else self.video.pause(); }, 'Spela/pausa');
+    this.tPlay = btn('tplay', 'pause', function () { if (self.live) self.livePlayPause(); else if (self.video.paused) self.playPromise(); else self.video.pause(); }, 'Spela/pausa');
     var mid = this.live
       ? [btn('tside', 'up', function () { self.zap(1); }, 'Nästa kanal'), this.tPlay, btn('tside', 'down', function () { self.zap(-1); }, 'Föregående kanal')]
       : [btn('tside', 'rw', function () { self.seekTo(self.cur() - 10); }, 'Bakåt 10 s'), this.tPlay, btn('tside', 'ff', function () { self.seekTo(self.cur() + 10); }, 'Framåt 10 s')];
     this.osd.appendChild(h('div', { class: 'tmid' }, mid));
     if (this.live) {
       this.osd.appendChild(h('div', { class: 'tlive' }, [
+        this.liveBtn = h('button', { class: 'btn golive', style: 'display:none', onclick: function (e) { e.stopPropagation(); self.goLive(); } }, [NS.icon('live'), 'Gå till live']),
         h('button', { class: 'btn', onclick: function (e) { e.stopPropagation(); self.openChannels(); } }, [NS.icon('episodes'), 'Kanaler']),
         h('button', { class: 'btn', onclick: function (e) { e.stopPropagation(); self.openTracks(); } }, [NS.icon('sub'), 'Ljud']),
         this.item.arc ? h('button', { class: 'btn', onclick: function (e) { e.stopPropagation(); self.restartProgramme(); } }, [NS.icon('restart'), 'Starta om']) : null,

@@ -360,4 +360,85 @@
   Guide.prototype.deactivate = function () { document.removeEventListener('nsk-epg', this._epg); NS.preview.stop(); this.pvCh = null; };
   Guide.prototype.destroy = function () { NS.preview.stop(); clearInterval(this.clockT); document.removeEventListener('nsk-epg', this._epg); };
   NS.Guide = Guide;
+
+  /* ================================================================ A TITLE ON A STREAMING SERVICE */
+  /**
+   * A film or series that is on Netflix, Max, Disney+ or Prime Video (not in the library). The TV can't start
+   * another app from here, so "Öppna i Netflix" tells you what to search for there and gives a QR code that
+   * opens the title in the service's app on the phone. If the library has it too, it plays here instead.
+   */
+  function ExtDetail(item) {
+    var self = this;
+    this.item = item;
+    this.el = h('div', { class: 'screen detail ext' });
+    this.ambient = new NS.Ambient();
+    this.el.appendChild(this.ambient.el);
+    this.bg = h('div', { class: 'dbg on' });
+    this.el.appendChild(this.bg);
+    this.el.appendChild(h('div', { class: 'dbg-shade' }));
+    this.el.appendChild(h('div', { class: 'dbg-left' }));
+    this.infoEl = h('div', { class: 'dinfo' });
+    this.el.appendChild(this.infoEl);
+    this.bi = 0;
+    this.render();
+    NS.api.get('api/services/title/' + item.mt + '/' + item.id).then(function (d) {
+      self.item = Object.assign({}, item, d);
+      self.render();
+    }).catch(function () { /* keep what the card had */ });
+  }
+  ExtDetail.prototype.render = function () {
+    var self = this, d = this.item;
+    var art = d.bd || d.img;
+    if (art) this.bg.style.backgroundImage = 'url("' + NS.imgSrc(art).replace(/"/g, '%22') + '")';
+    this.ambient.follow(d);
+    var info = this.infoEl;
+    info.innerHTML = '';
+    info.appendChild(h('div', { class: 'kind' }, [NS.icon('aurora'), d.mt === 'tv' ? 'Serie' : 'Film']));
+    info.appendChild(h('h1', { class: d.n.length > 22 ? 'long' : null, text: d.n }));
+    var m = h('div', { class: 'meta' });
+    var add = function (t) { if (t) m.appendChild(h('span', { text: String(t) })); };
+    if (d.g) add(d.g.split(',')[0]);
+    add(d.y);
+    if (d.dur) add(NS.fmtDur(d.dur));
+    if (d.seasons) add(d.seasons === 1 ? '1 säsong' : d.seasons + ' säsonger');
+    if (d.r > 0) add('★ ' + d.r.toFixed(1));
+    info.appendChild(m);
+    if (d.svc && d.svc.length) info.appendChild(h('div', { class: 'svc-line' }, [h('span', { text: 'Finns på' }), NS.svcChips(d.svc)]));
+    if (d.because) info.appendChild(h('div', { class: 'because', text: d.because }));
+    if (d.p) info.appendChild(h('div', { class: 'desc', text: d.p }));
+    if (d.cast) info.appendChild(h('div', { class: 'cast' }, [h('b', { text: 'Medverkande ' }), d.cast]));
+    var btns = [];
+    if (d.local) btns.push({ id: 'local', icon: 'play', label: 'Spela i ' + ((NS.status && NS.status.appName) || 'Norrsken') });
+    (d.links || (d.svc || []).map(function (k) { return { svc: k, name: NS.svcName(k) }; })).forEach(function (l) { btns.push({ id: 'open', icon: 'link', label: 'Öppna i ' + l.name, link: l }); });
+    this.btns = btns;
+    this.btnEls = btns.map(function (b, i) { return h('div', { class: 'btn', onclick: function () { self.bi = i; self.paint(); self.press(); } }, [NS.icon(b.icon), b.label]); });
+    info.appendChild(h('div', { class: 'btns' }, this.btnEls));
+    if (d.svc && d.svc.length) info.appendChild(h('div', { class: 'jw', text: 'Uppgifter om tjänster från JustWatch via TMDB' }));
+    this.paint();
+  };
+  ExtDetail.prototype.paint = function () {
+    var self = this;
+    if (this.bi >= this.btnEls.length) this.bi = 0;
+    this.btnEls.forEach(function (e, i) { e.classList.toggle('focus', i === self.bi); });
+  };
+  ExtDetail.prototype.press = function () {
+    var b = this.btns[this.bi], d = this.item;
+    if (!b) return;
+    if (b.id === 'local') { NS.router.push(new NS.Detail(d.local)); return; }
+    var l = b.link;
+    var qr = h('div', { class: 'qr-pop' }, [
+      h('div', { class: 'qr' }, NS.img('api/qr.svg?text=' + encodeURIComponent(l.url || ''))),
+      h('div', { class: 'qr-txt' }, [h('b', { text: 'På tv:n' }), h('p', { text: 'Öppna ' + l.name + '-appen och sök efter ”' + d.n + '”.' }),
+        h('b', { text: 'På mobilen' }), h('p', { text: 'Skanna koden, så öppnas ' + l.name + ' direkt på titeln.' })])
+    ]);
+    NS.confirm({ title: 'Öppna i ' + l.name, body: l.url ? qr : null, text: l.url ? '' : 'Öppna ' + l.name + '-appen och sök efter ”' + d.n + '”.', buttons: [{ label: 'Klar', icon: 'check', value: true }], cancel: true });
+  };
+  ExtDetail.prototype.onKey = function (a) {
+    if (a === 'back') { NS.router.pop(); return; }
+    if (a === 'left' && this.bi > 0) this.bi--;
+    else if (a === 'right' && this.bi < this.btns.length - 1) this.bi++;
+    else if (a === 'ok') { this.press(); return; }
+    this.paint();
+  };
+  NS.ExtDetail = ExtDetail;
 })();

@@ -1,4 +1,14 @@
-# Norrsken – överlämning (version 1.8.7, 22 okt 2026)
+# Norrsken – överlämning (version 1.10.0 på dev, 23 okt 2026)
+
+## Nytt i 1.9.0–1.10.0 (dev, inte på main än)
+- 1.9.0: muskontroller, "Föreslaget för dig", gillar/inte för mig.
+- Ljudspårsbyte i alla lägen: hls.js-renditioner, skärmens egna spår (video.audioTracks) när filen spelas direkt, annars servern (a=N). Under AirPlay byts spåret i Safaris egen spelare. Testat i Chromium med och utan inbyggda spår.
+- Undertexter: svenska förval per profil (NS.pref sub, standard sv). Svenskt tal → bara tvingade. Byter man till utländskt ljud slås svenska på, tillbaka till svenska → av igen. Undertexten flyttas upp när knapparna syns.
+- Favoritlag (standard Luleå Hockey) överst på startsidan när tv-guiden visar match nu eller inom en timme (lib/sport.js), OK byter kanal. Väljs i inställningarna.
+- Streamingtjänster (Netflix, Max, Disney+, Prime Video) via TMDB-nyckel i /setup: sök, "Finns på …", "Öppna i appen", förslagsrad (lib/services.js). Kräver nyckel.
+- Paus på live-tv: kanaler med arkiv fortsätter från arkivet; övriga spelas in till disk på servern (lib/tsbuf.js, högst 30 min–3 h, slutar vid <1,5 GB ledigt). Pausen överlever att tv-guiden öppnas. Inställning i /setup.
+- Otestat på riktig tv/iPhone: allt ovan. Kolla särskilt paus på riktig leverantör (H.264/TS) och ljudspår på Titan OS.
+- Domarrundor: användaren vill inte ha dem tills vidare.
 
 ## Läge just nu
 - Home Assistant (VM i VMware Fusion på iMacen, 192.168.85.51) slutade svara efter uppdatering till 1.8.5. Kolla först:
@@ -18,7 +28,7 @@
 ## Användarens krav
 - Felfritt på tv:n (Philips, Titan OS = bara HTML5-appar). 4K och flerkanalsljud ska fungera. Mobil och iMac (5K) också.
 - Alternativ som diskuterats: Android/Google TV-dosa med egen privat app (inbyggd spelare, inget omkodningssteg), "Spela i IINA" på Mac.
-- Pusha till main först när användaren sagt ja. Svara kort på svenska. Två domare vid granskningsrundor, bara ändrade skärmar.
+- Pusha till main först när användaren sagt ja. Svara kort på svenska. Inga domarrundor (användarens önskan 23 okt).
 
 ## Kvar från domarrunda 4 (betyg 8/7/8 båda)
 1. ~~Catch-up vid arkivslut~~ – klart i 1.8.6 (player.js cuEnded).
@@ -31,4 +41,4 @@
 8. Småsaker: gräns 36 h i guiden (move), position i catch-up, "I går", sökrutans text, PIN-etikett i inställningarna.
 
 ## Kod
-- Källa: norrsken/app (server.js, lib/, public/). Tester och mock-leverantör: dev/test (kopiera till app-mappen som test/, skapa testmedia med make-media.sh, kör `node --test test/*.test.js`, 25 st).
+- Källa: norrsken/app (server.js, lib/, public/). Tester och mock-leverantör: dev/test (kopiera till app-mappen som test/, skapa testmedia med make-media.sh, kör `node --test test/*.test.js`, 40 st).

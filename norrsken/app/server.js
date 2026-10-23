@@ -13,6 +13,9 @@ const { Catalog, Xtream, xtreamFromM3uUrl, normServer, dedupe } = require('./lib
 const { Proxy } = require('./lib/proxy');
 const ff = require('./lib/ffmpeg');
 const qr = require('./lib/qr');
+const sport = require('./lib/sport');
+const tsbuf = require('./lib/tsbuf');
+const { Services, serviceInfo } = require('./lib/services');
 const { redact, fetchText, pool } = require('./lib/util');
 const pkg = require('./package.json');
 
@@ -189,6 +192,8 @@ function homePage(prof, st) {
   if (cw.length) rows.push(row('cw', 'Fortsätt titta', 'poster', cw, { limit: 30 }));
   const rec = recommendations(prof, st);
   if (rec.length >= 4) rows.push(row('rec', 'Föreslaget för dig', 'poster', rec, { limit: 30 }));
+  const svc = serviceRow(prof);
+  if (svc) rows.push(svc);
   const ml = st.myList.map(m => m.item).filter(Boolean);
   const mlv = ml.filter(i => i.t !== 'live');
   if (mlv.length) rows.push(row('ml', 'Min lista', 'poster', mlv, { limit: 60 }));
@@ -340,6 +345,7 @@ function status() {
     epg: { at: s.epgAt, count: s.epgCount, loading: s.epgLoading, error: s.epgError },
     ffmpeg: ff.has(),
     previews: store.config.options.previews || 'sound',
+    pause: { mode: store.config.options.pauseMode || 'auto', max: +store.config.options.pauseMax || 60, rec: ff.has() },
     parentPin: (store.config.profiles || []).some(p => !p.kids && p.pin),
     profiles: publicProfiles(),
     pinRequired: !!SETUP_PIN,
@@ -357,7 +363,8 @@ function publicConfig() {
     xtream: { server: c.xtream.server, username: c.xtream.username, hasPassword: !!c.xtream.password },
     m3u: { url: c.m3u.url, epgUrl: c.m3u.epgUrl },
     profiles: publicProfiles(),
-    options: c.options,
+    // the key itself never goes back out; '••••' means "one is saved"
+    options: { ...c.options, tmdbKey: c.options.tmdbKey ? '••••' : '' },
   };
 }
 
@@ -445,7 +452,31 @@ route('GET', '/api/page/:page', (req, res, q, p) => {
   else if (p.page === 'mylist') rows = myListPage(st);
   else if (['live', 'movie', 'series'].includes(p.page)) rows = typePage(p.page, prof, st);
   else return bad(res, 'okänd sida', 404);
-  ok(res, { rows, featured: featured(p.page, prof) });
+  ok(res, { rows, featured: featured(p.page, prof), sport: p.page === 'home' || p.page === 'live' ? sportNow(prof, st) : null });
+});
+
+/** The profile's favourite team playing now or soon (start page billboard). */
+function sportNow(prof, st) {
+  const tid = (st.prefs && st.prefs.team) || 'lulea';
+  if (tid === 'none') return null;
+  const key = prof.id + '|' + tid + '|' + catalog.epg.at;
+  const hit = sportCache.get(key);
+  if (hit && Date.now() - hit.at < 60e3) return hit.m;
+  let m = null;
+  try {
+    m = sport.findMatch(tid, catalog.list('live', 'all', prof), catalog.epg);
+    if (m) m.chans = m.chans.slice(0, 12);
+  } catch (e) { console.error('[sport]', e.message); }
+  sportCache.set(key, { at: Date.now(), m });
+  if (sportCache.size > 50) sportCache.clear();
+  return m;
+}
+const sportCache = new Map();
+
+route('GET', '/api/sport', (req, res, q) => {
+  if (!catalog.ready()) return bad(res, 'inte redo', 503);
+  const prof = profileOf(q);
+  ok(res, { match: sportNow(prof, store.profileState(prof.id)), teams: sport.list() });
 });
 
 route('GET', '/api/list', (req, res, q) => {
@@ -509,7 +540,19 @@ route('GET', '/api/state/:profile', (req, res, q, p) => {
     seen: st.seen || {},
     reminders: (st.reminders || []).filter(r => r.s > Date.now() - 15 * 60e3),
     likes: st.likes || {},
+    prefs: st.prefs || {},
   });
+});
+
+route('POST', '/api/state/:profile/prefs', async (req, res, q, p) => {
+  // the profile's own choices: subtitle and sound language, favourite team
+  const b = await readBody(req);
+  const st = store.profileState(store.profile(p.profile).id);
+  const pr = st.prefs || (st.prefs = {});
+  for (const k of ['sub', 'audio']) if (typeof b[k] === 'string') pr[k] = b[k].toLowerCase().replace(/[^a-z-]/g, '').slice(0, 12);
+  if (typeof b.team === 'string') pr.team = sport.teamId(b.team);
+  store.saveState();
+  ok(res, { ok: true, prefs: pr });
 });
 
 route('POST', '/api/state/:profile/mylist', async (req, res, q, p) => {
@@ -598,6 +641,8 @@ route('POST', '/api/state/:profile/like', async (req, res, q, p) => {
   st.likes = st.likes || {};
   if (+b.v === 1 || +b.v === -1) st.likes[k] = +b.v; else delete st.likes[k];
   store.saveState();
+  const sc = svcRows.get(store.profile(p.profile).id);
+  if (sc && !sc.busy) sc.at = 0; // new taste: work the services row out again
   ok(res, { ok: true });
 });
 
@@ -714,7 +759,102 @@ route('GET', '/api/similar/:type/:id', async (req, res, q, p) => {
 
 let preparing = false;
 let lastStreamAt = 0;
-catalog.isBusy = () => Date.now() - lastStreamAt < 15 * 60e3 || ff.activeSessions() > 0;
+const services = new Services(() => store.config.options);
+
+/** The title in the library ("Finns i Norrsken"), if it is there. */
+function localTwin(it, prof) {
+  const type = it.mt === 'tv' ? 'series' : 'movie';
+  const hit = catalog.byTitle(type, it.n, it.y, prof);
+  return hit ? { t: hit.t, id: hit.id, k: hit.k, n: hit.n, img: hit.img, y: hit.y } : null;
+}
+
+/** TMDB titles for what the profile liked or watched most: the seeds for "på dina tjänster". */
+async function serviceSeeds(st) {
+  const sig = [...tasteSignals(st).entries()].filter(([, w]) => w > 1).sort((a, b) => b[1] - a[1]).slice(0, 4);
+  const out = [];
+  for (const [k] of sig) {
+    const type = k[0] === 's' ? 'series' : 'movie';
+    const it = catalog.get(type, k.slice(2));
+    if (!it) continue;
+    const info = catalog.info.get(k) || {};
+    const mt = type === 'series' ? 'tv' : 'movie';
+    let id = info.tmdb;
+    if (!id) {
+      try {
+        const r = await services.get('/search/' + mt, { query: it.n, year: mt === 'movie' ? it.y : '', first_air_date_year: mt === 'tv' ? it.y : '', language: 'sv-SE' }, 7 * 86400e3);
+        id = r.results && r.results[0] && r.results[0].id;
+      } catch (e) { if (/nyckeln/.test(e.message)) throw e; }
+    }
+    if (id) out.push({ mt, id: String(id), n: it.n });
+  }
+  return out;
+}
+
+/*
+ * "Föreslaget på dina tjänster" on the start page: worked out in the background (it takes a few dozen TMDB
+ * lookups the first time) and shown from then on, refreshed every few hours.
+ */
+const svcRows = new Map(); // profile id → { at, items, busy }
+function serviceRow(prof) {
+  if (!services.enabled() || prof.kids) return null;
+  let c = svcRows.get(prof.id);
+  if (!c || (Date.now() - c.at > 4 * 3600e3 && !c.busy)) {
+    c = c || { at: 0, items: [] };
+    c.busy = true;
+    svcRows.set(prof.id, c);
+    const st = store.profileState(prof.id);
+    serviceSeeds(st).then(seeds => services.suggest({ seeds, limit: 30 }))
+      .then(items => { c.items = items.filter(it => !localTwin(it, prof)).slice(0, 24); c.at = Date.now(); })
+      .catch(e => { console.error('[tjänster]', e.message); c.at = Date.now() - 3.5 * 3600e3; })
+      .finally(() => { c.busy = false; });
+  }
+  return c.items.length >= 4 ? row('svc', 'Föreslaget på dina tjänster', 'poster', c.items, { limit: 24 }) : null;
+}
+
+route('GET', '/api/services/where/:mt/:id', async (req, res, q, p) => {
+  if (!services.enabled() || !['movie', 'tv'].includes(p.mt) || !/^\d+$/.test(p.id)) return ok(res, { svc: [] });
+  try { ok(res, { svc: await services.where(p.mt, p.id) }); } catch (e) { ok(res, { svc: [], error: e.message }); }
+});
+
+route('GET', '/api/services', (req, res) => ok(res, { enabled: services.enabled(), chosen: services.chosen(), info: serviceInfo(), error: services.lastError }));
+
+route('GET', '/api/services/search', async (req, res, q) => {
+  if (!services.enabled()) return ok(res, { enabled: false, items: [] });
+  const prof = profileOf(q);
+  if (prof.kids) return ok(res, { enabled: true, items: [] }); // kids profiles: only what's in the library
+  try {
+    const items = await services.search(q.get('q') || '');
+    for (const it of items) it.local = localTwin(it, prof);
+    ok(res, { enabled: true, items });
+  } catch (e) { ok(res, { enabled: true, items: [], error: e.message }); }
+});
+
+route('GET', '/api/services/suggest', async (req, res, q) => {
+  if (!services.enabled()) return ok(res, { enabled: false, items: [] });
+  const prof = profileOf(q);
+  if (prof.kids) return ok(res, { enabled: true, items: [] });
+  const st = store.profileState(prof.id);
+  try {
+    const seeds = await serviceSeeds(st);
+    const skip = new Set(Object.keys(st.extSkip || {}));
+    let items = await services.suggest({ seeds, skip, limit: 30 });
+    // what is in the library already plays here: leave it out of the services row
+    items = items.filter(it => !localTwin(it, prof)).slice(0, 24);
+    ok(res, { enabled: true, items });
+  } catch (e) { ok(res, { enabled: true, items: [], error: e.message }); }
+});
+
+route('GET', '/api/services/title/:mt/:id', async (req, res, q, p) => {
+  if (!services.enabled()) return bad(res, 'Ingen TMDB-nyckel', 404);
+  if (!['movie', 'tv'].includes(p.mt) || !/^\d+$/.test(p.id)) return bad(res, 'id');
+  try {
+    const it = await services.detail(p.mt, p.id);
+    it.local = localTwin(it, profileOf(q));
+    ok(res, it);
+  } catch (e) { bad(res, e.message, 502); }
+});
+
+catalog.isBusy = () => Date.now() - lastStreamAt < 15 * 60e3 || ff.activeSessions() > 0 || tsbuf.active() > 0;
 route('POST', '/api/prepare/:type/:id', (req, res, q, p) => {
   // Read the file's format in the background so pressing Play starts faster – but never at the cost of a
   // provider connection someone needs: one at a time, not while anything plays, not on 1–2 connection accounts.
@@ -789,9 +929,52 @@ route('GET', '/api/stream/:type/:id', async (req, res, q, p) => {
     const caps = parseCaps(q.get('caps'));
     try { info = await Promise.race([ff.probe(src.primary, catalog.ua()), new Promise((_, no) => setTimeout(() => no(new Error('t')), 7000))]); } catch (_) { /* unknown: keep order */ }
     const o = store.config.options;
-    if (info && !ff.playsAsIs(info, caps, { audioMode: o.audioMode, maxRes: o.maxRes })) order = [remux, ...sources.filter(x => x !== remux)];
+    // judge by the track that plays: the file's default sound track, which isn't always the first
+    const a0 = info ? Math.max(0, info.audio.findIndex(x => x.def)) : 0;
+    if (info && !ff.playsAsIs(info, caps, { a: a0, audioMode: o.audioMode, maxRes: o.maxRes })) order = [remux, ...sources.filter(x => x !== remux)];
   }
-  ok(res, { live: false, sources: order, t: ff.has() ? t : '', ext, media: info ? { h: info.height, v: info.video, a: (info.audio[0] || {}).codec, ch: (info.audio[0] || {}).ch } : null });
+  ok(res, { live: false, sources: order, t: ff.has() ? t : '', ext, media: info ? { h: info.height, v: info.video, a: (info.audio.find(x => x.def) || info.audio[0] || {}).codec, ch: (info.audio.find(x => x.def) || info.audio[0] || {}).ch, na: info.audio.length } : null });
+});
+
+/* ------------------------------------------------------------------ pause live TV (record to disk) */
+route('POST', '/api/pause/start', async (req, res, q) => {
+  const b = await readBody(req);
+  if (!catalog.ready()) return bad(res, 'inte redo', 503);
+  if (!ff.has()) return bad(res, 'ffmpeg saknas på servern', 501);
+  const o = store.config.options;
+  if ((o.pauseMode || 'auto') !== 'auto') return bad(res, 'Paus med inspelning är avstängd i inställningarna', 403);
+  const prof = profileOf(q);
+  const id = String(b.id || '');
+  if (prof.kids && !catalog.allowed('live', id, prof)) return bad(res, 'Det här finns inte i barnprofilen', 403);
+  if (!pinOk(q, prof)) return bad(res, 'Profilen är låst', 401);
+  const src = catalog.streamUrl('live', id);
+  if (!src || !src.primary) return bad(res, 'Kunde inte hitta kanalen', 404);
+  lastStreamAt = Date.now();
+  try {
+    const it = catalog.get('live', id) || {};
+    const s = tsbuf.start(src.primary, { ua: catalog.ua(), maxMin: +o.pauseMax || 60, ch: it.n || id });
+    ok(res, { id: s.id, url: ingressBase(req) + '/pause/' + s.id + '/index.m3u8', max: s.maxMin });
+  } catch (e) { bad(res, e.message, 507); }
+});
+route('POST', '/api/pause/:id/alive', (req, res, q, p) => {
+  const s = tsbuf.get(p.id);
+  if (!s) return bad(res, 'slut', 404);
+  ok(res, { ok: true, sec: tsbuf.length(s), full: s.full, done: s.done });
+});
+route('POST', '/api/pause/:id/stop', (req, res, q, p) => { tsbuf.stop(tsbuf.get(p.id), 'gick till live'); ok(res, { ok: true }); });
+route('GET', '/pause/:id/index.m3u8', async (req, res, q, p) => {
+  const s = tsbuf.get(p.id);
+  if (!s) return bad(res, 'Inspelningen finns inte längre', 404);
+  try { send(res, 200, await tsbuf.playlist(s, ingressBase(req) + '/pause'), 'application/vnd.apple.mpegurl', { 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' }); } catch (e) { bad(res, e.message, 502); }
+});
+route('GET', '/pause/:id/:name', (req, res, q, p) => {
+  const f = tsbuf.file(p.id, p.name);
+  if (!f) return bad(res, 'slut', 404);
+  fs.stat(f, (err, st) => {
+    if (err) return bad(res, 'saknas', 404);
+    res.writeHead(200, { 'Content-Type': p.name.endsWith('.mp4') ? 'video/mp4' : 'video/iso.segment', 'Content-Length': st.size, 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' });
+    fs.createReadStream(f).pipe(res);
+  });
 });
 
 route('GET', '/api/probe', async (req, res, q) => {
@@ -896,6 +1079,10 @@ route('POST', '/api/setup', async (req, res) => {
     if (['orig', '1080'].includes(o.maxRes)) opt.maxRes = o.maxRes;
     if (['sound', 'muted', 'off'].includes(o.previews)) opt.previews = o.previews;
     if (['auto', 'off'].includes(o.directPlay)) opt.directPlay = o.directPlay;
+    if (['auto', 'archive', 'off'].includes(o.pauseMode)) opt.pauseMode = o.pauseMode;
+    if ([30, 60, 120, 180].includes(+o.pauseMax)) opt.pauseMax = +o.pauseMax;
+    if (typeof o.tmdbKey === 'string' && o.tmdbKey !== '••••') opt.tmdbKey = o.tmdbKey.trim().slice(0, 400);
+    if (Array.isArray(o.services)) opt.services = o.services.filter(x => ['netflix', 'max', 'disney', 'prime'].includes(x));
     for (const k of ['userAgent', 'epgUrl', 'kidsPattern']) if (typeof o[k] === 'string') opt[k] = o[k].trim().slice(0, 500);
   }
   const hasSource = c.source === 'm3u' ? !!c.m3u.url : !!(c.xtream.server && c.xtream.username && c.xtream.password);

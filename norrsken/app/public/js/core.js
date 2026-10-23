@@ -86,6 +86,7 @@
     lock: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
     archive: '<path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v4h4"/><path d="M12 8v4l3 2"/>',
         more: '<circle cx="5" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="19" cy="12" r="1.6" fill="currentColor"/>',
+    link: '<path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/>',
     aurora: '<path d="M3 17c3-8 6-11 9-11s6 3 9 11" stroke-width="2.4"/><path d="M6 19c2-5 4-7 6-7s4 2 6 7" stroke-width="1.6"/>'
   };
   var FILLED = { play: 1, pause: 1, next: 1, star: 1 };
@@ -156,6 +157,8 @@
     var pt = id ? NS.store.get('pt.' + id, '') : '';
     return path + (path.indexOf('?') < 0 ? '?' : '&') + 'profile=' + encodeURIComponent(id) + (pt ? '&pt=' + pt : '');
   }
+  /** The profile (and PIN token) as a query string, for POSTs that start playback. */
+  NS.pq = function () { return q(''); };
   NS.api = {
     get: function (p, t) { return req('GET', q(p), null, t); },
     post: function (p, b) { return req('POST', p, b); },
@@ -229,6 +232,7 @@
       NS.state.seen = s.seen || {};
       NS.state.reminders = s.reminders || [];
       NS.state.likes = s.likes || {};
+      NS.state.prefs = s.prefs || {};
     }).catch(function () { /* offline */ });
   };
   /** A played-back programme from a channel's archive, played like a film with its own timeline. */
@@ -415,6 +419,89 @@
   /** Per-profile key for settings remembered on this device. */
   NS.pkey = function (k) { return k + '.' + (NS.profile ? NS.profile.id : ''); };
 
+  /* ---------------------------------------------------------------- languages & per-profile choices */
+  var LANG = [
+    ['sv', 'Svenska', /^(sv|swe|sve|svenska|swedish)\b/i], ['en', 'Engelska', /^(en|eng|engelska|english)\b/i],
+    ['no', 'Norska', /^(no|nor|nob|nno|norska|norwegian|norsk)\b/i], ['da', 'Danska', /^(da|dan|danska|danish|dansk)\b/i],
+    ['fi', 'Finska', /^(fi|fin|finska|finnish|suomi)\b/i], ['de', 'Tyska', /^(de|ger|deu|tyska|german|deutsch)\b/i],
+    ['fr', 'Franska', /^(fr|fre|fra|franska|french)\b/i], ['es', 'Spanska', /^(es|spa|spanska|spanish)\b/i],
+    ['it', 'Italienska', /^(it|ita|italienska|italian)\b/i], ['ja', 'Japanska', /^(ja|jpn|japanska|japanese)\b/i]
+  ];
+  /** 'swe', 'sv-SE', 'Svenska', 'Swedish' → 'sv' (unknown → lower-case text). */
+  NS.langCode = function (s) {
+    s = String(s || '').trim();
+    if (!s) return '';
+    for (var i = 0; i < LANG.length; i++) if (LANG[i][2].test(s)) return LANG[i][0];
+    return s.toLowerCase().split(/[-_\s]/)[0];
+  };
+  NS.langName = function (c) { for (var i = 0; i < LANG.length; i++) if (LANG[i][0] === c) return LANG[i][1]; return c ? c.toUpperCase() : ''; };
+  /**
+   * The profile's choices, kept on the server so they follow the profile to every screen:
+   * sub = subtitle language ('' = off; Swedish unless the profile chose something else), audio = sound language, team = favourite team.
+   */
+  NS.pref = function (k) {
+    var p = NS.state.prefs || {};
+    if (k === 'sub') return p.sub === undefined || p.sub === null ? 'sv' : p.sub;
+    return p[k] === undefined ? (k === 'team' ? 'lulea' : '') : p[k];
+  };
+  /* favourite team and subtitle language: shared pickers for the TV settings and the phone's "Jag" page */
+  NS.teams = [];
+  NS.loadTeams = function () {
+    if (NS.teams.length) return Promise.resolve(NS.teams);
+    return NS.api.get('api/sport').then(function (r) { NS.teams = r.teams || []; return NS.teams; }).catch(function () { return []; });
+  };
+  NS.teamName = function (id) {
+    if (id === 'none') return 'Inget';
+    var t = NS.teams.find(function (x) { return x.id === id; });
+    return t ? t.name : id === 'lulea' ? 'Luleå Hockey' : id;
+  };
+  NS.pickTeam = function () {
+    return NS.loadTeams().then(function (teams) {
+      var cur = NS.pref('team');
+      var items = teams.map(function (t) { return { label: t.name, value: t.id, icon: t.id === cur ? 'check' : null, on: t.id === cur }; });
+      items.push({ label: 'Inget lag', value: 'none', icon: cur === 'none' ? 'check' : null, on: cur === 'none' });
+      return NS.menu('Favoritlag', items, 'Matcher med laget visas överst på startsidan när de pågår eller börjar snart.');
+    }).then(function (v) {
+      if (v === undefined || v === NS.pref('team')) return false;
+      return NS.setPref('team', v).then(function () { NS.toast(v === 'none' ? 'Inget favoritlag' : 'Favoritlag: ' + NS.teamName(v), 'check'); return true; });
+    });
+  };
+  NS.pickSubLang = function () {
+    var cur = NS.pref('sub');
+    var items = ['sv', 'en', 'no', 'da', 'fi'].map(function (c) { return { label: NS.langName(c), value: c, icon: c === cur ? 'check' : null, on: c === cur }; });
+    items.push({ label: 'Av', value: '', icon: cur === '' ? 'check' : null, on: cur === '' });
+    return NS.menu('Undertexter som förval', items, 'Väljs automatiskt när filmen eller serien har det språket.').then(function (v) {
+      if (v === undefined || v === cur) return false;
+      return NS.setPref('sub', v).then(function () { NS.toast('Undertexter: ' + (v ? NS.langName(v) : 'av'), 'sub'); return true; });
+    });
+  };
+  /* streaming services (Netflix, Max, Disney+, Prime Video): what's on them, via the server */
+  NS.svc = { enabled: false, info: {} };
+  NS.loadServices = function () {
+    return NS.api.get('api/services').then(function (r) { NS.svc = r; return r; }).catch(function () { return NS.svc; });
+  };
+  NS.svcName = function (k) { var i = NS.svc.info && NS.svc.info[k]; return i ? i.name : k; };
+  NS.svcNames = function (list) {
+    var n = (list || []).map(NS.svcName);
+    return n.length <= 1 ? n.join('') : n.slice(0, -1).join(', ') + ' och ' + n[n.length - 1];
+  };
+  /** Small coloured service labels ("Netflix", "HBO Max") for cards and details. */
+  NS.svcChips = function (list, cls) {
+    return NS.h('div', { class: 'svc-chips' + (cls ? ' ' + cls : '') }, (list || []).map(function (k) {
+      var i = (NS.svc.info && NS.svc.info[k]) || { name: k, color: '#555' };
+      return NS.h('span', { class: 'svc svc-' + k, style: 'background:' + i.color, text: i.name });
+    }));
+  };
+  /** Identity of a favourite-team match as shown (a change means the billboard should be redrawn). */
+  NS.sportKey = function (m) { return m && m.ch ? m.ch.id + '|' + m.s + '|' + m.state : ''; };
+  NS.setPref = function (k, v) {
+    NS.state.prefs = NS.state.prefs || {};
+    if (NS.state.prefs[k] === v) return Promise.resolve();
+    NS.state.prefs[k] = v;
+    var b = {}; b[k] = v;
+    return req('POST', 'api/state/' + NS.profile.id + '/prefs', b).catch(function () { /* offline: kept for this session */ });
+  };
+
   NS.forget = function (item) {
     delete NS.state.progress[item.k];
     NS.state.dirty = true;
@@ -524,7 +611,13 @@
         NS.h('div', { class: 'menu-cancel', onclick: function () { close(undefined); }, text: 'Avbryt' })
       ]));
       el.addEventListener('click', function (e) { if (e.target === el) close(undefined); });
-      function paint() { els.forEach(function (b, i) { b.classList.toggle('focus', i === idx); }); }
+      function paint() {
+        els.forEach(function (b, i) { b.classList.toggle('focus', i === idx); });
+        // long lists (teams, languages) scroll with the focus
+        try { if (els[idx] && els[idx].scrollIntoView) els[idx].scrollIntoView({ block: 'nearest' }); } catch (e) { /* ignore */ }
+      }
+      var cur = items.findIndex(function (it) { return it.on; });
+      if (cur >= 0) idx = cur;
       function close(v) { el.remove(); NS.dialog = null; resolve(v); }
       NS.dialog = {
         onKey: function (a) {
@@ -605,7 +698,7 @@
         return NS.h('div', { class: 'btn', onclick: function () { idx = i; close(b.value); } }, [b.icon ? NS.icon(b.icon) : null, b.label]);
       });
       var el = NS.h('div', { class: 'dialog' }, NS.h('div', { class: 'box' }, [
-        NS.h('h2', { text: opts.title }), opts.text ? NS.h('p', { text: opts.text }) : null, NS.h('div', { class: 'btns' }, btns)
+        NS.h('h2', { text: opts.title }), opts.text ? NS.h('p', { text: opts.text }) : null, opts.body || null, NS.h('div', { class: 'btns' }, btns)
       ]));
       function paint() { btns.forEach(function (b, i) { b.classList.toggle('focus', i === idx); }); }
       function close(v) { el.remove(); NS.dialog = null; resolve(v); }

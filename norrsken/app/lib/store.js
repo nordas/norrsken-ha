@@ -23,6 +23,10 @@ const DEFAULT_CONFIG = {
     userAgent: '',
     epgUrl: '',
     kidsPattern: '',
+    pauseMode: 'auto', // auto: archive when the channel has one, else record to disk | archive: archive only | off
+    pauseMax: 60, // minutes a paused live channel is recorded at most
+    tmdbKey: '', // themoviedb.org key: what is on Netflix, Max, Disney+ and Prime Video
+    services: ['netflix', 'max', 'disney', 'prime'],
   },
   hidden: { live: [], movie: [], series: [] },
 };

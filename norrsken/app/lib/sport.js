@@ -1,0 +1,117 @@
+'use strict';
+/**
+ * Favourite team on the start page (like TV4 Play): find the team's match in the TV guide while it is on
+ * or about to start, and the channel to watch it on.
+ */
+
+// SHL 2026/27 plus a few more Swedish hockey teams. re matches the team in a programme title.
+const TEAMS = [
+  { id: 'lulea', name: 'Luleå Hockey', short: 'Luleå', re: /lule[åa]/i, col: ['#c8102e', '#111111'] },
+  { id: 'bjorkloven', name: 'IF Björklöven', short: 'Björklöven', re: /bj[öo]rkl[öo]ven/i, col: ['#00843d', '#f2c500'] },
+  { id: 'brynas', name: 'Brynäs IF', short: 'Brynäs', re: /bryn[äa]s/i, col: ['#f2c500', '#d0102c'] },
+  { id: 'djurgarden', name: 'Djurgården', short: 'Djurgården', re: /djurg[åa]rden|\bdif\b/i, col: ['#0a2240', '#d4202a'] },
+  { id: 'frolunda', name: 'Frölunda HC', short: 'Frölunda', re: /fr[öo]lunda/i, col: ['#008b4f', '#111111'] },
+  { id: 'farjestad', name: 'Färjestad BK', short: 'Färjestad', re: /f[äa]rjestad|\bfbk\b/i, col: ['#008a3e', '#f5c400'] },
+  { id: 'hv71', name: 'HV71', short: 'HV71', re: /\bhv\s?71\b/i, col: ['#0d3b8c', '#f2c500'] },
+  { id: 'linkoping', name: 'Linköping HC', short: 'Linköping', re: /link[öo]ping|\blhc\b/i, col: ['#0b4fa0', '#e4002b'] },
+  { id: 'malmo', name: 'Malmö Redhawks', short: 'Malmö', re: /malm[öo] redhawks|redhawks|malm[öo](?! ff)/i, col: ['#c8102e', '#ffffff'] },
+  { id: 'rogle', name: 'Rögle BK', short: 'Rögle', re: /r[öo]gle/i, col: ['#00843d', '#ffffff'] },
+  { id: 'skelleftea', name: 'Skellefteå AIK', short: 'Skellefteå', re: /skellefte[åa]/i, col: ['#111111', '#f5c400'] },
+  { id: 'timra', name: 'Timrå IK', short: 'Timrå', re: /timr[åa]/i, col: ['#c8102e', '#ffffff'] },
+  { id: 'vaxjo', name: 'Växjö Lakers', short: 'Växjö', re: /v[äa]xj[öo]/i, col: ['#f26522', '#0b2d5b'] },
+  { id: 'orebro', name: 'Örebro Hockey', short: 'Örebro', re: /[öo]rebro/i, col: ['#111111', '#e4002b'] },
+  { id: 'leksand', name: 'Leksands IF', short: 'Leksand', re: /leksand/i, col: ['#0b4fa0', '#ffffff'] },
+  { id: 'modo', name: 'Modo Hockey', short: 'Modo', re: /\bmodo\b/i, col: ['#c8102e', '#00843d'] },
+  { id: 'aik', name: 'AIK', short: 'AIK', re: /\baik\b(?! fotboll)/i, col: ['#0a2240', '#f5c400'] },
+  { id: 'tre-kronor', name: 'Tre Kronor', short: 'Sverige', re: /tre kronor|sverige|sweden/i, col: ['#005293', '#fecb00'] },
+];
+const BY_ID = new Map(TEAMS.map(t => [t.id, t]));
+
+/** Hockey, not football or news: something hockey-ish in the title, description or channel name. */
+const HOCKEY = /hockey|\bshl\b|\bchl\b|hockeyallsvenskan|ishockey|redhawks|lakers|tre kronor/i;
+const NOT_LIVE = /\b(repris|i repris|h[öo]jdpunkter|highlights|sammandrag|studio|magasin|efter matchen)\b|\(r\)/i;
+
+function teamId(v) {
+  const s = String(v || '').toLowerCase().trim();
+  if (s === '' || s === 'none' || s === 'inget') return 'none';
+  if (BY_ID.has(s)) return s;
+  const t = TEAMS.find(x => x.re.test(s) || x.name.toLowerCase() === s);
+  return t ? t.id : 'lulea';
+}
+function team(id) { return BY_ID.get(id) || null; }
+function list() { return TEAMS.map(t => ({ id: t.id, name: t.name })); }
+
+/** "SHL: Luleå Hockey - Färjestad BK" → { home: 'Luleå', away: 'Färjestad' } (short names when known). */
+function matchup(title, fav) {
+  const clean = String(title || '').replace(/^(live|direkt|sport|ishockey|hockey|shl|chl|hockeyallsvenskan)\s*[:|.\-–]\s*/gi, '').replace(/^(live|direkt|sport|ishockey|hockey|shl|chl|hockeyallsvenskan)\s*[:|.\-–]\s*/gi, '');
+  const m = /^(.+?)\s+(?:[-–—]|vs\.?|mot)\s+(.+?)(?:\s*[,(|].*)?$/i.exec(clean);
+  if (!m) return null;
+  const name = (s) => {
+    const t = TEAMS.find(x => x.re.test(s));
+    return t ? t.short : s.replace(/\s+(hockey|hc|if|bk|ik|aik)$/i, '').trim();
+  };
+  const home = name(m[1]), away = name(m[2]);
+  if (!home || !away || home === away) return null;
+  if (fav && !fav.re.test(m[1]) && !fav.re.test(m[2])) return null;
+  return { home, away };
+}
+
+/** How good a channel is for the match: HD before SD, Swedish before others, not "backup"/"alt". */
+function channelScore(name) {
+  const n = String(name || '');
+  let s = 0;
+  if (/\b(fhd|hd|1080)\b/i.test(n)) s += 3;
+  if (/\b(4k|uhd)\b/i.test(n)) s += 2;
+  if (/\bsd\b/i.test(n)) s -= 3;
+  if (/(^|[\s|:[(])(se|swe|sverige)([\s|:\])]|$)/i.test(n)) s += 2;
+  if (/backup|alt\b|\braw\b/i.test(n)) s -= 4;
+  if (/hockey|sport/i.test(n)) s += 1;
+  return s;
+}
+
+/**
+ * The favourite team's match that is on now or starts within `soon` ms.
+ * channels: [{ id, n, epg }] (live channels visible to the profile); epg: an Epg with .map (channel → [[s, e, title, desc]]).
+ * Returns null, or { team, state: 'live'|'soon', title, home, away, s, e, d, ch, chans }.
+ */
+function findMatch(teamIdValue, channels, epg, { now = Date.now(), soon = 60 * 60e3 } = {}) {
+  const fav = team(teamIdValue);
+  if (!fav || !epg || !epg.map || !epg.map.size) return null;
+  const hits = new Map(); // start + teams → { prog, chans: [] }
+  for (const ch of channels) {
+    if (!ch.epg) continue;
+    const list = epg.map.get(ch.epg);
+    if (!list) continue;
+    for (const p of list) {
+      const [s, e, t, d] = p;
+      if (s > now + soon) break;
+      if (e <= now) continue;
+      if (!fav.re.test(t)) continue;
+      if (NOT_LIVE.test(t)) continue;
+      if (!HOCKEY.test(t + ' ' + (d || '') + ' ' + (ch.n || ''))) continue;
+      // a programme that already ran for hours is a re-run block, not the match
+      if (e - s > 5 * 3600e3) continue;
+      const mu = matchup(t, fav);
+      const key = (mu ? mu.home + '|' + mu.away : t.toLowerCase()) + '|' + Math.round(s / 600e3);
+      let h = hits.get(key);
+      if (!h) hits.set(key, (h = { s, e, t, d, mu, chans: [] }));
+      h.chans.push(ch);
+    }
+  }
+  if (!hits.size) return null;
+  // on now beats starting soon; then the earliest start; then the one on most channels
+  const best = [...hits.values()].sort((a, b) => ((b.s <= now) - (a.s <= now)) || a.s - b.s || b.chans.length - a.chans.length)[0];
+  const chans = best.chans.slice().sort((a, b) => channelScore(b.n) - channelScore(a.n));
+  return {
+    team: { id: fav.id, name: fav.name, short: fav.short, col: fav.col },
+    state: best.s <= now ? 'live' : 'soon',
+    title: best.mu ? best.mu.home + ' – ' + best.mu.away : best.t,
+    raw: best.t,
+    home: best.mu ? best.mu.home : '', away: best.mu ? best.mu.away : '',
+    s: best.s, e: best.e, d: best.d || '',
+    ch: chans[0],
+    chans,
+  };
+}
+
+module.exports = { TEAMS, teamId, team, list, matchup, findMatch, channelScore };

@@ -182,6 +182,34 @@ summary { cursor: pointer; font-weight: 650; color: #c9d3df; padding: 10px 0; }
     </details>
   </section>
 
+  <section>
+    <h2>Paus i live-tv</h2>
+    <label for="pauseMode">När du pausar en kanal</label>
+    <select id="pauseMode">
+      <option value="auto">Fortsätt där du pausade (arkivet, annars inspelning på servern)</option>
+      <option value="archive">Bara kanaler med arkiv</option>
+      <option value="off">Av – fortsätter från live</option>
+    </select>
+    <p class="help">Har kanalen arkiv fortsätter du därifrån. Annars spelar servern in kanalen från att du pausar tills du går tillbaka till live. Inspelningen tas bort direkt efteråt.</p>
+    <label for="pauseMax">Spela in högst</label>
+    <select id="pauseMax"><option value="30">30 minuter</option><option value="60">1 timme</option><option value="120">2 timmar</option><option value="180">3 timmar</option></select>
+    <p class="help">En timme i HD tar ungefär 2–4 GB på Home Assistants disk medan den spelas in. Inspelningen stannar om disken börjar bli full.</p>
+  </section>
+
+  <section>
+    <h2>Streamingtjänster</h2>
+    <p class="sub">Sök och förslag tar då med det som finns på tjänsterna, med ”Finns på …” och en knapp som öppnar appen.</p>
+    <div id="svcList" class="svc-pick">
+      <label class="toggle"><span>Netflix</span><span class="sw"><input type="checkbox" value="netflix"><i></i></span></label>
+      <label class="toggle"><span>HBO Max</span><span class="sw"><input type="checkbox" value="max"><i></i></span></label>
+      <label class="toggle"><span>Disney+</span><span class="sw"><input type="checkbox" value="disney"><i></i></span></label>
+      <label class="toggle"><span>Prime Video</span><span class="sw"><input type="checkbox" value="prime"><i></i></span></label>
+    </div>
+    <label for="tmdbKey">TMDB-nyckel</label>
+    <input type="password" id="tmdbKey" placeholder="API-nyckel eller läsnyckel (Read Access Token)" autocapitalize="off" spellcheck="false" autocomplete="off">
+    <p class="help" id="tmdbHelp">Gratis: skapa ett konto på themoviedb.org, gå till Inställningar → API och kopiera API-nyckeln. Utan nyckel visas bara det som finns i ditt eget utbud.</p>
+  </section>
+
   <section id="catSec" class="hidden">
     <h2>Kategorier</h2>
     <p class="sub">Bocka ur det du inte vill se. Leverantörer har ofta hundratals kategorier från hela världen.</p>
@@ -332,7 +360,10 @@ summary { cursor: pointer; font-weight: 650; color: #c9d3df; padding: 10px 0; }
       options: {
         appName: $('appName').value.trim(), hideAdult: $('hideAdult').checked, cleanNames: $('cleanNames').checked,
         liveFormat: $('liveFormat').value, maxRes: $('maxRes').value, previews: $('previews').value, directPlay: $('directPlay').value, audioMode: $('audioMode').value, userAgent: $('ua').value.trim(),
-        epgUrl: $('epgUrl').value.trim(), kidsPattern: $('kidsPattern').value.trim()
+        epgUrl: $('epgUrl').value.trim(), kidsPattern: $('kidsPattern').value.trim(),
+        pauseMode: $('pauseMode').value, pauseMax: +$('pauseMax').value,
+        services: [].slice.call(document.querySelectorAll('#svcList input')).filter(function (x) { return x.checked; }).map(function (x) { return x.value; }),
+        tmdbKey: $('tmdbKey').value.trim() || ($('tmdbKey').dataset.saved ? '••••' : '')
       }
     };
   }
@@ -470,6 +501,13 @@ summary { cursor: pointer; font-weight: 650; color: #c9d3df; padding: 10px 0; }
     $('ua').value = o.userAgent || '';
     $('epgUrl').value = o.epgUrl || '';
     $('kidsPattern').value = o.kidsPattern || '';
+    $('pauseMode').value = o.pauseMode || 'auto';
+    $('pauseMax').value = String(o.pauseMax || 60);
+    var sv = o.services || ['netflix', 'max', 'disney', 'prime'];
+    [].forEach.call(document.querySelectorAll('#svcList input'), function (x) { x.checked = sv.indexOf(x.value) >= 0; });
+    $('tmdbKey').value = '';
+    $('tmdbKey').dataset.saved = o.tmdbKey ? '1' : '';
+    $('tmdbKey').placeholder = o.tmdbKey ? 'En nyckel är sparad – lämna tomt för att behålla den' : 'API-nyckel eller läsnyckel (Read Access Token)';
     profiles = (cfg.profiles || []).map(function (p) { return { id: p.id, name: p.name, color: p.color, kids: p.kids, hasPin: p.hasPin }; });
     renderProfiles();
     setSource(cfg.source || 'xtream');
