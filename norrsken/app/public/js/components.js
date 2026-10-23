@@ -498,7 +498,8 @@
       // Top 10 cards don't expand, so the title goes into the details instead
       if (topTen) el.appendChild(h('div', { class: 'big', text: d.n }));
       el.appendChild(NS.metaEl(d, { kind: true }));
-      if (d.pos && d.dur) el.appendChild(h('div', { class: 'desc', style: 'color:var(--text-2)', text: NS.left(d.pos, d.dur) }));
+      if (d.because) el.appendChild(h('div', { class: 'desc', style: 'color:var(--text-2)', text: d.because }));
+      else if (d.pos && d.dur) el.appendChild(h('div', { class: 'desc', style: 'color:var(--text-2)', text: NS.left(d.pos, d.dur) }));
       else if (d.p) el.appendChild(h('div', { class: 'desc', text: d.p }));
     };
     if (this._infoK === (d && d.k)) { build(); return; }

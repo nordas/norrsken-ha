@@ -88,6 +88,7 @@
     el.appendChild(this.sideR);
 
     if (NS.touch) this.touchUi();
+    else if (window.matchMedia && matchMedia('(pointer: fine)').matches) this.mouseUi();
 
     // media events
     var on = function (ev, fn) { v.addEventListener(ev, fn); };
@@ -104,7 +105,12 @@
     on('play', function () { self.renderButtons(); });
     on('pause', function () { self.bigIcon.innerHTML = ''; self.bigIcon.appendChild(NS.icon('pause')); self.bigIcon.classList.add('on'); self.showOsd(true); });
     on('play', function () { self.bigIcon.classList.remove('on'); self.showOsd(); });
-    on('timeupdate', function () { self.lastMove = Date.now(); self.tick(); });
+    on('timeupdate', function () {
+      self.lastMove = Date.now();
+      // some browsers never send "playing" after a short stall: if the picture moves, it isn't buffering
+      if (v.currentTime !== self._lastCT && !v.paused) { self._lastCT = v.currentTime; self.buffering(false); }
+      self.tick();
+    });
     on('loadedmetadata', function () {
       if (self.kind === 'file' && self.pendingSeek > 0) { try { v.currentTime = self.pendingSeek; } catch (e) { /* ignore */ } self.pendingSeek = 0; }
     });
@@ -151,16 +157,8 @@
   Player.prototype.every = function (ms, fn) { this.timers.push(setInterval(fn, ms)); };
   Player.prototype.deactivate = function () {
     clearInterval(this.clk);
-    // something opened on top (guide, another player): stop streaming so we don't hold a second provider connection.
-    // Always cancel a request still in flight too, or it would start playing behind whatever is now on top.
-    this.reqId = {};
-    this.waitStart = false;
-    clearTimeout(this.airT);
-    this.airNative = false;
-    if (!this.suspended) this.resumeAt = this.live ? 0 : this.sources ? this.cur() : this.start;
-    if (this.sources) this.saveProgress();
-    this.teardown();
-    this.suspended = true;
+    // something opened on top (guide, another player): stop streaming so we don't hold a second provider connection
+    if (this.sources) { this.resumeAt = this.live ? 0 : this.cur(); this.saveProgress(); this.teardown(); this.suspended = true; }
   };
   Player.prototype.destroy = function () {
     this.saveProgress(true);
@@ -168,7 +166,7 @@
     if (this.tok) { try { var u = 'rx/stop?t=' + encodeURIComponent(this.tok); if (navigator.sendBeacon) navigator.sendBeacon(u); else NS.api.post(u, {}); } catch (e) { /* ignore */ } }
     this.timers.forEach(clearInterval);
     clearInterval(this.clk);
-    clearTimeout(this.osdT); clearTimeout(this.scrubT); clearTimeout(this.numT); clearInterval(this.nextT); clearTimeout(this.zapT); clearTimeout(this.airT);
+    clearTimeout(this.osdT); clearTimeout(this.scrubT); clearTimeout(this.numT); clearInterval(this.nextT); clearTimeout(this.zapT);
     document.removeEventListener('nsk-epg', this._epg);
     if (this._winOff) this._winOff();
     this.stopSubs();
@@ -266,14 +264,11 @@
     if (this.mp) { try { this.mp.pause(); this.mp.unload(); this.mp.detachMediaElement(); this.mp.destroy(); } catch (e) { /* ignore */ } this.mp = null; }
     try { v.pause(); } catch (e) { /* ignore */ }
     v.removeAttribute('src');
-    // a left-over AirPlay <source> would otherwise be loaded by load() below: a second stream nobody watches
-    [].slice.call(v.querySelectorAll('source')).forEach(function (s) { s.remove(); });
     try { v.load(); } catch (e) { /* ignore */ }
   };
 
   Player.prototype.startSource = function (at) {
     var self = this;
-    if (this.suspended) return;
     if (this.item.t === 'catchup') {
       // the archive URL is fixed to its start time: a retry/reload asks for a new one at the current position
       // (moving on to the next source of the same request is fine; reloading the same one is not)
@@ -288,8 +283,6 @@
     }
     var src = this.sources[this.si];
     var v = this.video;
-    this.airNative = false;
-    clearTimeout(this.airT);
     this.teardown();
     this.kind = src.kind;
     this.netRetry = 0;
@@ -372,9 +365,15 @@
         } catch (e) { /* ignore */ }
       });
       this.airUrl = url;
-      // iPhone/iPad (ManagedMediaSource): hls.js clears all <source> children and turns remote playback off when it
-      // attaches, so the plain HLS source for AirPlay has to be added after that, next to hls.js's own source
-      hls.on(window.Hls.Events.MEDIA_ATTACHED, function () { if (self.hls === hls) self.addAirSource(); });
+      // iPhone/iPad (ManagedMediaSource): give Safari a plain HLS source too, before attaching, so AirPlay is offered
+      if (window.ManagedMediaSource && window.WebKitPlaybackTargetAvailabilityEvent) {
+        var old = v.querySelector('source.air');
+        if (old) old.remove();
+        var so = document.createElement('source');
+        so.className = 'air'; so.type = 'application/x-mpegURL'; so.src = new URL(url, location.href).href;
+        v.appendChild(so);
+        v.disableRemotePlayback = false;
+      }
       hls.loadSource(url);
       hls.attachMedia(v);
       return;
@@ -384,55 +383,23 @@
     this.playPromise();
   };
 
-  /** With hls.js in Safari: a plain HLS <source> after hls.js's own, which is what AirPlay hands to the Apple TV. */
-  Player.prototype.addAirSource = function () {
+  /** AirPlay (iPhone/iPad/Mac Safari): the Apple TV fetches the stream itself, so it gets a full address. */
+  Player.prototype.airplay = function () {
     var v = this.video;
-    if (!window.WebKitPlaybackTargetAvailabilityEvent || !this.hls) return;
-    var src = this.airUrl || (this.sources && this.sources[this.si] && this.sources[this.si].url) || '';
-    if (!src) return;
     try {
       v.disableRemotePlayback = false;
       v.setAttribute('x-webkit-airplay', 'allow');
-      var el = v.querySelector('source.air') || document.createElement('source');
-      el.className = 'air'; el.type = 'application/x-mpegURL'; el.src = new URL(src, location.href).href;
-      if (!el.parentNode) v.appendChild(el);
-    } catch (e) { /* ignore */ }
-  };
-
-  /**
-   * AirPlay (iPhone/iPad/Mac Safari). Through hls.js (ManagedMediaSource) Safari only sends the sound, so switch
-   * to Safari's own HLS player first: it hands the stream's address to the Apple TV, which then fetches the picture
-   * itself. Back to hls.js when AirPlay ends (or if no Apple TV was picked).
-   */
-  Player.prototype.airplay = function () {
-    var self = this, v = this.video;
-    if (!v.webkitShowPlaybackTargetPicker) { NS.toast('AirPlay finns i Safari på iPhone, iPad och Mac', 'info'); return; }
-    try {
       var src = this.airUrl || (this.sources && this.sources[this.si] && this.sources[this.si].url) || '';
-      if (this.hls && src && !this.airNative) {
-        var rel = v.currentTime || 0;
-        try { this.hls.destroy(); } catch (e) { /* ignore */ }
-        this.hls = null;
-        this.airNative = true;
-        [].slice.call(v.querySelectorAll('source')).forEach(function (s) { s.remove(); });
-        v.disableRemotePlayback = false;
-        v.setAttribute('x-webkit-airplay', 'allow');
-        v.src = new URL(src, location.href).href;
-        var seek = function () { v.removeEventListener('loadedmetadata', seek); if (rel > 1 && !self.live) { try { v.currentTime = rel; } catch (e) { /* ignore */ } } };
-        v.addEventListener('loadedmetadata', seek);
-        this.playPromise();
-        clearTimeout(this.airT);
-        this.airT = setTimeout(function () { if (self.airNative && !v.webkitCurrentPlaybackTargetIsWireless) self.airBack(); }, 30000);
+      if (src && this.hls) {
+        // with hls.js (ManagedMediaSource) Safari needs a plain HLS source to hand over
+        var abs = new URL(src, location.href).href;
+        var el = v.querySelector('source.air') || document.createElement('source');
+        el.className = 'air'; el.type = 'application/x-mpegURL'; el.src = abs;
+        if (!el.parentNode) v.appendChild(el);
       }
-      v.webkitShowPlaybackTargetPicker();
+      if (v.webkitShowPlaybackTargetPicker) v.webkitShowPlaybackTargetPicker();
+      else NS.toast('AirPlay finns i Safari på iPhone, iPad och Mac', 'info');
     } catch (e) { NS.toast('AirPlay gick inte att starta', 'info'); }
-  };
-  /** AirPlay ended: back to hls.js on the phone, where it was. */
-  Player.prototype.airBack = function () {
-    if (!this.airNative || this.suspended) return;
-    this.airNative = false;
-    clearTimeout(this.airT);
-    this.startSource(this.live ? 0 : this.cur());
   };
 
   Player.prototype.playPromise = function () {
@@ -514,7 +481,7 @@
 
   Player.prototype.watchdog = function () {
     var v = this.video;
-    if (this.suspended || this.errShown || !this.sources || this.tapEl) return;
+    if (this.errShown || !this.sources || this.tapEl) return;
     // never got going on this source: try the next one instead of spinning forever
     if (!this.played && Date.now() - (this.srcStart || 0) > (this.kind === 'remux' ? 30000 : 15000)) {
       console.log('[norrsken] source', this.si, this.kind, 'did not start, trying next');
@@ -618,7 +585,7 @@
 
   Player.prototype.onEnded = function () {
     if (this.live) { this.startSource(0); return; }
-    if (this.item.t === 'catchup') { this.cuEnded(); return; }
+    if (this.item.t === 'catchup') { this.toLive(); return; }
     this.saveProgress(true);
     if (this.nextEp()) this.playNext();
     else this.exit();
@@ -1019,7 +986,7 @@
   Player.prototype.cuLiveNow = function () { var cu = this.item.cu; return cu && Date.now() / 1000 < cu.start + cu.dur * 60; };
   /** Catch-up: after a new start, wait until the exact second is loaded, then jump there. */
   Player.prototype.cuCatch = function () {
-    if (!this.cuSeek || this.suspended) return;
+    if (!this.cuSeek) return;
     var v = this.video;
     var end = 0;
     try { if (v.buffered.length) end = v.buffered.end(v.buffered.length - 1); } catch (e) { /* ignore */ }
@@ -1029,22 +996,6 @@
       this.buffering(false);
       if (v.paused && this._cuHeld) { this._cuHeld = false; this.playPromise(); }
     } else if (this.played && !v.paused) { v.pause(); this._cuHeld = true; this.buffering(true); }
-  };
-
-  /**
-   * Catch-up: the archive stream ran out. The provider cuts an archive request at the length it knew about
-   * when it was asked, so in a programme still on air (or one cut short) ask again from where we are;
-   * go to the live broadcast only when we are close to "now" or the programme is over.
-   */
-  Player.prototype.cuEnded = function () {
-    var cu = this.item.cu, pos = this.cur();
-    var left = this.cuLiveNow() ? this.cuMax() - pos : cu.dur * 60 - 30 - pos;
-    // the same end again right away: the archive has nothing more for us, don't loop
-    var again = this._cuEnd !== undefined && Math.abs(pos - this._cuEnd) < 10;
-    this._cuEnd = pos;
-    if (left >= 60 && !again) { this.play(this.item, pos); return; }
-    if (this.cuLiveNow()) { this.toLive(); return; }
-    this.exit();
   };
 
   /** Yellow (or 0): jump back to the channel you watched before. */
@@ -1352,6 +1303,47 @@
     this.seekTo(iv.to);
   };
 
+  /* ------------------------------------------------------------ mouse (Mac/PC browser) */
+  Player.prototype.mouseUi = function () {
+    var self = this, el = this.el;
+    el.classList.add('mouse');
+    var hideT = null;
+    el.addEventListener('mousemove', function () {
+      el.classList.remove('nocursor');
+      self.showOsd();
+      clearTimeout(hideT);
+      hideT = setTimeout(function () { if (!self.osdOn) el.classList.add('nocursor'); }, 5000);
+    });
+    var close = h('button', { class: 'mbtn mclose', 'aria-label': 'Stäng' }, NS.icon('back'));
+    close.addEventListener('click', function (e) { e.stopPropagation(); self.exit(); });
+    this.osd.appendChild(close);
+    if (el.requestFullscreen) {
+      var fsb = h('button', { class: 'mbtn mfs', 'aria-label': 'Helskärm' }, NS.icon('fs'));
+      fsb.addEventListener('click', function (e) { e.stopPropagation(); if (document.fullscreenElement) document.exitFullscreen(); else el.requestFullscreen(); });
+      this.osd.appendChild(fsb);
+    }
+    // click the picture: play/pause (live: channel list); double click: full screen
+    el.addEventListener('click', function (e) {
+      if (e.target.closest && e.target.closest('button, .btn, .bar, .panel-side, .nextup, .perror, .ci, .ti, .skip-intro')) return;
+      if (self.live) { if (self.panel) self.closePanel(); else self.openChannels(); return; }
+      if (self.video.paused) self.playPromise(); else self.video.pause();
+      self.showOsd(self.video.paused);
+    });
+    el.addEventListener('dblclick', function () { if (!el.requestFullscreen) return; if (document.fullscreenElement) document.exitFullscreen(); else el.requestFullscreen(); });
+    // seek bar: click or drag
+    if (this.bar) {
+      var at = function (e) { var r = self.bar.getBoundingClientRect(); return Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * self.duration(); };
+      var drag = false;
+      var move = function (e) { if (!drag) return; self.scrubbing = at(e); self.tick(); };
+      var up = function () { if (!drag) return; drag = false; self.commitScrub(); };
+      this.bar.style.cursor = 'pointer';
+      this.bar.addEventListener('mousedown', function (e) { if (!self.duration()) return; drag = true; self.scrubbing = at(e); self.bar.classList.add('scrub'); self.showOsd(true); self.tick(); e.preventDefault(); });
+      window.addEventListener('mousemove', move);
+      window.addEventListener('mouseup', up);
+      this._winOff = function () { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
+    }
+  };
+
   /* ------------------------------------------------------------ touch controls (phones/tablets) */
   Player.prototype.touchUi = function () {
     var self = this;
@@ -1363,20 +1355,13 @@
       return b;
     };
     this.osd.appendChild(btn('tclose', 'back', function () { self.exit(); }, 'Stäng'));
-    // AirPlay: iPhone Safari has no element fullscreen, so this must not depend on the fullscreen button.
-    // Always shown in Safari (the picker says itself when no Apple TV is found); dimmed while none is seen.
-    if (window.WebKitPlaybackTargetAvailabilityEvent) {
-      var air = btn('tair', 'airplay', function () { self.airplay(); }, 'AirPlay');
-      this.osd.appendChild(air);
-      this.video.addEventListener('webkitplaybacktargetavailabilitychanged', function (e) { air.classList.toggle('dim', e.availability !== 'available'); });
-      this.video.addEventListener('webkitcurrentplaybacktargetiswirelesschanged', function () {
-        var on = !!self.video.webkitCurrentPlaybackTargetIsWireless;
-        air.classList.toggle('on', on);
-        if (on) clearTimeout(self.airT); else if (self.airNative) self.airBack();
-      });
-    }
-    if (!(el.requestFullscreen || el.webkitRequestFullscreen)) el.classList.add('nofs');
-    else {
+    if (el.requestFullscreen || el.webkitRequestFullscreen) {
+      if (window.WebKitPlaybackTargetAvailabilityEvent) {
+        var air = btn('tair', 'airplay', function () { self.airplay(); }, 'AirPlay');
+        air.style.display = 'none';
+        this.osd.appendChild(air);
+        this.video.addEventListener('webkitplaybacktargetavailabilitychanged', function (e) { air.style.display = e.availability === 'available' ? '' : 'none'; });
+      }
       this.osd.appendChild(btn('tfs', 'fs', function () {
         var d = document;
         if (d.fullscreenElement || d.webkitFullscreenElement) (d.exitFullscreen || d.webkitExitFullscreen).call(d);

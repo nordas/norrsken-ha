@@ -568,3 +568,12 @@ html.m .player .tap-play { width: 84px; height: 84px; margin: -42px 0 0 -42px; f
 .detail.deep::before { content: ''; position: absolute; inset: 0; z-index: 1; background: rgba(0,0,0,.55); pointer-events: none; }
 .gd-bell svg, .gd-arc svg { width: 1.8rem; height: 1.8rem; }
 .grid-page { -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 2.4rem); mask-image: linear-gradient(180deg, transparent 0, #000 2.4rem); padding-bottom: 1rem; }
+/* player with a mouse (Mac/PC) */
+.player.mouse.nocursor { cursor: none; }
+.player.mouse .osd.on .btn, .player.mouse .osd.on .bar, .player.mouse .osd.on .mbtn { pointer-events: auto; cursor: pointer; }
+.player.mouse .mbtn { position: absolute; top: 5rem; width: 7rem; height: 7rem; border-radius: 50%; border: 0; background: rgba(0,0,0,.35); color: #fff; display: grid; place-items: center; font-size: 3.6rem; cursor: pointer; }
+.player.mouse .mbtn:hover { background: rgba(255,255,255,.2); }
+.player.mouse .mclose { left: 3rem; }
+.player.mouse .mfs { right: 3rem; }
+.player.mouse .osd .ttl { left: 12rem; }
+.player.mouse .obtns .btn:hover { background: var(--white); color: #111; }

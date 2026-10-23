@@ -291,6 +291,20 @@ test('catch-up: archive stream as TS and HLS, played through the proxy', async (
   assert.ok(!noArc.catchup);
 });
 
+test('recommendations learn from likes and what was watched', async () => {
+  const none = (await get('/api/recommend?profile=p2')).json.items;
+  assert.equal(none.length, 0);
+  const s = (await get('/api/list?type=series&cat=all&limit=1&profile=p1')).json.items[0];
+  await post('/api/state/p1/like', { k: s.k, v: 1 });
+  const rec = (await get('/api/recommend?profile=p1')).json.items;
+  assert.ok(rec.length > 0);
+  assert.ok(!rec.some(x => x.k === s.k), 'the liked title itself is not suggested');
+  assert.ok(rec.some(x => /Eftersom du sett/.test(x.because || '')));
+  const st = (await get('/api/state/p1')).json;
+  assert.equal(st.likes[s.k], 1);
+  await post('/api/state/p1/like', { k: s.k, v: 0 });
+});
+
 test('qr code svg', async () => {
   const r = await fetch(base + '/api/qr.svg?text=' + encodeURIComponent('http://192.168.1.2:8787/setup'));
   assert.equal(r.headers.get('content-type'), 'image/svg+xml');

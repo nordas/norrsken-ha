@@ -327,6 +327,9 @@ class Catalog {
 
   invalidate() { this.lists.clear(); }
 
+  /** Series id for an episode id we have seen in a season list. */
+  epSeries(id) { const e = this.epIndex.get(String(id)); return e ? e.sid : null; }
+
   /** Other versions (quality, language) of the same film or series, best quality first. */
   versions(type, id, prof) {
     const d = this.data && this.data[type];

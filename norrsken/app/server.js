@@ -121,10 +121,74 @@ function catRow(type, cat, prof, title, loadItems = true) {
   return { id: type + ':' + cat, title, kind: ROW_KIND[type], type, cat, total: list.length, items: loadItems ? list.slice(0, INITIAL) : [] };
 }
 
+/* ------------------------------------------------------------------ "Föreslaget för dig"
+   Learns from what the profile watched, finished, liked, saved and disliked: genres, actors, director, category and
+   era of those titles become a taste profile, and every other title is scored against it. Runs on the server, no
+   data leaves the house. */
+function tasteSignals(st) {
+  const sig = new Map(); // catalog key (m:id / s:id) -> weight
+  const add = (k, w) => { if (k) sig.set(k, (sig.get(k) || 0) + w); };
+  const titleKey = (k, item) => {
+    if (k.startsWith('e:')) { const sid = item && item.sid; return sid ? 's:' + sid : null; }
+    return k.startsWith('m:') || k.startsWith('s:') ? k : null;
+  };
+  for (const [k, ts] of Object.entries(st.seen || {})) {
+    let sk = k.startsWith('m:') ? k : null;
+    if (k.startsWith('e:')) { const e = catalog.epSeries ? catalog.epSeries(k.slice(2)) : null; if (e) sk = 's:' + e; }
+    add(sk, 2);
+  }
+  for (const p of Object.values(st.progress || {})) if (p.item) add(titleKey(p.item.k, p.item), p.upnext ? 2 : 1.5);
+  for (const m of st.myList || []) if (m.item) add(titleKey(m.item.k, m.item), 1.5);
+  for (const [k, v] of Object.entries(st.likes || {})) add(k, v > 0 ? 5 : -6);
+  return sig;
+}
+function tasteTokens(it) {
+  const out = [];
+  for (const g of String(it.g || '').toLowerCase().split(/[,/|&]/)) { const t = g.trim(); if (t) out.push(['g:' + t, 1]); }
+  for (const n of String(catalog.people.get(it.k) || '').split(/,/).slice(0, 6)) { const t = n.trim(); if (t.length > 2) out.push(['p:' + t, 1.4]); }
+  if (it.cat) out.push(['c:' + it.t + ':' + it.cat, 0.6]);
+  if (it.y) out.push(['y:' + Math.floor(it.y / 10), 0.3]);
+  return out;
+}
+function recommendations(prof, st, limit = 30) {
+  const sig = tasteSignals(st);
+  if (!sig.size) return [];
+  const taste = new Map();
+  const why = new Map(); // token -> best source title
+  for (const [k, w] of sig) {
+    const it = catalog.get(k[0] === 's' ? 'series' : 'movie', k.slice(2));
+    if (!it) continue;
+    for (const [t, tw] of tasteTokens(it)) {
+      taste.set(t, (taste.get(t) || 0) + w * tw);
+      if (w > 0 && (!why.has(t) || why.get(t).w < w)) why.set(t, { w, n: it.n });
+    }
+  }
+  const skip = new Set([...sig.keys()]);
+  const out = [];
+  for (const type of ['movie', 'series']) {
+    for (const it of dedupe(catalog.list(type, 'all', prof))) {
+      if (skip.has(it.k)) continue;
+      let sc = 0, best = null, bestV = 0;
+      for (const [t, tw] of tasteTokens(it)) {
+        const v = (taste.get(t) || 0) * tw;
+        sc += v;
+        if (v > bestV && why.has(t)) { bestV = v; best = why.get(t).n; }
+      }
+      if (sc <= 0) continue;
+      sc += (it.r || 0) * 0.15 + (it.add && Date.now() / 1000 - it.add < 30 * 86400 ? 0.5 : 0);
+      out.push([sc, it, best]);
+    }
+  }
+  out.sort((a, b) => b[0] - a[0]);
+  return out.slice(0, limit).map(([, it, best]) => (best ? { ...it, because: 'Eftersom du sett ' + best } : it));
+}
+
 function homePage(prof, st) {
   const rows = [];
   const cw = continueItems(st);
   if (cw.length) rows.push(row('cw', 'Fortsätt titta', 'poster', cw, { limit: 30 }));
+  const rec = recommendations(prof, st);
+  if (rec.length >= 4) rows.push(row('rec', 'Föreslaget för dig', 'poster', rec, { limit: 30 }));
   const ml = st.myList.map(m => m.item).filter(Boolean);
   const mlv = ml.filter(i => i.t !== 'live');
   if (mlv.length) rows.push(row('ml', 'Min lista', 'poster', mlv, { limit: 60 }));
@@ -444,6 +508,7 @@ route('GET', '/api/state/:profile', (req, res, q, p) => {
     progress: Object.fromEntries(Object.entries(st.progress).map(([k, v]) => [k, { pos: v.pos, dur: v.dur, ts: v.ts, upnext: !!v.upnext }])),
     seen: st.seen || {},
     reminders: (st.reminders || []).filter(r => r.s > Date.now() - 15 * 60e3),
+    likes: st.likes || {},
   });
 });
 
@@ -522,6 +587,24 @@ route('POST', '/api/profile/:id/unlock', async (req, res, q, p) => {
   if (!codes.length || codes.includes(String(b.pin || ''))) return ok(res, { ok: true, token: prof.pin ? profToken(prof) : '' });
   await new Promise(r => setTimeout(r, 600)); // slow down guessing
   bad(res, 'Fel PIN-kod', 403);
+});
+
+route('POST', '/api/state/:profile/like', async (req, res, q, p) => {
+  // thumbs up / down (v: 1, -1, or 0 to clear); feeds "Föreslaget för dig"
+  const b = await readBody(req);
+  const st = store.profileState(store.profile(p.profile).id);
+  const k = String(b.k || '');
+  if (!/^[ms]:[\w.-]{1,40}$/.test(k)) return bad(res, 'k');
+  st.likes = st.likes || {};
+  if (+b.v === 1 || +b.v === -1) st.likes[k] = +b.v; else delete st.likes[k];
+  store.saveState();
+  ok(res, { ok: true });
+});
+
+route('GET', '/api/recommend', (req, res, q) => {
+  if (!catalog.ready()) return bad(res, 'inte redo', 503);
+  const prof = profileOf(q);
+  ok(res, { items: recommendations(prof, store.profileState(prof.id), 60) });
 });
 
 route('POST', '/api/state/:profile/reminders', async (req, res, q, p) => {

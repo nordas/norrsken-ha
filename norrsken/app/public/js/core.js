@@ -79,6 +79,8 @@
     fs: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
     up: '<path d="M6 14.5l6-6 6 6"/>',
     airplay: '<path d="M5 17H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-1"/><path d="M12 15l5 6H7z"/>',
+    thumb: '<path d="M7 11v9H4v-9z"/><path d="M7 11l4-8a2 2 0 0 1 2 2v4h5.5a2 2 0 0 1 2 2.3l-1.2 7A2 2 0 0 1 17.3 20H7"/>',
+    thumbdown: '<path d="M7 13V4H4v9z"/><path d="M7 13l4 8a2 2 0 0 0 2-2v-4h5.5a2 2 0 0 0 2-2.3l-1.2-7A2 2 0 0 0 17.3 4H7"/>',
     bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
     belloff: '<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/><path d="M4 4l16 16"/>',
     lock: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
@@ -226,6 +228,7 @@
       NS.state.progress = s.progress || {};
       NS.state.seen = s.seen || {};
       NS.state.reminders = s.reminders || [];
+      NS.state.likes = s.likes || {};
     }).catch(function () { /* offline */ });
   };
   /** A played-back programme from a channel's archive, played like a film with its own timeline. */
@@ -472,6 +475,24 @@
     if (++diagN > 30) return;
     var dev = /iPhone|iPad/.test(navigator.userAgent) ? 'iPhone/iPad' : /Android/.test(navigator.userAgent) ? 'Android' : /Macintosh/.test(navigator.userAgent) ? (/Chrome/.test(navigator.userAgent) ? 'Mac Chrome' : 'Mac Safari') : /Titan|SmartTV|Web0S|Tizen|TV/i.test(navigator.userAgent) ? 'TV' : 'webbläsare';
     try { NS.api.post('api/diag', { d: dev, m: String(msg).slice(0, 300) }).catch(function () {}); } catch (e) { /* ignore */ }
+  };
+  /* ---------------------------------------------------------------- thumbs up/down (feeds "Föreslaget för dig") */
+  NS.likeOf = function (k) { return (NS.state.likes || {})[k] || 0; };
+  NS.rate = function (item) {
+    var k = item.t === 'episode' && item.sid ? 's:' + item.sid : item.k;
+    var cur = NS.likeOf(k);
+    return NS.menu('Vad tycker du om ' + (item.t === 'episode' ? item.sn || item.n : item.n) + '?', [
+      { label: cur === 1 ? 'Gillar (vald)' : 'Gillar', icon: 'thumb', value: 1 },
+      { label: cur === -1 ? 'Inte för mig (vald)' : 'Inte för mig', icon: 'thumbdown', value: -1 },
+      cur ? { label: 'Ta bort betyget', icon: 'x', value: 0 } : null
+    ].filter(Boolean), 'Används för att föreslå filmer och serier till dig.').then(function (v) {
+      if (v === undefined) return false;
+      NS.state.likes = NS.state.likes || {};
+      if (v) NS.state.likes[k] = v; else delete NS.state.likes[k];
+      NS.state.dirty = true;
+      NS.toast(v === 1 ? 'Kul! Vi föreslår mer i samma stil' : v === -1 ? 'Okej, vi visar mindre sådant' : 'Betyget är borttaget', v === -1 ? 'thumbdown' : 'thumb');
+      return NS.api.post('api/state/' + NS.profile.id + '/like', { k: k, v: v }).then(function () { return true; });
+    });
   };
   NS.isSeen = function (k) { return !!(NS.state.seen && NS.state.seen[k]); };
   NS.markSeen = function (item, on) {

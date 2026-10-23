@@ -52,6 +52,7 @@
         items.push({ label: 'Markera som sedd', icon: 'check', value: 'seen' });
       }
       if (it.t === 'movie' && NS.isSeen(it.k)) items.push({ label: 'Markera som osedd', icon: 'x', value: 'unseen' });
+      items.push({ label: 'Betygsätt (gillar / inte för mig)', icon: 'thumb', value: 'rate' });
       if (it.t === 'episode' && it.sid) items.push({ label: 'Gå till serien', icon: 'series', value: 'series' });
       else items.push({ label: 'Mer info', icon: 'info', value: 'info' });
       var inl = NS.inList(it.t === 'episode' && it.sid ? 's:' + it.sid : it.k);
@@ -70,6 +71,7 @@
       if (v === 'guide') { NS.router.push(new NS.Guide({ cat: it.cat })); return false; }
       if (v === 'forget') { NS.toast('Borttagen från Fortsätt titta', 'check'); return NS.forget(it).then(function () { return true; }); }
       if (v === 'seen') { NS.toast('Markerad som sedd', 'check'); return NS.markSeen(it).then(function () { return true; }); }
+      if (v === 'rate') return NS.rate(it);
       if (v === 'unseen') { NS.toast('Markerad som osedd', 'check'); return NS.markSeen(it, false).then(function () { return true; }); }
       if (v === 'series') { NS.router.push(new NS.Detail({ t: 'series', id: it.sid, k: 's:' + it.sid, n: it.sn || it.n, img: it.img, bd: it.bd })); return false; }
       if (v === 'info') { NS.router.push(new NS.Detail(it)); return false; }
@@ -541,6 +543,8 @@
     }
     var inl = NS.inList(d.k);
     btns.push({ id: 'list', icon: inl ? 'check' : 'plus', label: 'Min lista' });
+    var lk = NS.likeOf(d.k);
+    if (d.t === 'movie' || d.t === 'series') btns.push({ id: 'rate', icon: lk === -1 ? 'thumbdown' : 'thumb', label: lk === 1 ? 'Gillar' : lk === -1 ? 'Inte för mig' : 'Betygsätt' });
     var prog = d.t === 'movie' ? NS.state.progress[d.k] : (this.target() ? NS.state.progress[this.target().k] : null);
     if (prog) btns.push({ id: 'more', icon: 'episodes', label: 'Fler val' });
     this.btns = btns;
@@ -636,6 +640,7 @@
     if (!b) return;
     var d = this.data();
     if (b.id === 'list') { NS.toggleList(this.item).then(function () { self.render(); }); return; }
+    if (b.id === 'rate') { NS.rate(d).then(function (ch) { if (ch) self.render(); }); return; }
     if (b.id === 'more') {
       var it = d.t === 'movie' ? d : Object.assign({}, this.target(), { sn: d.n, sid: d.id });
       NS.cardMenu(it, 'cw').then(function (changed) { if (changed) NS.loadState().then(function () { self.render(); self.buildRows(); }); });

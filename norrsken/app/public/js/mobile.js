@@ -498,6 +498,7 @@
     var canRestart = (d.t === 'movie' && NS.resumePos(d)) || (d.t === 'series' && this.target() && NS.state.progress[this.target().k]);
     b.appendChild(h('div', { class: 'm-d-actions' }, [
       h('button', { class: 'm-act', onclick: function () { NS.toggleList(self.item).then(function () { self.render(); }); } }, [NS.icon(inl ? 'check' : 'plus'), h('span', { text: 'Min lista' })]),
+      h('button', { class: 'm-act', onclick: function () { NS.rate(d).then(function (ch) { if (ch) self.render(); }); } }, [NS.icon(NS.likeOf(d.k) === -1 ? 'thumbdown' : 'thumb'), h('span', { text: NS.likeOf(d.k) === 1 ? 'Gillar' : NS.likeOf(d.k) === -1 ? 'Inte för mig' : 'Betygsätt' })]),
       canRestart ? h('button', { class: 'm-act', onclick: function () { self.play(true); } }, [NS.icon('restart'), h('span', { text: 'Från början' })]) : null,
       canRestart ? h('button', { class: 'm-act', onclick: function () {
         var tt = d.t === 'series' ? Object.assign({}, self.target(), { t: 'episode', sid: d.id, sn: d.n }) : d;
