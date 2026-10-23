@@ -614,6 +614,11 @@ html.m .player .tap-play { width: 84px; height: 84px; margin: -42px 0 0 -42px; f
 .osd .tsrow, .osd .times.tsbar { display: none; }
 .player.lshift .osd .tsrow { display: flex; align-items: center; gap: 2.4rem; position: absolute; left: 12rem; right: 12rem; bottom: 30rem; }
 .player .osd .tsrow .bar.tsbar { position: relative; left: auto; right: auto; bottom: auto; flex: 1; }
+.osd .lctl { position: absolute; left: 12rem; bottom: 3.6rem; display: none; gap: 1.6rem; }
+.player.lshift .osd .lctl { display: flex; }
+.player.lshift .osd .hint { display: none; }
+.osd .lctl .btn { height: 6.4rem; font-size: 2.3rem; padding: 0 2.6rem; background: rgba(255,255,255,.14); }
+.osd .lctl .btn svg { font-size: 3rem; }
 .osd .tsrow .tslive { flex: none; background: none; border: 0; color: #fff; font: inherit; font-size: 2.6rem; font-weight: 700; padding: .4rem 0 .4rem 1.6rem; cursor: pointer; white-space: nowrap; }
 .osd .tsrow .tslive .arr { margin-left: .8rem; }
 .osd .tsrow .tslive:focus, .osd .tsrow .tslive:hover { text-decoration: underline; outline: none; }

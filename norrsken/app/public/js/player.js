@@ -69,6 +69,16 @@
       this.lrow = h('div', { class: 'tsrow' }, [this.lbar, this.lLive]);
       this.osd.appendChild(this.lrow);
       this.osd.appendChild(this.ltimes);
+      // controls under the bar, like TV4 Play: pause, 10 s back and forward, sound and subtitles
+      var lb = function (icon, label, fn) { return h('button', { class: 'btn', 'aria-label': label, onclick: function (e) { e.stopPropagation(); fn(); self.showOsd(); } }, [NS.icon(icon), label || '']); };
+      this.lPP = lb('pause', '', function () { self.livePlayPause(); });
+      this.lctl = h('div', { class: 'lctl' }, [
+        this.lPP,
+        lb('rw', '', function () { self.seekRec(self.recPos() - 10); }),
+        lb('ff', '', function () { self.seekRec(self.recPos() + 10); }),
+        lb('sub', 'Ljud och undertexter', function () { self.openTracks(); })
+      ]);
+      this.osd.appendChild(this.lctl);
       this.lDrag = false;
       this.freezeEl = h('canvas', { class: 'freeze' });
       el.insertBefore(this.freezeEl, el.firstChild.nextSibling);
@@ -1337,7 +1347,9 @@
     var ts = this.tshift;
     var rec = !!(ts && ts.mode === 'rec' && ts.url);
     this.el.classList.toggle('lshift', rec);
-    if (!rec || this.lDrag) return;
+    if (!rec) return;
+    if (this.lPP) { var pausedNow = !ts.playing || this.video.paused; this.lPP.innerHTML = ''; this.lPP.appendChild(NS.icon(pausedNow ? 'play' : 'pause')); }
+    if (this.lDrag) return;
     var pos = this.recPos(), len = this.recLen();
     this.lShow(pos, len);
   };
