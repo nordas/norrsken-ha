@@ -452,31 +452,37 @@ route('GET', '/api/page/:page', (req, res, q, p) => {
   else if (p.page === 'mylist') rows = myListPage(st);
   else if (['live', 'movie', 'series'].includes(p.page)) rows = typePage(p.page, prof, st);
   else return bad(res, 'okänd sida', 404);
-  ok(res, { rows, featured: featured(p.page, prof), sport: p.page === 'home' || p.page === 'live' ? sportNow(prof, st) : null });
+  ok(res, { rows, featured: featured(p.page, prof), sport: p.page === 'home' || p.page === 'live' ? sportNow(prof, st, ingressBase(req)) : null });
 });
 
 /** The profile's favourite team playing now or soon (start page billboard). */
-function sportNow(prof, st) {
+function sportNow(prof, st, base = '') {
   const tid = (st.prefs && st.prefs.team) || 'lulea';
   if (tid === 'none') return null;
   const key = prof.id + '|' + tid + '|' + catalog.epg.at;
-  const hit = sportCache.get(key);
-  if (hit && Date.now() - hit.at < 60e3) return hit.m;
-  let m = null;
-  try {
-    m = sport.findMatch(tid, catalog.list('live', 'all', prof), catalog.epg);
-    if (m) m.chans = m.chans.slice(0, 12);
-  } catch (e) { console.error('[sport]', e.message); }
-  sportCache.set(key, { at: Date.now(), m });
-  if (sportCache.size > 50) sportCache.clear();
-  return m;
+  let hit = sportCache.get(key);
+  if (!hit || Date.now() - hit.at >= 60e3) {
+    let m = null;
+    try {
+      m = sport.findMatch(tid, catalog.list('live', 'all', prof), catalog.epg);
+      if (m) m.chans = m.chans.slice(0, 12);
+    } catch (e) { console.error('[sport]', e.message); }
+    hit = { at: Date.now(), m };
+    sportCache.set(key, hit);
+    if (sportCache.size > 50) sportCache.clear();
+  }
+  // the match recording (if any) is looked up fresh every time: it grows while we look
+  const m = hit.m;
+  if (!m) return m;
+  const r = matchRecs.get(m.team.id + '|' + m.s);
+  return Object.assign({}, m, { rec: r ? recInfo(r, base) : null });
 }
 const sportCache = new Map();
 
 route('GET', '/api/sport', (req, res, q) => {
   if (!catalog.ready()) return bad(res, 'inte redo', 503);
   const prof = profileOf(q);
-  ok(res, { match: sportNow(prof, store.profileState(prof.id)), teams: sport.list() });
+  ok(res, { match: sportNow(prof, store.profileState(prof.id), ingressBase(req)), teams: sport.list() });
 });
 
 route('GET', '/api/list', (req, res, q) => {
@@ -936,6 +942,60 @@ route('GET', '/api/stream/:type/:id', async (req, res, q, p) => {
   ok(res, { live: false, sources: order, t: ff.has() ? t : '', ext, media: info ? { h: info.height, v: info.video, a: (info.audio.find(x => x.def) || info.audio[0] || {}).codec, ch: (info.audio.find(x => x.def) || info.audio[0] || {}).ch, na: info.audio.length } : null });
 });
 
+/* ------------------------------------------------------------------ match recording (the whole match, 24 h) */
+const MATCH_TEAM = 'lulea';
+const MATCH_LEAD_MS = 5 * 60e3; // start a little before the puck drops
+const MATCH_TAIL_MS = 10 * 60e3; // and go on a little after the final whistle
+const KEEP_MATCH_MS = 24 * 3600e3;
+const matchRecs = new Map(); // team|start → { key, s, e, title, chId, chName, sessId }
+
+function recInfo(r, base) {
+  const s = r && tsbuf.get(r.sessId);
+  if (!s) return null;
+  return { id: s.id, url: base + '/pause/' + s.id + '/index.m3u8', sec: Math.round(tsbuf.length(s)), recording: !s.done && !s.dead, title: r.title, ch: r.chName, chId: r.chId, s: r.s, e: r.e };
+}
+
+/** Records every match of the favourite team (Luleå Hockey) from just before it starts until the end, if it's on a channel we have. */
+function matchRecTick() {
+  if (!catalog.ready()) return;
+  const now = Date.now();
+  for (const [k, r] of matchRecs) {
+    if (now - r.s > KEEP_MATCH_MS) { const s = tsbuf.get(r.sessId); if (s) tsbuf.stop(s, 'ett dygn gånget'); matchRecs.delete(k); }
+  }
+  if ((store.config.options || {}).matchRec === false) return;
+  let list = [];
+  try { list = sport.matchesToday(MATCH_TEAM, catalog.list('live', 'all', store.profile('')), catalog.epg, { now }); } catch (e) { return; }
+  for (const m of list) {
+    const key = MATCH_TEAM + '|' + m.s;
+    if (matchRecs.has(key)) continue;
+    if (now < m.s - MATCH_LEAD_MS || now > m.e + MATCH_TAIL_MS) continue;
+    if (tsbuf.matchSession()) break; // the provider gives one connection: the recording that runs goes on
+    const src = catalog.streamUrl('live', m.ch.id);
+    if (!src || !src.primary) continue;
+    try {
+      const sess = tsbuf.start(src.primary, { ua: catalog.ua(), maxMin: Math.ceil((m.e + MATCH_TAIL_MS - now) / 60e3), ch: m.ch.n, match: true });
+      matchRecs.set(key, { key, s: m.s, e: m.e, title: m.title, chId: m.ch.id, chName: m.ch.n, sessId: sess.id });
+      lastStreamAt = Date.now();
+    } catch (e) { console.error('[match]', e.message); }
+  }
+}
+
+route('GET', '/api/matchrec', (req, res) => {
+  const base = ingressBase(req);
+  const recs = [...matchRecs.values()].map(r => recInfo(r, base)).filter(Boolean);
+  const on = recs.find(x => x.recording) || null;
+  ok(res, { active: on ? { id: on.id, chId: on.chId, chName: on.ch, title: on.title } : null, recs });
+});
+route('POST', '/api/matchrec/stop', (req, res) => {
+  let n = 0;
+  for (const [k, r] of matchRecs) {
+    const s = tsbuf.get(r.sessId);
+    if (s && !s.dead) { tsbuf.stop(s, 'borttagen av användaren'); n++; }
+    matchRecs.delete(k);
+  }
+  ok(res, { ok: true, stopped: n });
+});
+
 /* ------------------------------------------------------------------ pause live TV (record to disk) */
 route('POST', '/api/pause/start', async (req, res, q) => {
   const b = await readBody(req);
@@ -949,6 +1009,13 @@ route('POST', '/api/pause/start', async (req, res, q) => {
   if (!pinOk(q, prof)) return bad(res, 'Profilen är låst', 401);
   const src = catalog.streamUrl('live', id);
   if (!src || !src.primary) return bad(res, 'Kunde inte hitta kanalen', 404);
+  // a match is being recorded: pausing the same channel uses that recording, another channel has to wait
+  const ms = tsbuf.matchSession();
+  if (ms) {
+    const r = [...matchRecs.values()].find(x => x.sessId === ms.id);
+    if (r && r.chId === id) return ok(res, { id: ms.id, url: ingressBase(req) + '/pause/' + ms.id + '/index.m3u8', max: ms.maxMin });
+    return bad(res, 'Matchinspelningen pågår på ' + (r ? r.chName : 'en annan kanal') + '. Avbryt den först.', 409);
+  }
   lastStreamAt = Date.now();
   try {
     const it = catalog.get('live', id) || {};
@@ -961,7 +1028,11 @@ route('POST', '/api/pause/:id/alive', (req, res, q, p) => {
   if (!s) return bad(res, 'slut', 404);
   ok(res, { ok: true, sec: tsbuf.length(s), full: s.full, done: s.done });
 });
-route('POST', '/api/pause/:id/stop', (req, res, q, p) => { tsbuf.stop(tsbuf.get(p.id), 'gick till live'); ok(res, { ok: true }); });
+route('POST', '/api/pause/:id/stop', (req, res, q, p) => {
+  const s = tsbuf.get(p.id);
+  if (s && !s.match) tsbuf.stop(s, 'gick till live'); // a match recording is not the viewer's to stop
+  ok(res, { ok: true });
+});
 route('GET', '/pause/:id/index.m3u8', async (req, res, q, p) => {
   const s = tsbuf.get(p.id);
   if (!s) return bad(res, 'Inspelningen finns inte längre', 404);
@@ -1195,10 +1266,11 @@ function start() {
   // background refresh: catalog every 12 h, EPG every 6 h
   setInterval(() => { if (store.config.configured && catalog.ready()) catalog.load(); }, 3600e3).unref();
   setInterval(() => { if (catalog.ready()) catalog.loadEpg().catch(() => {}); }, 30 * 60e3).unref();
+  setInterval(matchRecTick, 30e3).unref(); // match recordings
 }
 
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { store.flush(); process.exit(0); });
 
 if (require.main === module) start();
 
-module.exports = { server, store, catalog, proxy, start, _pool: pool };
+module.exports = { server, store, catalog, proxy, start, _pool: pool, _matchRecTick: matchRecTick };

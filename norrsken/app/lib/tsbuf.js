@@ -47,16 +47,30 @@ function stop(s, why) {
 
 function stopAll(why) { for (const s of [...sessions.values()]) stop(s, why); }
 
-/** Start recording `url` (a live channel). maxMin caps the length (and the disk use). */
-function start(url, { ua, maxMin = 60, ch = '' } = {}) {
-  stopAll('ny paus'); // one connection: a new pause ends the previous one
+/** The match recording that is still running, if any (it keeps the provider connection). */
+function matchSession() {
+  for (const s of sessions.values()) if (s.match && !s.dead && !s.done) return s;
+  return null;
+}
+
+/**
+ * Start recording `url` (a live channel). maxMin caps the length (and the disk use).
+ * match: a match recording (keeps 24 h, not stopped when nobody asks). It takes over from a pause, but a pause
+ * never takes over from a match recording.
+ */
+function start(url, { ua, maxMin = 60, ch = '', match = false } = {}) {
+  if (match) { for (const s of [...sessions.values()]) if (!s.match) stop(s, 'matchinspelning'); }
+  else {
+    if (matchSession()) throw new Error('Matchinspelningen pågår på en annan kanal');
+    stopAll('ny paus'); // one connection: a new pause ends the previous one
+  }
   fs.mkdirSync(ROOT, { recursive: true });
   const free = freeBytes(ROOT);
   if (free < MIN_FREE) throw new Error('För lite ledigt diskutrymme för att spela in pausen');
   const id = Math.random().toString(36).slice(2, 10);
   const dir = path.join(ROOT, id);
   fs.mkdirSync(dir, { recursive: true });
-  const s = { id, url, dir, ch, proc: null, started: Date.now(), last: Date.now(), dead: false, done: false, err: '', maxMin, full: false };
+  const s = { id, url, dir, ch, proc: null, started: Date.now(), last: Date.now(), dead: false, done: false, err: '', maxMin, full: false, match: !!match };
   const hls = /\.m3u8?(\?|$)/i.test(url);
   const args = ['-hide_banner', '-loglevel', 'error', '-nostats', '-user_agent', ua || DEFAULT_UA, '-rw_timeout', '20000000'];
   if (!hls) args.push('-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5');
@@ -82,7 +96,7 @@ function start(url, { ua, maxMin = 60, ch = '' } = {}) {
   }, 15000);
   if (s.diskT.unref) s.diskT.unref();
   sessions.set(id, s);
-  console.log('[paus] spelar in', ch || 'kanalen', 'från nu (högst', maxMin, 'min)');
+  console.log(match ? '[match] spelar in' : '[paus] spelar in', ch || 'kanalen', 'från nu (högst', maxMin, 'min)');
   return s;
 }
 
@@ -131,11 +145,15 @@ function length(s) {
   } catch (_) { return 0; }
 }
 
+const KEEP_MATCH_MS = 24 * 3600e3;
 setInterval(() => {
   const now = Date.now();
-  for (const s of [...sessions.values()]) if (now - s.last > IDLE_MS) stop(s, 'ingen tittar');
+  for (const s of [...sessions.values()]) {
+    if (s.match) { if (now - s.started > KEEP_MATCH_MS) stop(s, 'ett dygn gånget'); continue; } // a match stays a day
+    if (now - s.last > IDLE_MS) stop(s, 'ingen tittar');
+  }
 }, 20e3).unref();
 
 function active() { return sessions.size; }
 
-module.exports = { start, get, stop, stopAll, playlist, file, length, active, ROOT };
+module.exports = { start, get, stop, stopAll, matchSession, playlist, file, length, active, ROOT };

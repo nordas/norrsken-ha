@@ -319,7 +319,7 @@
     ], cur.ch.n + '  ·  ' + NS.fmtClock(cur.p.s) + '–' + NS.fmtClock(cur.p.e)).then(function (v) {
       if (v === 'rem') { NS.toggleReminder(cur.ch, cur.p); self.paint(); }
       else if (v === 'watch') watch(cur.ch, self.chans);
-      else if (v === 'count') NS.router.push(new NS.Countdown({ item: cur.ch, list: self.chans, at: cur.p.s, title: cur.p.t, sub: cur.ch.n }));
+      else if (v === 'count') NS.router.push(new NS.Countdown({ at: cur.p.s, title: cur.p.t, sub: cur.ch.n, go: function () { NS.playItem(cur.ch, { list: self.chans }); } }));
     });
   };
 

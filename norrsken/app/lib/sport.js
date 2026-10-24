@@ -84,14 +84,10 @@ function stockholmDay(now) {
   return { start: midnightOf(w, 0), end: midnightOf(w, 1) };
 }
 
-/**
- * The favourite's match for the calendar day (Stockholm): live, later today, or already played today.
- * channels: [{ id, n, epg }]; epg: an Epg with .map (channel → [[s, e, title, desc]]).
- * Returns null, or { team, state: 'live'|'soon'|'ended', title, home, away, s, e, d, ch, chans }. Live first, then the earliest start.
- */
-function findMatch(teamIdValue, channels, epg, { now = Date.now() } = {}) {
+/** Every match of the favourite's team in the calendar day (Stockholm), best first (see findMatch). */
+function matchesToday(teamIdValue, channels, epg, { now = Date.now() } = {}) {
   const fav = team(teamIdValue);
-  if (!fav || !epg || !epg.map || !epg.map.size) return null;
+  if (!fav || !epg || !epg.map || !epg.map.size) return [];
   const day = stockholmDay(now);
   const hits = new Map(); // start + teams → { prog, chans: [] }
   for (const ch of channels) {
@@ -114,21 +110,26 @@ function findMatch(teamIdValue, channels, epg, { now = Date.now() } = {}) {
       h.chans.push(ch);
     }
   }
-  if (!hits.size) return null;
-  // on now beats starting soon; then the earliest start; then the one on most channels
+  // on now beats starting soon, then played; then the earliest start; then the one on most channels
   const rank = (h) => (h.s <= now && now < h.e) ? 0 : h.s > now ? 1 : 2;
-  const best = [...hits.values()].sort((a, b) => (rank(a) - rank(b)) || a.s - b.s || b.chans.length - a.chans.length)[0];
-  const chans = best.chans.slice().sort((a, b) => channelScore(b.n) - channelScore(a.n));
-  return {
-    team: { id: fav.id, name: fav.name, short: fav.short, col: fav.col },
-    state: best.s > now ? 'soon' : now < best.e ? 'live' : 'ended',
-    title: best.mu ? best.mu.home + ' – ' + best.mu.away : best.t,
-    raw: best.t,
-    home: best.mu ? best.mu.home : '', away: best.mu ? best.mu.away : '',
-    s: best.s, e: best.e, d: best.d || '',
-    ch: chans[0],
-    chans,
-  };
+  return [...hits.values()].sort((a, b) => (rank(a) - rank(b)) || a.s - b.s || b.chans.length - a.chans.length).map((best) => {
+    const chans = best.chans.slice().sort((a, b) => channelScore(b.n) - channelScore(a.n));
+    return {
+      team: { id: fav.id, name: fav.name, short: fav.short, col: fav.col },
+      state: best.s > now ? 'soon' : now < best.e ? 'live' : 'ended',
+      title: best.mu ? best.mu.home + ' – ' + best.mu.away : best.t,
+      raw: best.t,
+      home: best.mu ? best.mu.home : '', away: best.mu ? best.mu.away : '',
+      s: best.s, e: best.e, d: best.d || '',
+      ch: chans[0],
+      chans,
+    };
+  });
 }
 
-module.exports = { TEAMS, teamId, team, list, matchup, findMatch, channelScore, stockholmDay };
+/** The favourite's match for the calendar day: the one to show on the start page, or null. */
+function findMatch(teamIdValue, channels, epg, opts = {}) {
+  return matchesToday(teamIdValue, channels, epg, opts)[0] || null;
+}
+
+module.exports = { TEAMS, teamId, team, list, matchup, findMatch, matchesToday, channelScore, stockholmDay };

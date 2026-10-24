@@ -15,19 +15,45 @@
   /* ================================================================ play helpers */
   NS.playItem = function (item, opts) {
     opts = opts || {};
-    NS.router.push(new NS.Player(Object.assign({ item: item }, opts)));
+    var open = function () { NS.router.push(new NS.Player(Object.assign({ item: item }, opts))); };
+    if (item.t === 'live' && !opts.rec) NS.guardStream(item, open);
+    else open();
   };
 
-  /** A favourite's match: the channel when it is on, a countdown to kick-off when it is not started yet. */
+  /** A match is being recorded on one channel: starting another live channel asks first (yes = stop the recording). */
+  NS.guardStream = function (item, go) {
+    if (!item || item.t !== 'live') { go(); return; }
+    NS.api.get('api/matchrec' + NS.pq()).then(function (r) {
+      var a = r && r.active;
+      if (!a || a.chId === item.id) { go(); return; }
+      NS.confirm({ title: 'Avbryta matchinspelningen?', text: a.title + ' spelas in på ' + a.chName + '. Det går bara en ström åt gången. Vill du avbryta inspelningen och byta kanal?',
+        buttons: [{ label: 'Ja, avbryt', value: true }, { label: 'Nej, behåll', value: false }], cancel: false }).then(function (yes) {
+        if (!yes) return;
+        NS.api.post('api/matchrec/stop' + NS.pq(), {}).then(go, go);
+      });
+    }).catch(go);
+  };
+
+  /** The match recording of a favourite's match: from its start, or at its live edge. */
+  NS.watchRec = function (m, edge) {
+    NS.router.push(new NS.Player({ item: m.ch, list: m.chans || [m.ch], cat: m.ch.cat, rec: { id: m.rec.id, url: m.rec.url, edge: !!edge } }));
+  };
+
+  /** A favourite's match: the recording when there is one, the channel when it is on, a countdown when it is not started yet. */
   NS.watchMatch = function (m, list, cat) {
+    var rec = m.rec && m.rec.id;
+    if (m.state === 'soon') {
+      NS.router.push(new NS.Countdown({ at: m.s, title: m.title, sub: m.ch.n, go: function () { if (rec) NS.watchRec(m, true); else NS.playItem(m.ch, { list: list, cat: cat }); } }));
+      return;
+    }
+    if (rec) { NS.watchRec(m, false); return; }
     if (m.state === 'ended') { NS.router.push(new NS.Guide({ cat: m.ch.cat })); return; }
-    if (m.state === 'soon') { NS.router.push(new NS.Countdown({ item: m.ch, list: list, cat: cat, at: m.s, title: m.title, sub: m.ch.n })); return; }
     NS.playItem(m.ch, { list: list, cat: cat });
   };
 
   /** Full-screen countdown to a start time; it starts the channel by itself when the time comes. */
   function Countdown(o) {
-    this.o = o;
+    this.o = o; // { at, title, sub, go }: go() runs when the time comes
     this.big = NS.h('div', { class: 'cd-big' });
     this.left = NS.h('div', { class: 'cd-left' });
     this.el = NS.h('div', { class: 'countdown' }, [
@@ -55,7 +81,8 @@
   Countdown.prototype.destroy = function () { clearInterval(this._t); };
   Countdown.prototype.start = function () {
     clearInterval(this._t);
-    NS.router.replace(new NS.Player({ item: this.o.item, list: this.o.list, cat: this.o.cat }));
+    NS.router.pop();
+    this.o.go();
   };
   Countdown.prototype.onKey = function (a) {
     if (a === 'back') NS.router.pop();
@@ -370,7 +397,8 @@
     if (it.sport) {
       // second billboard button: the guide while it's on, a reminder before it starts
       var m = it.sport;
-      if (m.state === 'live') { NS.router.push(new NS.Guide({ cat: m.ch.cat })); return; }
+      if (m.state === 'live' && m.rec && m.rec.id) { NS.watchRec(m, true); return; }
+      if (m.state === 'live' || m.state === 'ended') { NS.router.push(new NS.Guide({ cat: m.ch.cat })); return; }
       NS.toggleReminder(m.ch, { s: m.s, t: m.title });
       if (this.rows && this.rows.bb) { this.rows.bb.showSport(m); this.rows.bb.focus(true); this.rows.bb.sel = 1; this.rows.bb.paintBtns(); }
       return;

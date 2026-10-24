@@ -20,6 +20,8 @@
     this.o = opts;
     this.item = opts.item;
     this.live = this.item.t === 'live';
+    // a match recording (the whole match, on the server): play it from its start or at its live edge
+    if (opts.rec && this.live) this.tshift = { mode: 'rec', match: true, chId: this.item.id, id: opts.rec.id, url: opts.rec.url, at: Date.now(), playing: true, pos: 0, edge: !!opts.rec.edge };
     this.list = opts.list && opts.list.length ? opts.list.slice() : [this.item];
     this.cat = opts.cat || this.item.cat || null;
     this.series = opts.series || null;
@@ -252,7 +254,7 @@
   /* ------------------------------------------------------------ loading */
   Player.prototype.play = function (item, start) {
     var self = this;
-    if (this.tshift) this.endTshift();
+    if (this.tshift && (!this.tshift.match || item.id !== this.tshift.chId)) this.endTshift();
     this.item = item;
     this.start = start || 0;
     this.offset = 0;
@@ -350,7 +352,15 @@
   Player.prototype.startSource = function (at) {
     var self = this;
     if (this.suspended) return;
-    if (this.live && this.tshift && this.tshift.url) { this.startRec(this.tshift.playing ? this.video.currentTime || 0 : 0); return; }
+    if (this.live && this.tshift && this.tshift.url) {
+      var ts = this.tshift;
+      if (ts.match) {
+        if (ts.edge) { ts.edge = false; this.buffering(true); this.matchEdge(ts); return; }
+        this.startRec(ts.playing ? this.video.currentTime || ts.pos || 0 : ts.pos || 0);
+        return;
+      }
+      this.startRec(this.tshift.playing ? this.video.currentTime || 0 : 0); return;
+    }
     if (this.item.t === 'catchup') {
       // the archive URL is fixed to its start time: a retry/reload asks for a new one at the current position
       // (moving on to the next source of the same request is fine; reloading the same one is not)
@@ -1322,6 +1332,18 @@
     var off = function () { v.removeEventListener('playing', off); self.freezeEl.classList.remove('on'); };
     v.addEventListener('playing', off);
   };
+  /** A match recording: where its live edge is right now, then play from there. */
+  Player.prototype.matchEdge = function (ts) {
+    var self = this;
+    NS.api.get('api/matchrec' + NS.pq()).then(function (r) {
+      var a = (r.recs || []).find(function (x) { return x.id === ts.id; });
+      if (self.tshift !== ts) return;
+      // a few seconds back from the newest piece: the playlist may be a little behind what the server has written
+      ts.pos = a ? Math.max(0, a.sec - 6) : 0;
+      ts.playing = true;
+      self.startRec(ts.pos);
+    }).catch(function () { if (self.tshift === ts) self.startRec(ts.pos || 0); });
+  };
   /** Leave the paused/behind state: stop the recording (or forget the archive spot). */
   Player.prototype.endTshift = function () {
     var ts = this.tshift;
@@ -1331,12 +1353,13 @@
     if (!ts) return;
     this.tshift = null;
     clearInterval(ts.aliveT);
-    if (ts.id) NS.api.post('api/pause/' + ts.id + '/stop', {}).catch(function () {});
+    if (ts.id && !ts.match) NS.api.post('api/pause/' + ts.id + '/stop', {}).catch(function () {}); // a match recording goes on without us
     this.paintTshift();
   };
   /** ▶▶ / "Gå till live": back to the live broadcast. */
   Player.prototype.goLive = function () {
     if (!this.live) { if (this.item.t === 'catchup') this.toLive(); return; }
+    if (this.tshift && this.tshift.match) { this.tshift.edge = true; this.startSource(0); this.showOsd(); NS.toast('Live', 'live'); return; }
     this.endTshift();
     this.startSource(0);
     this.showOsd();
@@ -1473,7 +1496,12 @@
     i = (i + dir + this.list.length) % this.list.length;
     this.tune(this.list[i]);
   };
+  /** Changing channel: while a match is being recorded, ask first (the provider gives one connection). */
   Player.prototype.tune = function (it, list) {
+    var self = this;
+    NS.guardStream(it, function () { self.tuneNow(it, list); });
+  };
+  Player.prototype.tuneNow = function (it, list) {
     if (list) this.list = list;
     if (this.item && this.item.id !== it.id) this.prevCh = this.item;
     this.play(it, 0);

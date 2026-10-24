@@ -329,3 +329,30 @@ test('services: a wrong key says so instead of failing quietly', async () => {
   assert.equal((await get('/api/services')).json.error, 'TMDB-nyckeln fungerar inte');
   await post('/api/setup', { options: { tmdbKey: 'testkey123' } });
 });
+
+/* ------------------------------------------------------------------ match recording (Luleå, 24 h) */
+
+test('match: the favourite\'s match is recorded from the start, kept for a day, one stream at a time', async () => {
+  app._matchRecTick();
+  const r = (await get('/api/matchrec')).json;
+  assert.equal(r.recs.length, 1, JSON.stringify(r));
+  const rec = r.recs[0];
+  assert.match(rec.title, /Luleå – Färjestad/);
+  assert.match(rec.url, /\/pause\/\w+\/index\.m3u8$/);
+  // while it runs, a pause on another channel waits; the same channel pauses into the recording
+  const other = await post('/api/pause/start?profile=p1', { id: '111' });
+  if (rec.recording) assert.equal(other.status, 409, JSON.stringify(other.json));
+  const same = await post('/api/pause/start?profile=p1', { id: rec.chId });
+  if (rec.recording) assert.equal(same.json && same.json.id, rec.id);
+  // the playlist is there, growing from the start
+  const pl = await until(async () => { const x = await get(rec.url); return x.status === 200 && x.text; }, 30000);
+  assert.match(pl, /#EXT-X-PLAYLIST-TYPE:EVENT/);
+  // a second tick does not start another one for the same match
+  app._matchRecTick();
+  assert.equal((await get('/api/matchrec')).json.recs.length, 1);
+  // stopping it (the viewer says so) removes it
+  const stopped = (await post('/api/matchrec/stop')).json;
+  assert.ok(stopped.stopped >= 0);
+  await until(async () => (await get(rec.url)).status === 404, 5000);
+  assert.equal((await get('/api/matchrec')).json.active, null);
+});
