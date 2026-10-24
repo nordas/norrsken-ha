@@ -496,7 +496,11 @@
     var self = this, v = this.video;
     if (!v.webkitShowPlaybackTargetPicker) { NS.toast('AirPlay finns i Safari på iPhone, iPad och Mac', 'info'); return; }
     try {
-      var src = this.airUrl || (this.sources && this.sources[this.si] && this.sources[this.si].url) || '';
+      // the Apple TV fetches the address itself: take the one that goes through the add-on, not the provider's own
+      // (the provider's may need our user-agent or refuse a TV on the network)
+      var cur = this.sources && this.sources[this.si];
+      var via = this.sources && this.sources.find(function (x) { return x.kind === 'hls' && !x.direct; });
+      var src = this.airUrl || (via && via.url) || (cur && cur.url) || '';
       if (this.hls && src && !this.airNative) {
         var rel = v.currentTime || 0;
         try { this.hls.destroy(); } catch (e) { /* ignore */ }
