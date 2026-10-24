@@ -215,6 +215,9 @@ test('sport: the favourite\'s match counts for the whole calendar day (live, lat
   // live beats both
   m = sport.findMatch('lulea', chans, mk([at(11, 2.5, 'SHL: Luleå Hockey - Brynäs'), at(19, 2.5, 'SHL: Luleå Hockey - Skellefteå')]), { now });
   assert.equal(m.state, 'live');
+  // a title with no hockey word in it ("Luleå HF - Färjestad BK") is still the match
+  m = sport.findMatch('lulea', chans, mk([at(11, 2.5, 'Luleå HF - Färjestad BK')]), { now });
+  assert.equal(m && m.title, 'Luleå – Färjestad');
   // tomorrow's match is not today's
   m = sport.findMatch('lulea', chans, mk([at(26, 2.5, 'SHL: Luleå Hockey - Brynäs')]), { now });
   assert.equal(m, null);

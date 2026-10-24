@@ -100,7 +100,9 @@ function matchesToday(teamIdValue, channels, epg, { now = Date.now() } = {}) {
       if (s < day.start) continue;
       if (!fav.re.test(t)) continue;
       if (NOT_LIVE.test(t)) continue;
-      if (!HOCKEY.test(t + ' ' + (d || '') + ' ' + (ch.n || ''))) continue;
+      // "Luleå HF - Färjestad BK" has no hockey word in it: two known hockey clubs in the title is hockey enough
+      const other = TEAMS.some(x => x !== fav && x.re.test(t));
+      if (!other && !HOCKEY.test(t + ' ' + (d || '') + ' ' + (ch.n || ''))) continue;
       // a programme that already ran for hours is a re-run block, not the match
       if (e - s > 5 * 3600e3) continue;
       const mu = matchup(t, fav);
