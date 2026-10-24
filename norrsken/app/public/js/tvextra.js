@@ -314,10 +314,12 @@
     var on = NS.hasReminder(cur.ch.id, cur.p.s);
     NS.menu(cur.p.t, [
       { label: on ? 'Ta bort påminnelsen' : 'Påminn mig ' + NS.dayLabel(cur.p.s) + ' ' + NS.fmtClock(cur.p.s), icon: 'bell', value: 'rem' },
-      { label: 'Titta på ' + cur.ch.n + ' nu', icon: 'play', value: 'watch' }
+      { label: 'Titta på ' + cur.ch.n + ' nu', icon: 'play', value: 'watch' },
+      { label: 'Titta från start ' + NS.fmtClock(cur.p.s) + ' (nedräkning)', icon: 'play', value: 'count' }
     ], cur.ch.n + '  ·  ' + NS.fmtClock(cur.p.s) + '–' + NS.fmtClock(cur.p.e)).then(function (v) {
       if (v === 'rem') { NS.toggleReminder(cur.ch, cur.p); self.paint(); }
       else if (v === 'watch') watch(cur.ch, self.chans);
+      else if (v === 'count') NS.router.push(new NS.Countdown({ item: cur.ch, list: self.chans, at: cur.p.s, title: cur.p.t, sub: cur.ch.n }));
     });
   };
 

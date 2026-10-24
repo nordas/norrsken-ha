@@ -231,7 +231,7 @@
     var t = this.txt;
     t.innerHTML = '';
     var live = m.state === 'live';
-    t.appendChild(h('div', { class: 'kind' }, [live ? h('span', { class: 'live-pill', text: 'Live nu' }) : h('span', { class: 'soon-pill', text: 'Börjar ' + NS.fmtClock(m.s) }), m.team.name]));
+    t.appendChild(h('div', { class: 'kind' }, [live ? h('span', { class: 'live-pill', text: 'Live nu' }) : h('span', { class: 'soon-pill', text: m.state === 'ended' ? 'Slut' : 'Börjar ' + NS.fmtClock(m.s) }), m.team.name]));
     t.appendChild(h('h1', { class: m.title.length > 22 ? 'long' : null, text: m.title }));
     var meta = h('div', { class: 'meta' });
     var logo = h('span', { class: 'chlogo' });
@@ -245,7 +245,7 @@
     if (m.d) t.appendChild(h('div', { class: 'desc', text: m.d }));
     this.hint.innerHTML = '';
     var rem = !live && NS.hasReminder(m.ch.id, m.s);
-    this.btnEls = [h('div', { class: 'btn' }, [NS.icon('play'), live ? 'Titta nu' : 'Byt till kanalen']),
+    this.btnEls = [h('div', { class: 'btn' }, [NS.icon('play'), live ? 'Titta nu' : m.state === 'ended' ? 'Tv-guide' : 'Titta från start']),
       h('div', { class: 'btn' }, live ? [NS.icon('episodes'), 'Tv-guide'] : [NS.icon(rem ? 'check' : 'bell'), rem ? 'Påminnelse satt' : 'Påminn mig'])];
     this.btnEls.forEach(function (b) { this.hint.appendChild(b); }, this);
     t.appendChild(this.hint);

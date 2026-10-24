@@ -195,6 +195,31 @@ test('another favourite: Brynäs starts within the hour (soon); none: no billboa
   await post('/api/state/p1/prefs', { team: 'lulea' });
 });
 
+test('sport: the favourite\'s match counts for the whole calendar day (live, later, already played)', () => {
+  const sport = require('../lib/sport');
+  const day = sport.stockholmDay(Date.UTC(2026, 9, 24, 10)); // 24 Oct 2026, 12:00 in Stockholm
+  assert.equal(new Date(day.start).toISOString(), '2026-10-23T22:00:00.000Z');
+  assert.equal(new Date(day.end).toISOString(), '2026-10-24T22:00:00.000Z');
+  const H = 3600e3, s0 = day.start;
+  const chans = [{ id: 'c1', n: 'TV4 Sport', epg: 'tv4' }];
+  const mk = (list) => ({ map: new Map([['tv4', list]]) });
+  const now = s0 + 12 * H; // 12:00
+  const at = (h, len, title) => [s0 + h * H, s0 + (h + len) * H, title, 'Ishockey, SHL.'];
+  // played this morning
+  let m = sport.findMatch('lulea', chans, mk([at(8, 2, 'SHL: Luleå Hockey - Färjestad BK')]), { now });
+  assert.equal(m.state, 'ended');
+  // starts at 19:00 today, four hours away: still shown
+  m = sport.findMatch('lulea', chans, mk([at(8, 2, 'SHL: Luleå Hockey - Färjestad BK'), at(19, 2.5, 'SHL: Luleå Hockey - Brynäs')]), { now });
+  assert.equal(m.state, 'soon');
+  assert.equal(m.title, 'Luleå – Brynäs');
+  // live beats both
+  m = sport.findMatch('lulea', chans, mk([at(11, 2.5, 'SHL: Luleå Hockey - Brynäs'), at(19, 2.5, 'SHL: Luleå Hockey - Skellefteå')]), { now });
+  assert.equal(m.state, 'live');
+  // tomorrow's match is not today's
+  m = sport.findMatch('lulea', chans, mk([at(26, 2.5, 'SHL: Luleå Hockey - Brynäs')]), { now });
+  assert.equal(m, null);
+});
+
 /* ------------------------------------------------------------------ pause live TV */
 
 test('pause: records the channel to disk, plays it back as HLS, stops and cleans up', async () => {

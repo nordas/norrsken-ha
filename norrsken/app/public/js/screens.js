@@ -17,6 +17,51 @@
     opts = opts || {};
     NS.router.push(new NS.Player(Object.assign({ item: item }, opts)));
   };
+
+  /** A favourite's match: the channel when it is on, a countdown to kick-off when it is not started yet. */
+  NS.watchMatch = function (m, list, cat) {
+    if (m.state === 'ended') { NS.router.push(new NS.Guide({ cat: m.ch.cat })); return; }
+    if (m.state === 'soon') { NS.router.push(new NS.Countdown({ item: m.ch, list: list, cat: cat, at: m.s, title: m.title, sub: m.ch.n })); return; }
+    NS.playItem(m.ch, { list: list, cat: cat });
+  };
+
+  /** Full-screen countdown to a start time; it starts the channel by itself when the time comes. */
+  function Countdown(o) {
+    this.o = o;
+    this.big = NS.h('div', { class: 'cd-big' });
+    this.left = NS.h('div', { class: 'cd-left' });
+    this.el = NS.h('div', { class: 'countdown' }, [
+      NS.h('div', { class: 'cd-title', text: o.title }),
+      NS.h('div', { class: 'cd-sub', text: o.sub + '  ·  börjar ' + NS.fmtClock(o.at) }),
+      this.big, this.left,
+      NS.h('div', { class: 'cd-hint', text: 'OK startar nu  ·  Tillbaka avbryter' })
+    ]);
+  }
+  Countdown.prototype.tick = function () {
+    var left = this.o.at - Date.now();
+    if (left <= 0) { this.start(); return; }
+    var s = Math.ceil(left / 1000), hh = Math.floor(s / 3600), mm = Math.floor(s % 3600 / 60), ss = s % 60;
+    var p = function (n) { return (n < 10 ? '0' : '') + n; };
+    this.big.textContent = p(hh) + ':' + p(mm) + ':' + p(ss);
+    this.left.textContent = hh ? 'Börjar om ' + hh + ' h ' + mm + ' min' : mm ? 'Börjar om ' + mm + ' min' : 'Börjar om ' + ss + ' sek';
+  };
+  Countdown.prototype.activate = function () {
+    var self = this;
+    clearInterval(this._t);
+    this.tick();
+    this._t = setInterval(function () { self.tick(); }, 1000);
+  };
+  Countdown.prototype.deactivate = function () { clearInterval(this._t); };
+  Countdown.prototype.destroy = function () { clearInterval(this._t); };
+  Countdown.prototype.start = function () {
+    clearInterval(this._t);
+    NS.router.replace(new NS.Player({ item: this.o.item, list: this.o.list, cat: this.o.cat }));
+  };
+  Countdown.prototype.onKey = function (a) {
+    if (a === 'back') NS.router.pop();
+    else if (a === 'ok') this.start();
+  };
+  NS.Countdown = Countdown;
   NS.resumePos = function (item) {
     var p = NS.state.progress[item.k];
     if (p && p.pos > 15 && p.dur && !NS.isDone(p.pos, p.dur, item.t)) return p.pos;
@@ -346,7 +391,7 @@
   Browse.prototype.quickPlay = function (it, row) {
     if (it.t === 'ext') { NS.router.push(new NS.ExtDetail(it)); return; }
     // the match: its channel, with the other channels showing it a ▲▼ away
-    if (it.sport) { NS.playItem(it.sport.ch, { list: it.sport.chans || [it.sport.ch], cat: it.sport.ch.cat }); return; }
+    if (it.sport) { NS.watchMatch(it.sport, it.sport.chans || [it.sport.ch], it.sport.ch.cat); return; }
     if (it.t === 'movie') { NS.playItem(it, { start: NS.resumePos(it) }); return; }
     if (it.t === 'series') { NS.router.push(new NS.Detail(it, { autoplay: true })); return; }
     this.select(it, row || {});

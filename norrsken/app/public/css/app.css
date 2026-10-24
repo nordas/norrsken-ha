@@ -589,6 +589,13 @@ html.m .player .tap-play { width: 84px; height: 84px; margin: -42px 0 0 -42px; f
 .live-pill, .soon-pill { display: inline-flex; align-items: center; gap: 1rem; padding: .5rem 1.4rem; border-radius: .8rem; background: var(--live); color: #fff; letter-spacing: .1em; font-weight: 800; }
 .live-pill::before { content: ''; width: 1.1rem; height: 1.1rem; border-radius: 50%; background: #fff; animation: livepulse 1.6s ease-in-out infinite; }
 .soon-pill { background: rgba(255,255,255,.18); }
+/* countdown to a kick-off: the channel starts by itself when it reaches zero */
+.countdown { position: fixed; inset: 0; z-index: 5; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1.2rem; padding: 0 16px; background: radial-gradient(80% 80% at 50% 40%, #1d2028 0%, #0a0b0e 75%); color: #fff; text-align: center; }
+.countdown .cd-title { font-size: 3.2rem; font-weight: 800; max-width: 80vw; }
+.countdown .cd-sub { font-size: 1.8rem; opacity: .75; }
+.countdown .cd-big { margin-top: 2rem; font-size: 9rem; font-weight: 300; font-variant-numeric: tabular-nums; letter-spacing: .02em; }
+.countdown .cd-left { font-size: 2rem; opacity: .85; }
+.countdown .cd-hint { margin-top: 3rem; font-size: 1.4rem; opacity: .45; }
 @keyframes livepulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
 .billboard.sport h1 { font-size: 9rem; }
 .billboard.sport h1.long { font-size: 6.6rem; }

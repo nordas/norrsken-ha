@@ -69,14 +69,30 @@ function channelScore(name) {
   return s;
 }
 
+/** Start and end (ms) of the Swedish calendar day that contains `now`. */
+function stockholmDay(now) {
+  const f = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Stockholm', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' });
+  // local wall clock of an instant, as if it were UTC
+  const wall = (ms) => { const p = {}; for (const q of f.formatToParts(new Date(ms))) p[q.type] = +q.value; return { y: p.year, mo: p.month, d: p.day, ms: Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) }; };
+  const midnightOf = (w, plusDays) => {
+    const g = Date.UTC(w.y, w.mo - 1, w.d + plusDays);
+    let t = g; // local midnight is g minus the zone offset at that moment (two passes cover DST)
+    for (let i = 0; i < 2; i++) t = g - (wall(t).ms - t);
+    return t;
+  };
+  const w = wall(now);
+  return { start: midnightOf(w, 0), end: midnightOf(w, 1) };
+}
+
 /**
- * The favourite team's match that is on now or starts within `soon` ms.
- * channels: [{ id, n, epg }] (live channels visible to the profile); epg: an Epg with .map (channel → [[s, e, title, desc]]).
- * Returns null, or { team, state: 'live'|'soon', title, home, away, s, e, d, ch, chans }.
+ * The favourite's match for the calendar day (Stockholm): live, later today, or already played today.
+ * channels: [{ id, n, epg }]; epg: an Epg with .map (channel → [[s, e, title, desc]]).
+ * Returns null, or { team, state: 'live'|'soon'|'ended', title, home, away, s, e, d, ch, chans }. Live first, then the earliest start.
  */
-function findMatch(teamIdValue, channels, epg, { now = Date.now(), soon = 60 * 60e3 } = {}) {
+function findMatch(teamIdValue, channels, epg, { now = Date.now() } = {}) {
   const fav = team(teamIdValue);
   if (!fav || !epg || !epg.map || !epg.map.size) return null;
+  const day = stockholmDay(now);
   const hits = new Map(); // start + teams → { prog, chans: [] }
   for (const ch of channels) {
     if (!ch.epg) continue;
@@ -84,8 +100,8 @@ function findMatch(teamIdValue, channels, epg, { now = Date.now(), soon = 60 * 6
     if (!list) continue;
     for (const p of list) {
       const [s, e, t, d] = p;
-      if (s > now + soon) break;
-      if (e <= now) continue;
+      if (s >= day.end) break;
+      if (s < day.start) continue;
       if (!fav.re.test(t)) continue;
       if (NOT_LIVE.test(t)) continue;
       if (!HOCKEY.test(t + ' ' + (d || '') + ' ' + (ch.n || ''))) continue;
@@ -100,11 +116,12 @@ function findMatch(teamIdValue, channels, epg, { now = Date.now(), soon = 60 * 6
   }
   if (!hits.size) return null;
   // on now beats starting soon; then the earliest start; then the one on most channels
-  const best = [...hits.values()].sort((a, b) => ((b.s <= now) - (a.s <= now)) || a.s - b.s || b.chans.length - a.chans.length)[0];
+  const rank = (h) => (h.s <= now && now < h.e) ? 0 : h.s > now ? 1 : 2;
+  const best = [...hits.values()].sort((a, b) => (rank(a) - rank(b)) || a.s - b.s || b.chans.length - a.chans.length)[0];
   const chans = best.chans.slice().sort((a, b) => channelScore(b.n) - channelScore(a.n));
   return {
     team: { id: fav.id, name: fav.name, short: fav.short, col: fav.col },
-    state: best.s <= now ? 'live' : 'soon',
+    state: best.s > now ? 'soon' : now < best.e ? 'live' : 'ended',
     title: best.mu ? best.mu.home + ' – ' + best.mu.away : best.t,
     raw: best.t,
     home: best.mu ? best.mu.home : '', away: best.mu ? best.mu.away : '',
@@ -114,4 +131,4 @@ function findMatch(teamIdValue, channels, epg, { now = Date.now(), soon = 60 * 6
   };
 }
 
-module.exports = { TEAMS, teamId, team, list, matchup, findMatch, channelScore };
+module.exports = { TEAMS, teamId, team, list, matchup, findMatch, channelScore, stockholmDay };
