@@ -28,6 +28,9 @@ const SETUP_PIN = process.env.SETUP_PIN || '';
 const store = new Store(DATA_DIR);
 const catalog = new Catalog(store);
 const proxy = new Proxy();
+// provider addresses (with the account's password) are encrypted in every address handed to a TV or phone
+if (!store.config.proxySecret) { store.config.proxySecret = require('crypto').randomBytes(32).toString('hex'); store.saveConfig(); }
+proxy.setSecret(store.config.proxySecret);
 
 /* ------------------------------------------------------------------ helpers */
 
@@ -458,8 +461,7 @@ route('GET', '/api/page/:page', (req, res, q, p) => {
 
 /** The profile's favourite team playing now or soon (start page billboard). */
 function sportNow(prof, st, base = '') {
-  const tid = (st.prefs && st.prefs.team) || 'lulea';
-  if (tid === 'none') return null;
+  const tid = (st.prefs && st.prefs.team) || 'lulea'; // 'none': no team, but Sweden and the skiing world cups still show
   const key = prof.id + '|' + tid + '|' + catalog.epg.at;
   let hit = sportCache.get(key);
   if (!hit || Date.now() - hit.at >= 60e3) {

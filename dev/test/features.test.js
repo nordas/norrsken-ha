@@ -249,6 +249,36 @@ test('sport: TV4 Play event channels carry the match in their name (no TV guide)
   assert.equal(sport.findMatch('lulea', chans, null, { now: Date.UTC(2026, 9, 25, 18) }).state, 'live');
 });
 
+test('sport: the start page also follows Sweden (hockey, football) and the skiing world cups', () => {
+  const sport = require('../lib/sport');
+  const now = Date.UTC(2026, 10, 28, 10); // 28 Nov 2026, 11:00 Swedish time
+  const day = sport.stockholmDay(now), H = 3600e3;
+  const at = (h, len, t, d = '') => [day.start + h * H, day.start + (h + len) * H, t, d];
+  const chans = [
+    { id: '1', n: 'SVT1 HD', epg: 'svt1' }, { id: '3', n: 'Eurosport 1 HD', epg: 'es1' },
+    { id: '2', n: '[TV4Play] (28/11) 20:45 Sverige - Schweiz', epg: '-' },
+    { id: '4', n: '[TV4Play] (28/11) 19:00 Luleå HF - Brynäs IF', epg: '-' },
+  ];
+  const epg = { map: new Map([
+    ['svt1', [at(8, 2, 'Längdskidor: Världscupen', '10 km fri stil damer, Ruka.'), at(13, 1.5, 'Skidskytte: Världscupen', 'Sprint herrar.'), at(15, 1, 'Sverige idag'), at(16, 1, 'Handboll: Sverige - Norge')]],
+    ['es1', [at(10.5, 2, 'Fotboll: Sverige - Danmark', 'Landskamp'), at(20, 1, 'Ishockey: Tre Kronor - Finland', 'Karjala Cup')]],
+  ]) };
+  const all = sport.todayAll('lulea', chans, epg, { now });
+  const got = all.map(m => m.state + ' ' + m.team.id + ' ' + m.title);
+  assert.deepEqual(got, [
+    'live sverige Sverige – Danmark',
+    'soon skidskytte Skidskytte: Världscupen',
+    'soon lulea Luleå – Brynäs',
+    'soon sverige Sverige – Finland',
+    'soon sverige Sverige – Schweiz',
+    'ended langd Längdskidor: Världscupen',
+  ]);
+  // the billboard takes the first; Sverige idag and handball are not followed
+  assert.equal(sport.findMatch('lulea', chans, epg, { now }).title, 'Sverige – Danmark');
+  // the recordings stay with the favourite team only
+  assert.deepEqual(sport.matchesToday('lulea', chans, epg, { now }).map(m => m.title), ['Luleå – Brynäs']);
+});
+
 /* ------------------------------------------------------------------ pause live TV */
 
 test('pause: records the channel to disk, plays it back as HLS, stops and cleans up', async () => {

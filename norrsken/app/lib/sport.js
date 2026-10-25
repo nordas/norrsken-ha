@@ -110,31 +110,66 @@ function eventOf(name, now = Date.now()) {
 }
 const EVENT_LEN = 3 * 3600e3; // the name only says when it starts: a hockey broadcast is about three hours
 
-/** Every match of the favourite's team in the calendar day (Stockholm), best first (see findMatch). */
-function matchesToday(teamIdValue, channels, epg, { now = Date.now() } = {}) {
-  const fav = team(teamIdValue);
-  if (!fav) return [];
+/* What the start page follows besides the favourite team: Sweden (hockey or football) and the skiing world cups. */
+const SWE_SIDE = /(^|[:\s])(sverige|tre kronor|damkronorna|sweden)\s+[-–—]\s+\S|\S\s+[-–—]\s+(sverige|tre kronor|damkronorna|sweden)(\s|$|[,(])/i;
+const FOOTBALL = /fotboll|football|soccer|landskamp|vm-kval|em-kval|nations league|\bvm\b|\bem\b|\bos\b|fifa|uefa/i;
+const OTHER_SPORT = /handboll|bandy|innebandy|basket|volley|curling|tennis|padel|rugby|friidrott|simning|e-?sport|golf|dart/i;
+const WORLD_CUP = /v[äa]rldscup|world cup|tour de ski/i;
+const FOLLOW = {
+  sverige: {
+    id: 'sverige', name: 'Sverige', short: 'Sverige', col: ['#005293', '#fecb00'], maxLen: 5 * 3600e3, vs: BY_ID.get('tre-kronor'),
+    ok: (t, d, chn, ev) => SWE_SIDE.test(t) && !OTHER_SPORT.test(t + ' ' + d) && (ev || HOCKEY.test(t + ' ' + d + ' ' + chn) || FOOTBALL.test(t + ' ' + d + ' ' + chn)),
+  },
+  langd: {
+    id: 'langd', name: 'Längdskidor', short: 'Längd', col: ['#1d6fb8', '#ffffff'], maxLen: 6 * 3600e3,
+    ok: (t, d) => /l[äa]ngdskid|l[äa]ngd(åkning|akning)|\bl[äa]ngd\b|cross[- ]?country|tour de ski/i.test(t + ' ' + d) && WORLD_CUP.test(t + ' ' + d) && !/skidskytte|biathlon/i.test(t),
+  },
+  skidskytte: {
+    id: 'skidskytte', name: 'Skidskytte', short: 'Skidskytte', col: ['#0a7a5a', '#ffffff'], maxLen: 6 * 3600e3,
+    ok: (t, d) => /skidskytte|biathlon/i.test(t + ' ' + d) && WORLD_CUP.test(t + ' ' + d),
+  },
+};
+
+/** The favourite team as something to follow: its name in the title, and hockey. */
+function teamFollow(fav) {
+  return {
+    id: fav.id, name: fav.name, short: fav.short, col: fav.col, maxLen: 5 * 3600e3, vs: fav,
+    ok: (t, d, chn) => {
+      if (!fav.re.test(t)) return false;
+      // "Luleå HF - Färjestad BK" has no hockey word in it: two known hockey clubs in the title is hockey enough
+      const other = TEAMS.some(x => x !== fav && x.re.test(t));
+      return other || HOCKEY.test(t + ' ' + d + ' ' + chn);
+    },
+  };
+}
+
+/**
+ * Everything followed (see FOLLOW) in the calendar day (Stockholm), best first: live, then the next to start,
+ * then what already ran; within that the earliest. Programmes from the TV guide and event channels (name only).
+ */
+function collect(follows, channels, epg, now) {
   if (!epg || !epg.map) epg = { map: new Map() };
   const day = stockholmDay(now);
-  const hits = new Map(); // start + teams → { prog, chans: [] }
-  const add = (ch, s, e, t, d, label) => {
+  const hits = new Map(); // follow + start + teams → { f, prog, chans: [] }
+  const add = (ch, s, e, t, d, label, ev) => {
     if (s >= day.end || s < day.start) return;
-    if (!fav.re.test(t) || NOT_LIVE.test(t)) return;
-    // "Luleå HF - Färjestad BK" has no hockey word in it: two known hockey clubs in the title is hockey enough
-    const other = TEAMS.some(x => x !== fav && x.re.test(t));
-    if (!other && !HOCKEY.test(t + ' ' + (d || '') + ' ' + (ch.n || ''))) return;
-    // a programme that already ran for hours is a re-run block, not the match
-    if (e - s > 5 * 3600e3) return;
-    const mu = matchup(t, fav);
-    const key = (mu ? mu.home + '|' + mu.away : t.toLowerCase()) + '|' + Math.round(s / 600e3);
-    let h = hits.get(key);
-    if (!h) hits.set(key, (h = { s, e, t, d, mu, chans: [], labels: new Map() }));
-    if (!h.chans.includes(ch)) h.chans.push(ch);
-    h.labels.set(ch.id, label || ch.n);
+    if (NOT_LIVE.test(t)) return;
+    d = d || '';
+    for (const f of follows) {
+      if (!f.ok(t, d, ch.n || '', ev)) continue;
+      if (e - s > f.maxLen) continue; // hours of the same thing: a re-run block, not the event
+      const mu = f.vs ? matchup(t, f.vs) : null;
+      const key = f.id + '|' + (mu ? mu.home + '|' + mu.away : t.toLowerCase()) + '|' + Math.round(s / 600e3);
+      let h = hits.get(key);
+      if (!h) hits.set(key, (h = { f, s, e, t, d, mu, chans: [], labels: new Map() }));
+      if (!h.chans.includes(ch)) h.chans.push(ch);
+      h.labels.set(ch.id, label || ch.n);
+      return; // one thing per programme
+    }
   };
   for (const ch of channels) {
     const ev = eventOf(ch.n, now);
-    if (ev) { add(ch, ev.s, ev.s + EVENT_LEN, ev.title, '', ev.label); continue; }
+    if (ev) { add(ch, ev.s, ev.s + EVENT_LEN, ev.title, '', ev.label, true); continue; }
     if (!ch.epg) continue;
     const list = epg.map.get(ch.epg);
     if (!list) continue;
@@ -144,12 +179,12 @@ function matchesToday(teamIdValue, channels, epg, { now = Date.now() } = {}) {
       add(ch, s, e, t, d);
     }
   }
-  // on now beats starting soon, then played; then the earliest start; then the one on most channels
   const rank = (h) => (h.s <= now && now < h.e) ? 0 : h.s > now ? 1 : 2;
   return [...hits.values()].sort((a, b) => (rank(a) - rank(b)) || a.s - b.s || b.chans.length - a.chans.length).map((best) => {
     const chans = best.chans.slice().sort((a, b) => channelScore(b.n) - channelScore(a.n));
+    const f = best.f;
     return {
-      team: { id: fav.id, name: fav.name, short: fav.short, col: fav.col },
+      team: { id: f.id, name: f.name, short: f.short, col: f.col },
       state: best.s > now ? 'soon' : now < best.e ? 'live' : 'ended',
       title: best.mu ? best.mu.home + ' – ' + best.mu.away : best.t,
       raw: best.t,
@@ -162,9 +197,25 @@ function matchesToday(teamIdValue, channels, epg, { now = Date.now() } = {}) {
   });
 }
 
-/** The favourite's match for the calendar day: the one to show on the start page, or null. */
-function findMatch(teamIdValue, channels, epg, opts = {}) {
-  return matchesToday(teamIdValue, channels, epg, opts)[0] || null;
+/** Every match of the favourite's team in the calendar day (used for the match recordings). */
+function matchesToday(teamIdValue, channels, epg, { now = Date.now() } = {}) {
+  const fav = team(teamIdValue);
+  if (!fav) return [];
+  return collect([teamFollow(fav)], channels, epg, now);
 }
 
-module.exports = { TEAMS, teamId, team, list, matchup, findMatch, matchesToday, channelScore, stockholmDay, stockholmTime, eventOf };
+/** What the start page shows today: the favourite team, Sweden (hockey/football), the skiing world cups. */
+function followsFor(teamIdValue) {
+  const fav = team(teamIdValue);
+  return (fav ? [teamFollow(fav)] : []).concat([FOLLOW.sverige, FOLLOW.langd, FOLLOW.skidskytte]);
+}
+function todayAll(teamIdValue, channels, epg, { now = Date.now() } = {}) {
+  return collect(followsFor(teamIdValue), channels, epg, now);
+}
+
+/** The one for the start page billboard, or null. */
+function findMatch(teamIdValue, channels, epg, opts = {}) {
+  return todayAll(teamIdValue, channels, epg, opts)[0] || null;
+}
+
+module.exports = { TEAMS, teamId, team, list, matchup, findMatch, matchesToday, todayAll, channelScore, stockholmDay, stockholmTime, eventOf };

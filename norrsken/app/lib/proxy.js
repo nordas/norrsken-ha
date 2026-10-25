@@ -1,4 +1,5 @@
 'use strict';
+const crypto = require('crypto');
 const { Readable } = require('stream');
 const { DEFAULT_UA } = require('./util');
 
@@ -23,10 +24,33 @@ class Proxy {
     } catch (_) { return false; }
   }
 
-  token(u) { return Buffer.from(u, 'utf8').toString('base64url'); }
+  /** The key that hides provider addresses (with the account's user name and password) inside the tokens. */
+  setSecret(hex) { this.key = hex ? Buffer.from(hex, 'hex') : null; }
+
+  /**
+   * Token for a provider url: encrypted (AES-256-GCM), so the user name and password in it can't be read from
+   * the addresses the TV or phone sees. The same url always gives the same token (players and sessions rely on it).
+   */
+  token(u) {
+    if (!this.key) return Buffer.from(u, 'utf8').toString('base64url');
+    const iv = crypto.createHmac('sha256', this.key).update(u).digest().subarray(0, 12);
+    const c = crypto.createCipheriv('aes-256-gcm', this.key, iv);
+    const enc = Buffer.concat([c.update(u, 'utf8'), c.final()]);
+    return 'e' + Buffer.concat([iv, c.getAuthTag(), enc]).toString('base64url');
+  }
 
   untoken(t) {
-    try { return Buffer.from(String(t), 'base64url').toString('utf8'); } catch (_) { return ''; }
+    t = String(t || '');
+    if (t[0] === 'e' && this.key) {
+      try {
+        const b = Buffer.from(t.slice(1), 'base64url');
+        const d = crypto.createDecipheriv('aes-256-gcm', this.key, b.subarray(0, 12));
+        d.setAuthTag(b.subarray(12, 28));
+        return Buffer.concat([d.update(b.subarray(28)), d.final()]).toString('utf8');
+      } catch (_) { return ''; }
+    }
+    // older plain tokens still work (only hosts we handed out are fetched either way)
+    try { return Buffer.from(t, 'base64url').toString('utf8'); } catch (_) { return ''; }
   }
 
   /** Public path for a provider url; `name` is cosmetic (players sometimes look at extensions). */
