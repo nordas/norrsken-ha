@@ -43,7 +43,7 @@
   NS.watchMatch = function (m, list, cat) {
     var rec = m.rec && m.rec.id;
     if (m.state === 'soon') {
-      NS.router.push(new NS.Countdown({ at: m.s, title: m.title, sub: m.ch.n, go: function () { if (rec) NS.watchRec(m, true); else NS.playItem(m.ch, { list: list, cat: cat }); } }));
+      NS.router.push(new NS.Countdown({ at: m.s, title: m.title, sub: m.chName || m.ch.n, go: function () { if (rec) NS.watchRec(m, true); else NS.playItem(m.ch, { list: list, cat: cat }); } }));
       return;
     }
     if (rec) { NS.watchRec(m, false); return; }

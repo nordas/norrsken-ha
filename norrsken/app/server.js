@@ -974,8 +974,8 @@ function matchRecTick() {
     const src = catalog.streamUrl('live', m.ch.id);
     if (!src || !src.primary) continue;
     try {
-      const sess = tsbuf.start(src.primary, { ua: catalog.ua(), maxMin: Math.ceil((m.e + MATCH_TAIL_MS - now) / 60e3), ch: m.ch.n, match: true });
-      matchRecs.set(key, { key, s: m.s, e: m.e, title: m.title, chId: m.ch.id, chName: m.ch.n, sessId: sess.id });
+      const sess = tsbuf.start(src.primary, { ua: catalog.ua(), maxMin: Math.ceil((m.e + MATCH_TAIL_MS - now) / 60e3), ch: m.title + ' på ' + (m.chName || m.ch.n), match: true });
+      matchRecs.set(key, { key, s: m.s, e: m.e, title: m.title, chId: m.ch.id, chName: m.chName || m.ch.n, sessId: sess.id });
       lastStreamAt = Date.now();
     } catch (e) { console.error('[match]', e.message); }
   }

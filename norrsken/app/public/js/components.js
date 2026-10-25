@@ -237,7 +237,7 @@
     var logo = h('span', { class: 'chlogo' });
     if (m.ch.img) logo.appendChild(NS.pic(m.ch.img, '', function () { logo.remove(); }));
     meta.appendChild(logo);
-    meta.appendChild(h('span', { text: m.ch.n }));
+    meta.appendChild(h('span', { text: m.chName || m.ch.n }));
     meta.appendChild(h('span', { text: NS.fmtClock(m.s) + '–' + NS.fmtClock(m.e) }));
     if (m.chans && m.chans.length > 1) meta.appendChild(h('span', { class: 'soft', text: 'på ' + m.chans.length + ' kanaler' }));
     t.appendChild(meta);

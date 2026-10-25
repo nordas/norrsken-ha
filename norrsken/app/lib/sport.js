@@ -69,47 +69,79 @@ function channelScore(name) {
   return s;
 }
 
+const SE_FMT = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Stockholm', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' });
+/** Swedish wall clock of an instant: its date, and the wall time as if it were UTC (ms). */
+function wall(ms) {
+  const p = {};
+  for (const q of SE_FMT.formatToParts(new Date(ms))) p[q.type] = +q.value;
+  return { y: p.year, mo: p.month, d: p.day, ms: Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) };
+}
+/** The instant (ms) of a Swedish wall-clock time; two passes get the summer/winter time change right. */
+function stockholmTime(y, mo, d, hh = 0, mm = 0) {
+  const g = Date.UTC(y, mo - 1, d, hh, mm);
+  let t = g;
+  for (let i = 0; i < 2; i++) t = g - (wall(t).ms - Math.floor(t / 1000) * 1000);
+  return t;
+}
+
 /** Start and end (ms) of the Swedish calendar day that contains `now`. */
 function stockholmDay(now) {
-  const f = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Stockholm', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' });
-  // local wall clock of an instant, as if it were UTC
-  const wall = (ms) => { const p = {}; for (const q of f.formatToParts(new Date(ms))) p[q.type] = +q.value; return { y: p.year, mo: p.month, d: p.day, ms: Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) }; };
-  const midnightOf = (w, plusDays) => {
-    const g = Date.UTC(w.y, w.mo - 1, w.d + plusDays);
-    let t = g; // local midnight is g minus the zone offset at that moment (two passes cover DST)
-    for (let i = 0; i < 2; i++) t = g - (wall(t).ms - t);
-    return t;
-  };
   const w = wall(now);
-  return { start: midnightOf(w, 0), end: midnightOf(w, 1) };
+  return { start: stockholmTime(w.y, w.mo, w.d), end: stockholmTime(w.y, w.mo, w.d + 1) };
 }
+
+/**
+ * Event channels carry the match in their name and have no TV guide, like the provider's TV4 Play ones:
+ * "[TV4Play] (25/10) 18:00 Luleå HF - Djurgården IF" → { s, title, label: 'TV4 Play' }. The time is Swedish time.
+ */
+const EVENT_RE = /^\s*\[([^\]]{2,30})\]\s*\((\d{1,2})\/(\d{1,2})\)\s*(\d{1,2})[:.](\d{2})\s+(.+?)\s*$/;
+function eventOf(name, now = Date.now()) {
+  const m = EVENT_RE.exec(String(name || ''));
+  if (!m) return null;
+  const [, label, dd, mo, hh, mm, title] = m;
+  const y = wall(now).y;
+  // around new year the date can belong to the year before or after
+  let best = null;
+  for (const yy of [y - 1, y, y + 1]) {
+    const t = stockholmTime(yy, +mo, +dd, +hh, +mm);
+    if (best === null || Math.abs(t - now) < Math.abs(best - now)) best = t;
+  }
+  return { s: best, title, label: label.replace(/^\s*tv4\s*play\s*$/i, 'TV4 Play').trim() };
+}
+const EVENT_LEN = 3 * 3600e3; // the name only says when it starts: a hockey broadcast is about three hours
 
 /** Every match of the favourite's team in the calendar day (Stockholm), best first (see findMatch). */
 function matchesToday(teamIdValue, channels, epg, { now = Date.now() } = {}) {
   const fav = team(teamIdValue);
-  if (!fav || !epg || !epg.map || !epg.map.size) return [];
+  if (!fav) return [];
+  if (!epg || !epg.map) epg = { map: new Map() };
   const day = stockholmDay(now);
   const hits = new Map(); // start + teams → { prog, chans: [] }
+  const add = (ch, s, e, t, d, label) => {
+    if (s >= day.end || s < day.start) return;
+    if (!fav.re.test(t) || NOT_LIVE.test(t)) return;
+    // "Luleå HF - Färjestad BK" has no hockey word in it: two known hockey clubs in the title is hockey enough
+    const other = TEAMS.some(x => x !== fav && x.re.test(t));
+    if (!other && !HOCKEY.test(t + ' ' + (d || '') + ' ' + (ch.n || ''))) return;
+    // a programme that already ran for hours is a re-run block, not the match
+    if (e - s > 5 * 3600e3) return;
+    const mu = matchup(t, fav);
+    const key = (mu ? mu.home + '|' + mu.away : t.toLowerCase()) + '|' + Math.round(s / 600e3);
+    let h = hits.get(key);
+    if (!h) hits.set(key, (h = { s, e, t, d, mu, chans: [], labels: new Map() }));
+    if (!h.chans.includes(ch)) h.chans.push(ch);
+    h.labels.set(ch.id, label || ch.n);
+  };
   for (const ch of channels) {
+    const ev = eventOf(ch.n, now);
+    if (ev) { add(ch, ev.s, ev.s + EVENT_LEN, ev.title, '', ev.label); continue; }
     if (!ch.epg) continue;
     const list = epg.map.get(ch.epg);
     if (!list) continue;
     for (const p of list) {
       const [s, e, t, d] = p;
       if (s >= day.end) break;
-      if (s < day.start) continue;
-      if (!fav.re.test(t)) continue;
-      if (NOT_LIVE.test(t)) continue;
-      // "Luleå HF - Färjestad BK" has no hockey word in it: two known hockey clubs in the title is hockey enough
-      const other = TEAMS.some(x => x !== fav && x.re.test(t));
-      if (!other && !HOCKEY.test(t + ' ' + (d || '') + ' ' + (ch.n || ''))) continue;
-      // a programme that already ran for hours is a re-run block, not the match
-      if (e - s > 5 * 3600e3) continue;
-      const mu = matchup(t, fav);
-      const key = (mu ? mu.home + '|' + mu.away : t.toLowerCase()) + '|' + Math.round(s / 600e3);
-      let h = hits.get(key);
-      if (!h) hits.set(key, (h = { s, e, t, d, mu, chans: [] }));
-      h.chans.push(ch);
+      add(ch, s, e, t, d);
     }
   }
   // on now beats starting soon, then played; then the earliest start; then the one on most channels
@@ -124,6 +156,7 @@ function matchesToday(teamIdValue, channels, epg, { now = Date.now() } = {}) {
       home: best.mu ? best.mu.home : '', away: best.mu ? best.mu.away : '',
       s: best.s, e: best.e, d: best.d || '',
       ch: chans[0],
+      chName: best.labels.get(chans[0].id) || chans[0].n, // "TV4 Play" instead of the event channel's long name
       chans,
     };
   });
@@ -134,4 +167,4 @@ function findMatch(teamIdValue, channels, epg, opts = {}) {
   return matchesToday(teamIdValue, channels, epg, opts)[0] || null;
 }
 
-module.exports = { TEAMS, teamId, team, list, matchup, findMatch, matchesToday, channelScore, stockholmDay };
+module.exports = { TEAMS, teamId, team, list, matchup, findMatch, matchesToday, channelScore, stockholmDay, stockholmTime, eventOf };

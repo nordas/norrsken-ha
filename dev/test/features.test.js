@@ -223,6 +223,32 @@ test('sport: the favourite\'s match counts for the whole calendar day (live, lat
   assert.equal(m, null);
 });
 
+test('sport: TV4 Play event channels carry the match in their name (no TV guide)', () => {
+  const sport = require('../lib/sport');
+  const now = Date.UTC(2026, 9, 25, 10); // 25 Oct 2026, 11:00 Swedish time (winter time from 03:00 today)
+  const ev = sport.eventOf('[TV4Play] (25/10) 13:50 Norrby IF - IFK Norrköping', now);
+  assert.equal(new Date(ev.s).toISOString(), '2026-10-25T12:50:00.000Z');
+  assert.equal(ev.title, 'Norrby IF - IFK Norrköping');
+  assert.equal(ev.label, 'TV4 Play');
+  assert.equal(sport.eventOf('TV4 Play Event 21', now), null);
+  // around new year the date belongs to the next year
+  assert.equal(new Date(sport.eventOf('[TV4Play] (02/01) 19:00 X - Y', Date.UTC(2026, 11, 30)).s).toISOString(), '2027-01-02T18:00:00.000Z');
+  const chans = [
+    { id: 'a', n: '[TV4Play] (25/10) 13:20 Inter - Fiorentina', epg: '-' },
+    { id: 'b', n: '[TV4Play] (25/10) 17:00 Studio: Luleå HF - Djurgården IF', epg: '-' },
+    { id: 'c', n: '[TV4Play] (25/10) 18:00 Luleå HF - Djurgården IF', epg: '-' },
+    { id: 'd', n: '[TV4Play] (24/10) 18:00 Luleå HF - Frölunda HC', epg: '-' },
+    { id: 'e', n: 'TV4 Hockey HD', epg: 'tv4hockey.se' },
+  ];
+  const m = sport.findMatch('lulea', chans, null, { now });
+  assert.equal(m.state, 'soon');
+  assert.equal(m.title, 'Luleå – Djurgården');
+  assert.equal(m.ch.id, 'c'); // not the studio show, not yesterday's match
+  assert.equal(m.chName, 'TV4 Play');
+  assert.equal(new Date(m.s).toISOString(), '2026-10-25T17:00:00.000Z');
+  assert.equal(sport.findMatch('lulea', chans, null, { now: Date.UTC(2026, 9, 25, 18) }).state, 'live');
+});
+
 /* ------------------------------------------------------------------ pause live TV */
 
 test('pause: records the channel to disk, plays it back as HLS, stops and cleans up', async () => {

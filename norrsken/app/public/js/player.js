@@ -376,6 +376,7 @@
     var src = this.sources[this.si];
     var v = this.video;
     this.airNative = false;
+    this.airUrl = ''; // a converted film sets its own below; a live channel uses the add-on's address of the channel
     clearTimeout(this.airT);
     this.teardown();
     this.kind = src.kind;
@@ -399,6 +400,7 @@
         hls.on(window.Hls.Events.MANIFEST_PARSED, function () { self.playPromise(); });
         hls.on(window.Hls.Events.SUBTITLE_TRACKS_UPDATED, function () { self.autoTracks(); });
         hls.on(window.Hls.Events.AUDIO_TRACKS_UPDATED, function () { self.autoTracks(); });
+        hls.on(window.Hls.Events.MEDIA_ATTACHED, function () { if (self.hls === hls) self.addAirSource(); });
         hls.loadSource(src.url);
         hls.attachMedia(v);
         return;
@@ -472,17 +474,33 @@
     this.playPromise();
   };
 
-  /** With hls.js in Safari: a plain HLS <source> after hls.js's own, which is what AirPlay hands to the Apple TV. */
+  /**
+   * The address an Apple TV gets for AirPlay. It fetches the stream itself, so: the add-on's own address (not the
+   * provider's, which may refuse it), and the network address instead of Home Assistant's menu (needs a login).
+   */
+  Player.prototype.airSrc = function () {
+    var cur = this.sources && this.sources[this.si];
+    var via = this.sources && this.sources.find(function (x) { return x.kind === 'hls' && !x.direct; });
+    var src = this.airUrl || (via && via.url) || (cur && cur.url) || '';
+    if (/\/api\/hassio_ingress\//.test(src)) {
+      var lan = NS.status && NS.status.lan;
+      if (!lan) return '';
+      src = src.replace(/^(https?:\/\/[^/]+)?\/api\/hassio_ingress\/[\w-]+/, lan);
+    }
+    return src ? new URL(src, location.href).href : '';
+  };
+
+  /** With hls.js in Safari: a plain HLS <source> after hls.js's own, which is what AirPlay (also the system's own button) hands to the Apple TV. */
   Player.prototype.addAirSource = function () {
     var v = this.video;
     if (!window.WebKitPlaybackTargetAvailabilityEvent || !this.hls) return;
-    var src = this.airUrl || (this.sources && this.sources[this.si] && this.sources[this.si].url) || '';
+    var src = this.airSrc();
     if (!src) return;
     try {
       v.disableRemotePlayback = false;
       v.setAttribute('x-webkit-airplay', 'allow');
       var el = v.querySelector('source.air') || document.createElement('source');
-      el.className = 'air'; el.type = 'application/x-mpegURL'; el.src = new URL(src, location.href).href;
+      el.className = 'air'; el.type = 'application/x-mpegURL'; el.src = src;
       if (!el.parentNode) v.appendChild(el);
     } catch (e) { /* ignore */ }
   };
@@ -496,18 +514,9 @@
     var self = this, v = this.video;
     if (!v.webkitShowPlaybackTargetPicker) { NS.toast('AirPlay finns i Safari på iPhone, iPad och Mac', 'info'); return; }
     try {
-      // the Apple TV fetches the address itself: take the one that goes through the add-on, not the provider's own
-      // (the provider's may need our user-agent or refuse a TV on the network)
-      var cur = this.sources && this.sources[this.si];
-      var via = this.sources && this.sources.find(function (x) { return x.kind === 'hls' && !x.direct; });
-      var src = this.airUrl || (via && via.url) || (cur && cur.url) || '';
-      // through Home Assistant's own menu (ingress) the address needs a Home Assistant login the Apple TV doesn't have
-      if (/\/api\/hassio_ingress\//.test(src)) {
-        var lan = NS.status && NS.status.lan;
-        if (!lan) { NS.toast('AirPlay: öppna Norrsken på tv-adressen (http://…:8787), inte från Home Assistant-menyn', 'info'); return; }
-        src = src.replace(/^(https?:\/\/[^/]+)?\/api\/hassio_ingress\/[\w-]+/, lan);
-      }
-      if (this.hls && src && !this.airNative) {
+      var src = this.airSrc();
+      if (!src) { NS.toast('AirPlay: öppna Norrsken på tv-adressen (http://…:8787), inte från Home Assistant-menyn', 'info'); return; }
+      if (this.hls && !this.airNative) {
         var rel = v.currentTime || 0;
         try { this.hls.destroy(); } catch (e) { /* ignore */ }
         this.hls = null;
@@ -515,8 +524,8 @@
         [].slice.call(v.querySelectorAll('source')).forEach(function (s) { s.remove(); });
         v.disableRemotePlayback = false;
         v.setAttribute('x-webkit-airplay', 'allow');
-        v.src = new URL(src, location.href).href;
-        var seek = function () { v.removeEventListener('loadedmetadata', seek); if (rel > 1 && !self.live) { try { v.currentTime = rel; } catch (e) { /* ignore */ } } };
+        v.src = src;
+        var seek = function () { v.removeEventListener('loadedmetadata', seek); if (rel > 1 && (!self.live || self.tshift)) { try { v.currentTime = rel; } catch (e) { /* ignore */ } } };
         v.addEventListener('loadedmetadata', seek);
         this.playPromise();
         clearTimeout(this.airT);
@@ -1325,12 +1334,14 @@
     this.lastMove = Date.now();
     this.buffering(true);
     var url = ts.url;
+    this.airUrl = url; // AirPlay of a recording: the recording itself (fMP4 HLS from the add-on)
     if (window.Hls && window.Hls.isSupported()) {
       // an EVENT playlist: start where the recording starts and never jump ahead to its end
       var hls = this.hls = new window.Hls({ enableWorker: true, startPosition: at || 0, liveSyncDurationCount: 99999, liveMaxLatencyDurationCount: Infinity,
         maxBufferLength: 40, backBufferLength: 60, manifestLoadingTimeOut: 40000, manifestLoadingMaxRetry: 2, levelLoadingMaxRetry: 6, fragLoadingMaxRetry: 6 });
       hls.on(window.Hls.Events.ERROR, function (ev, d) { if (d && d.fatal) { NS.diag('pausinspelning: ' + d.details); self.goLive(); } });
       hls.on(window.Hls.Events.MANIFEST_PARSED, function () { self.playPromise(); });
+      hls.on(window.Hls.Events.MEDIA_ATTACHED, function () { if (self.hls === hls) self.addAirSource(); });
       hls.loadSource(url);
       hls.attachMedia(v);
     } else {
