@@ -501,6 +501,12 @@
       var cur = this.sources && this.sources[this.si];
       var via = this.sources && this.sources.find(function (x) { return x.kind === 'hls' && !x.direct; });
       var src = this.airUrl || (via && via.url) || (cur && cur.url) || '';
+      // through Home Assistant's own menu (ingress) the address needs a Home Assistant login the Apple TV doesn't have
+      if (/\/api\/hassio_ingress\//.test(src)) {
+        var lan = NS.status && NS.status.lan;
+        if (!lan) { NS.toast('AirPlay: öppna Norrsken på tv-adressen (http://…:8787), inte från Home Assistant-menyn', 'info'); return; }
+        src = src.replace(/^(https?:\/\/[^/]+)?\/api\/hassio_ingress\/[\w-]+/, lan);
+      }
       if (this.hls && src && !this.airNative) {
         var rel = v.currentTime || 0;
         try { this.hls.destroy(); } catch (e) { /* ignore */ }

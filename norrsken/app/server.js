@@ -334,6 +334,7 @@ function status() {
   const d = catalog.data;
   return {
     version: pkg.version,
+    lan: lanUrls()[0] || '', // the address an Apple TV can reach (AirPlay); the add-on runs on the host network
     appName: store.config.options.appName || 'Norrsken',
     configured: !!store.config.configured,
     ready: catalog.ready(),
