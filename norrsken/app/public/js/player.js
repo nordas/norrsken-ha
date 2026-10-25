@@ -15,6 +15,30 @@
 
   NS.introCache = NS.introCache || {};
 
+  /** "4K", "1080p" … from the picture size. */
+  function resLabel(w, hh) {
+    w = w || 0; hh = hh || 0;
+    if (!w && !hh) return '';
+    if (w >= 3800 || hh >= 2000) return '4K';
+    if (w >= 2500 || hh >= 1400) return '1440p';
+    if (w >= 1800 || hh >= 1000) return '1080p';
+    if (w >= 1200 || hh >= 700) return '720p';
+    return (hh || Math.round(w * 9 / 16)) + 'p';
+  }
+  /** "Dolby Digital Plus 5.1", "AAC stereo" … */
+  function audioLabel(codec, ch) {
+    var names = { ac3: 'Dolby Digital', eac3: 'Dolby Digital Plus', truehd: 'Dolby TrueHD', mlp: 'Dolby TrueHD', dts: 'DTS', aac: 'AAC', mp3: 'MP3', mp2: 'MPEG-ljud', opus: 'Opus', flac: 'FLAC', vorbis: 'Vorbis', alac: 'ALAC' };
+    var n = names[codec] || (codec ? String(codec).toUpperCase() : '');
+    var c = ch >= 8 ? '7.1' : ch >= 6 ? '5.1' : ch === 2 ? 'stereo' : ch === 1 ? 'mono' : '';
+    return [n, c].filter(Boolean).join(' ');
+  }
+  /** What a source is, in words, for the player choice. */
+  function srcLabel(x) {
+    var k = { hls: 'HLS', ts: 'MPEG-TS', file: 'Fil', remux: 'Konverterad av servern' }[x.kind] || x.kind;
+    return x.kind === 'remux' ? k : k + (x.direct ? ' · direkt från leverantören' : ' · via servern');
+  }
+  var SUB_SIZES = [['s', 'Liten'], ['m', 'Normal'], ['l', 'Stor'], ['xl', 'Extra stor']];
+
   function Player(opts) {
     var self = this;
     this.o = opts;
@@ -83,6 +107,7 @@
         h('div', { class: 'lspace' }),
         this.lAudB,
         this.lSubB,
+        this.lSetB = lb('settings', '', function () { self.openSettings(); }),
         this.lGo
       ]);
       this.osd.appendChild(this.lctl);
@@ -127,7 +152,7 @@
 
     // media events
     var on = function (ev, fn) { v.addEventListener(ev, fn); };
-    on('playing', function () { self.buffering(false); self.errShown = false; self.played = true; self.lastMove = Date.now(); });
+    on('playing', function () { self.buffering(false); self.errShown = false; self.played = true; self.lastMove = Date.now(); self.maybeBadge(); });
     on('waiting', function () {
       self.buffering(true);
       var b = 0;
@@ -207,8 +232,10 @@
       this.skipResume = false;
       return;
     }
+    this.setSubSize(NS.store.get('subSize', 'm'), true);
     this.play(this.item, this.start);
     this.every(3000, function () { self.watchdog(); });
+    this.every(1000, function () { if (self.infoOn) self.paintInfo(); });
     this.every(500, function () { if (self.cuSeek) self.cuCatch(); });
     this.every(15000, function () { self.saveProgress(); });
     if (this.live) this.every(30000, function () { NS.needEpg([self.item.id]); });
@@ -264,6 +291,7 @@
     this.audioIdx = 0;
     this.nextDismissed = false;
     this.introDone = false;
+    this.badgeDone = false;
     this.hideNext();
     this.stopSubs();
     this.sub = null;
@@ -388,7 +416,9 @@
     this.pendingSeek = 0;
     at = at || 0;
     if (src.kind === 'hls') {
-      if (window.Hls && window.Hls.isSupported()) {
+      // "Tv:ns egen spelare" chosen in the player settings: the screen's own HLS instead of hls.js
+      var ownHls = NS.store.get('engine', '') === 'native' && v.canPlayType('application/vnd.apple.mpegurl');
+      if (window.Hls && window.Hls.isSupported() && !ownHls) {
         var hls = this.hls = new window.Hls({
           enableWorker: true, lowLatencyMode: false, backBufferLength: 30, maxBufferLength: 40, maxMaxBufferLength: 120,
           maxBufferHole: 1, liveSyncDurationCount: 4, liveMaxLatencyDurationCount: 12, startFragPrefetch: true,
@@ -827,7 +857,7 @@
       if (self.scrubbing !== null && self.scrubbing !== undefined) return;
       if (self.zone !== 'bar' && !self.live) return;
       self.hideOsd();
-    }, this.live ? 5000 : 4500);
+    }, 5000);
   };
   Player.prototype.hideOsd = function () {
     this.osdOn = false;
@@ -959,6 +989,7 @@
     if (this.nextEp()) b.push({ id: 'next', icon: 'next', label: 'Nästa avsnitt' });
     b.push({ id: 'restart', icon: 'restart', label: 'Från början' });
     if (this.item.t === 'catchup') b.push({ id: 'live', icon: 'live', label: 'Gå till live' });
+    b.push({ id: 'settings', icon: 'settings', label: 'Inställningar' });
     this.btns = b;
     this.obtns.innerHTML = '';
     this.btnEls = b.map(function (x, i) {
@@ -983,6 +1014,7 @@
     else if (b.id === 'ff') this.seekTo(this.cur() + 10);
     else if (b.id === 'tracks' || b.id === 'subs' || b.id === 'audio') this.openTracks();
     else if (b.id === 'next') this.playNext();
+    else if (b.id === 'settings') this.openSettings();
     else if (b.id === 'live') this.toLive();
     else if (b.id === 'restart') { this.seekTo(0); this.zone = 'bar'; this.paintZone(); this.playPromise(); }
   };
@@ -1051,6 +1083,7 @@
   Player.prototype.pickTrack = function () {
     var t = this.trItems[this.ti];
     if (!t) return;
+    if (t.act) { t.act(); return; }
     if (t.group === 'Ljud') {
       this.setAudio(t);
       if (t.code) NS.setPref('audio', t.code);
@@ -1401,9 +1434,10 @@
   Player.prototype.paintTrackBtns = function () {
     if (!this.lSubB) return;
     var L = this.trackLabels();
-    this.lSubB.lastChild.textContent = L.sub;
+    var short = this.lctl && this.lctl.classList.contains('tl'); // phone: a short word under the icon
+    this.lSubB.lastChild.textContent = short ? 'Text' : L.sub;
     this.lAudB.style.display = L.audioCount > 1 ? '' : 'none';
-    this.lAudB.lastChild.textContent = L.audio;
+    this.lAudB.lastChild.textContent = short ? 'Ljud' : L.audio;
   };
   /** Where we are in the recording, and how much has been recorded (seconds). */
   Player.prototype.recPos = function () {
@@ -1643,8 +1677,117 @@
     if (it.id !== this.item.id) this.tune(it, this.chItems);
   };
 
+  /** Player settings: which player/source, subtitle size, stream information. */
+  Player.prototype.openSettings = function () {
+    var self = this;
+    this.panel = 'tracks';
+    this.trItems = [];
+    var box = h('div', { class: 'tracks' });
+    var add = function (title, list) {
+      if (!list.length) return;
+      box.appendChild(h('h3', { text: title }));
+      list.forEach(function (t) {
+        var e = h('div', { class: 'ti', onclick: function () { self.ti = self.trItems.indexOf(t); self.pickTrack(); } }, [h('span', { class: 'chk' }, t.on ? NS.icon('check') : null), t.label, t.note ? h('span', { class: 'note', text: t.note }) : null]);
+        t.el = e; t.group = title;
+        self.trItems.push(t);
+        box.appendChild(e);
+      });
+    };
+    // the sources of this title, and the screen's own player for HLS (if something stutters, try another)
+    var srcs = (this.sources || []).map(function (x, i) {
+      return { label: srcLabel(x), on: i === self.si && !(self.live && self.tshift && self.tshift.url), act: function () { self.closePanel(); self.switchSource(i); } };
+    });
+    var cur = this.sources && this.sources[this.si];
+    if (cur && cur.kind === 'hls' && window.Hls && window.Hls.isSupported() && this.video.canPlayType('application/vnd.apple.mpegurl')) {
+      var own = NS.store.get('engine', '') === 'native';
+      srcs.push({ label: own ? 'Byt till Norrskens spelare (hls.js)' : 'Byt till tv:ns egen spelare', note: own ? 'tv:ns egen används' : '', act: function () {
+        NS.store.set('engine', own ? '' : 'native');
+        self.closePanel();
+        self.switchSource(self.si);
+      } });
+    }
+    add('Spelare', srcs);
+    var size = NS.store.get('subSize', 'm');
+    add('Undertextstorlek', SUB_SIZES.map(function (z) { return { label: z[1], on: z[0] === size, act: function () { self.setSubSize(z[0]); self.openSettings(); } }; }));
+    add('Information', [{ label: this.infoOn ? 'Dölj streaminformation' : 'Visa streaminformation', on: !!this.infoOn, act: function () { self.closePanel(); self.toggleInfo(); } }]);
+    this.sideR.innerHTML = '';
+    this.sideR.appendChild(h('div', { class: 'ph', text: 'Inställningar' }));
+    this.sideR.appendChild(box);
+    this.ti = Math.max(0, Math.min(this.ti || 0, this.trItems.length - 1));
+    if (!this.panelWasSettings) this.ti = 0;
+    this.panelWasSettings = true;
+    this.paintTracks();
+    this.sideR.classList.add('on');
+    this.hideOsd();
+  };
+  /** Another source or player for the same title, from the same spot. */
+  Player.prototype.switchSource = function (i) {
+    if (!this.sources || !this.sources[i]) return;
+    var at = this.live ? 0 : this.cur();
+    if (this.live && this.tshift && this.tshift.url && !this.tshift.match) this.endTshift();
+    this.si = i;
+    NS.toast('Spelare: ' + srcLabel(this.sources[i]) + (NS.store.get('engine', '') === 'native' && this.sources[i].kind === 'hls' ? ' (tv:ns egen)' : ''), 'info');
+    if (this.live && this.tshift && this.tshift.match) { this.startSource(0); return; }
+    this.start = at;
+    this.startSource(at);
+  };
+  Player.prototype.setSubSize = function (z, quiet) {
+    var el = this.el;
+    SUB_SIZES.forEach(function (x) { el.classList.toggle('subs-' + x[0], x[0] === z); });
+    if (!quiet) { NS.store.set('subSize', z); NS.toast('Undertexter: ' + (SUB_SIZES.find(function (x) { return x[0] === z; }) || [0, ''])[1], 'sub'); }
+  };
+  /** Stream information in a corner: what plays, how, and how well. */
+  Player.prototype.toggleInfo = function () {
+    this.infoOn = !this.infoOn;
+    if (!this.infoEl) { this.infoEl = h('div', { class: 'sinfo' }); this.el.appendChild(this.infoEl); }
+    this.infoEl.classList.toggle('on', this.infoOn);
+    if (this.infoOn) this.paintInfo();
+  };
+  Player.prototype.paintInfo = function () {
+    var v = this.video, rows = [];
+    var src = this.sources && this.sources[this.si];
+    var engine = this.hls ? ('hls.js' + (window.ManagedMediaSource && !window.MediaSource ? ' (MMS)' : '')) : this.mp ? 'mpegts.js' : this.kind === 'native' || (src && src.kind === 'file') ? 'skärmens egen' : this.kind || '';
+    var m = this.media || {}, pr = this.probe || {};
+    var a = (pr.audio && (pr.audio.find(function (x) { return x.i === this.audioIdx; }, this) || pr.audio[0])) || { codec: m.a, ch: m.ch };
+    var lvl = this.hls && this.hls.levels && this.hls.levels[this.hls.currentLevel];
+    var buf = 0;
+    try { buf = v.buffered.length ? v.buffered.end(v.buffered.length - 1) - v.currentTime : 0; } catch (e) { /* ignore */ }
+    var q = v.getVideoPlaybackQuality ? v.getVideoPlaybackQuality() : null;
+    rows.push(['Källa', this.live && this.tshift && this.tshift.url ? (this.tshift.match ? 'Matchinspelning' : 'Pausinspelning') + ' (servern)' : src ? srcLabel(src) : '–']);
+    rows.push(['Spelare', engine]);
+    rows.push(['Bild', (v.videoWidth ? v.videoWidth + '×' + v.videoHeight + ' (' + resLabel(v.videoWidth, v.videoHeight) + ')' : '–') + ((pr.video || m.v) ? ' · ' + String(pr.video || m.v).toUpperCase() : '') + ((pr.hdr || m.hdr) ? ' · ' + (pr.hdr || m.hdr) : '')]);
+    if (lvl && (lvl.codecSet || lvl.videoCodec)) rows.push(['Kodek', [lvl.videoCodec, lvl.audioCodec].filter(Boolean).join(' / ')]);
+    rows.push(['Ljud', audioLabel(a.codec, a.ch) || '–']);
+    if (lvl && lvl.bitrate) rows.push(['Bithastighet', (lvl.bitrate / 1e6).toFixed(1) + ' Mbit/s']);
+    if (this.hls && this.hls.bandwidthEstimate) rows.push(['Nedladdning', (this.hls.bandwidthEstimate / 1e6).toFixed(1) + ' Mbit/s']);
+    rows.push(['Buffert', buf.toFixed(1) + ' s']);
+    if (q) rows.push(['Tappade bildrutor', q.droppedVideoFrames + ' av ' + q.totalVideoFrames]);
+    this.infoEl.innerHTML = '';
+    this.infoEl.appendChild(h('div', { class: 'sh', text: 'Streaminformation' }));
+    rows.forEach(function (r) { this.infoEl.appendChild(h('div', { class: 'sr' }, [h('span', { text: r[0] }), h('b', { text: r[1] })])); }, this);
+  };
+  /** Films and series: "4K · HDR10 · Dolby Digital Plus 5.1" for a few seconds after the start. */
+  Player.prototype.maybeBadge = function () {
+    var self = this;
+    if (this.live || this.badgeDone) return;
+    this.badgeDone = true;
+    setTimeout(function () {
+      var v = self.video, m = self.media || {}, pr = self.probe || {};
+      var res = resLabel(v.videoWidth || m.w, v.videoHeight || m.h || pr.height);
+      var hdr = pr.hdr || m.hdr || '';
+      var a = (pr.audio && (pr.audio.find(function (x) { return x.i === self.audioIdx; }) || pr.audio[0])) || { codec: m.a, ch: m.ch };
+      var parts = [res, hdr, audioLabel(a.codec, a.ch)].filter(Boolean);
+      if (!parts.length) return;
+      if (self.badgeEl) self.badgeEl.remove();
+      var b = self.badgeEl = h('div', { class: 'qbadge' }, parts.map(function (x, i) { return h('span', { class: i === 0 && /4K/.test(x) ? 'k4' : /HDR|Dolby Vision|HLG/.test(x) ? 'hdr' : null, text: x }); }));
+      self.el.appendChild(b);
+      requestAnimationFrame(function () { b.classList.add('on'); });
+      setTimeout(function () { b.classList.remove('on'); setTimeout(function () { b.remove(); }, 900); }, 5000);
+    }, 800);
+  };
   Player.prototype.closePanel = function () {
     this.panel = null;
+    this.panelWasSettings = false;
     this.side.classList.remove('on');
     this.sideR.classList.remove('on');
     this.chList = null;
@@ -1732,6 +1875,7 @@
       if (this.tshift && this.tshift.mode === 'rec' && (a === 'left' || a === 'right')) { this.seekRec(this.recPos() + (a === 'left' ? -10 : 10)); this.showOsd(); return; }
       if (a === 'up' || a === 'chup') this.zap(1);
       else if (a === 'down' || a === 'chdn') this.zap(-1);
+      else if (a === 'ok' && !this.osdOn) this.showOsd();
       else if (a === 'ok' || a === 'left') this.openChannels();
       else if (a === 'right') this.openTracks();
       else if (a === 'yellow' || a === 'num0' && !this.numBuf) { this.lastChannel(); }
@@ -1760,9 +1904,9 @@
       if (a === 'left') this.scrub(-1, e && e.repeat);
       else if (a === 'right') this.scrub(1, e && e.repeat);
       else if (a === 'ok') {
+        // like moving the mouse: the time left and the buttons, gone again after 5 s without a press
         if (this.scrubbing !== null && this.scrubbing !== undefined) this.commitScrub();
-        else if (wasHidden) this.showOsd();
-        else { if (v.paused) this.playPromise(); else v.pause(); this.showOsd(v.paused); }
+        else this.showOsd(v.paused);
       } else if (a === 'down') {
         if (wasHidden) { this.showOsd(); return; }
         this.zone = 'btns'; this.paintZone(); this.showOsd(true);
@@ -1906,14 +2050,21 @@
       ? [btn('tside', 'up', function () { self.zap(1); }, 'Nästa kanal'), this.tPlay, btn('tside', 'down', function () { self.zap(-1); }, 'Föregående kanal')]
       : [btn('tside', 'rw', function () { self.seekTo(self.cur() - 10); }, 'Bakåt 10 s'), this.tPlay, btn('tside', 'ff', function () { self.seekTo(self.cur() + 10); }, 'Framåt 10 s')];
     this.osd.appendChild(h('div', { class: 'tmid' }, mid));
-    if (this.live) {
-      this.osd.appendChild(h('div', { class: 'tlive' }, [
-        this.liveBtn = h('button', { class: 'btn golive', style: 'display:none', onclick: function (e) { e.stopPropagation(); self.goLive(); } }, [NS.icon('live'), 'Gå till live']),
-        h('button', { class: 'btn', onclick: function (e) { e.stopPropagation(); self.openChannels(); } }, [NS.icon('episodes'), 'Kanaler']),
-        h('button', { class: 'btn', onclick: function (e) { e.stopPropagation(); self.openTracks(); } }, [NS.icon('sub'), 'Ljud']),
-        this.item.arc ? h('button', { class: 'btn', onclick: function (e) { e.stopPropagation(); self.restartProgramme(); } }, [NS.icon('restart'), 'Starta om']) : null,
-        h('button', { class: 'btn', onclick: function (e) { e.stopPropagation(); if (NS.mOpenLive) NS.mOpenLive(self.cat); else self.exit(); } }, [NS.icon('episodes'), 'Tv-guide'])
-      ]));
+    if (this.live && this.lctl) {
+      // one row of icon buttons with a short word under each (the phone is narrow): no second row on top of it
+      var kids = [].slice.call(this.lctl.children);
+      var rw = kids[1], ff = kids[2];
+      rw.lastChild.textContent = '−10 s'; ff.lastChild.textContent = '+10 s';
+      var tb = function (icon, label, fn) { return h('button', { class: 'btn', onclick: function (e) { e.stopPropagation(); fn(); self.showOsd(); } }, [NS.icon(icon), label]); };
+      this.lSetB.lastChild.textContent = 'Mer';
+      this.lctl.innerHTML = '';
+      [rw, ff,
+        tb('chans', 'Kanaler', function () { self.openChannels(); }),
+        tb('guide', 'Tv-guide', function () { if (NS.mOpenLive) NS.mOpenLive(self.cat); else self.exit(); }),
+        this.lAudB, this.lSubB,
+        this.item.arc ? tb('restart', 'Starta om', function () { self.restartProgramme(); }) : null,
+        this.lSetB].forEach(function (b) { if (b) self.lctl.appendChild(b); });
+      this.lctl.classList.add('tl');
     }
     var sync = function () { self.tPlay.innerHTML = ''; self.tPlay.appendChild(NS.icon(self.video.paused ? 'play' : 'pause')); };
     this.video.addEventListener('play', sync);

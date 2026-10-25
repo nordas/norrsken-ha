@@ -658,3 +658,21 @@ html.m .player .tap-play { width: 84px; height: 84px; margin: -42px 0 0 -42px; f
 .dialog .qr-pop .qr-txt b { display: block; font-size: 2.4rem; margin-top: 1.6rem; }
 .dialog .qr-pop .qr-txt b:first-child { margin-top: 0; }
 .dialog .qr-pop .qr-txt p { margin-top: .6rem; font-size: 2.3rem; color: var(--text-2); line-height: 1.4; }
+
+/* subtitle size (player settings) */
+.player.subs-s video::cue { font-size: 3.2rem; }
+.player.subs-l video::cue { font-size: 5.4rem; }
+.player.subs-xl video::cue { font-size: 6.8rem; }
+/* stream information */
+.player .sinfo { position: absolute; left: 3rem; top: 12rem; z-index: 6; display: none; min-width: 46rem; padding: 2rem 2.4rem; border-radius: 1.6rem; background: rgba(10,11,14,.82); backdrop-filter: blur(8px); color: #fff; font-size: 2rem; pointer-events: none; }
+.player .sinfo.on { display: block; }
+.player .sinfo .sh { font-weight: 800; font-size: 2.2rem; margin-bottom: 1.2rem; }
+.player .sinfo .sr { display: flex; justify-content: space-between; gap: 3rem; padding: .35rem 0; }
+.player .sinfo .sr span { color: rgba(255,255,255,.6); }
+.player .sinfo .sr b { font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
+/* quality at the start of a film: fades in, stays 5 s, fades out */
+.player .qbadge { position: absolute; left: 50%; top: 4rem; z-index: 6; display: flex; gap: 1rem; opacity: 0; transform: translate(-50%, -.8rem); transition: opacity .8s ease, transform .8s ease; pointer-events: none; }
+.player .qbadge.on { opacity: 1; transform: translate(-50%, 0); }
+.player .qbadge span { padding: .6rem 1.4rem; border-radius: .8rem; background: rgba(10,11,14,.7); border: 1px solid rgba(255,255,255,.22); color: #fff; font-size: 2rem; font-weight: 700; letter-spacing: .02em; }
+.player .qbadge span.k4 { background: #fff; color: #0b0c10; border-color: #fff; }
+.player .qbadge span.hdr { border-color: #f5c400; color: #f5c400; }

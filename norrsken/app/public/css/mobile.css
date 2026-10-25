@@ -369,3 +369,21 @@ html.m .svc-chips.on-card .svc { height: 18px; font-size: 10px; padding: 0 6px; 
 .m-svc-line .svc { height: 24px; font-size: 13px; padding: 0 9px; border-radius: 6px; }
 html.m .m-d-body a.m-btn + a.m-btn, html.m .m-d-body .m-btn + a.m-btn { margin-top: 10px; }
 .m-jw { margin-top: 18px; font-size: 12px; color: var(--dim); }
+
+/* phone live TV: one row of icons with a short word under each */
+html .player.touch .tlive { display: none; }
+html .player.touch.lshift .osd .lctl.tl { left: 0; right: 0; bottom: calc(4px + env(safe-area-inset-bottom)); padding: 0 8px; gap: 0; justify-content: space-between; overflow-x: auto; scrollbar-width: none; pointer-events: auto; }
+html .player.touch .osd .lctl.tl::-webkit-scrollbar { display: none; }
+html .player.touch .osd .lctl.tl .btn { flex: 1 0 50px; min-width: 50px; height: auto; padding: 6px 2px; background: none; flex-direction: column; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; border-radius: 12px; white-space: nowrap; color: rgba(255,255,255,.92); }
+html .player.touch .osd .lctl.tl .btn:active { background: rgba(255,255,255,.14); }
+html .player.touch .osd .lctl.tl .btn svg { width: 22px; height: 22px; font-size: 22px; }
+html .player.touch .osd .lctl.tl .lspace, html .player.touch .osd .lctl.tl .tsgo { display: none; }
+html .player.touch.lshift .osd .chan { bottom: calc(64px + env(safe-area-inset-bottom)); }
+.player.touch.subs-s video::cue { font-size: 14px; }
+.player.touch.subs-l video::cue { font-size: 24px; }
+.player.touch.subs-xl video::cue { font-size: 30px; }
+.player.touch .sinfo { left: 12px; right: 12px; top: calc(64px + env(safe-area-inset-top)); min-width: 0; padding: 12px 14px; font-size: 12px; border-radius: 12px; }
+.player.touch .sinfo .sh { font-size: 13px; margin-bottom: 6px; }
+.player.touch .sinfo .sr { gap: 12px; padding: 2px 0; }
+.player.touch .qbadge { top: calc(62px + env(safe-area-inset-top)); gap: 6px; white-space: nowrap; }
+.player.touch .qbadge span { font-size: 12px; padding: 4px 8px; border-radius: 6px; }

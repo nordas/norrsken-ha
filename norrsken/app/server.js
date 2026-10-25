@@ -942,7 +942,7 @@ route('GET', '/api/stream/:type/:id', async (req, res, q, p) => {
     const a0 = info ? Math.max(0, info.audio.findIndex(x => x.def)) : 0;
     if (info && !ff.playsAsIs(info, caps, { a: a0, audioMode: o.audioMode, maxRes: o.maxRes })) order = [remux, ...sources.filter(x => x !== remux)];
   }
-  ok(res, { live: false, sources: order, t: ff.has() ? t : '', ext, media: info ? { h: info.height, v: info.video, a: (info.audio.find(x => x.def) || info.audio[0] || {}).codec, ch: (info.audio.find(x => x.def) || info.audio[0] || {}).ch, na: info.audio.length } : null });
+  ok(res, { live: false, sources: order, t: ff.has() ? t : '', ext, media: info ? { h: info.height, w: info.width || 0, hdr: info.hdr || '', v: info.video, a: (info.audio.find(x => x.def) || info.audio[0] || {}).codec, ch: (info.audio.find(x => x.def) || info.audio[0] || {}).ch, na: info.audio.length } : null });
 });
 
 /* ------------------------------------------------------------------ match recording (the whole match, 24 h) */

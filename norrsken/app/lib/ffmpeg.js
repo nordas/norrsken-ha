@@ -44,6 +44,16 @@ function probe(url, ua) {
   return pr;
 }
 
+/** HDR kind of a video stream from ffprobe: 'Dolby Vision', 'HDR10', 'HLG' or ''. */
+function hdrOf(vs) {
+  const sd = (vs.side_data_list || []).map(x => String(x.side_data_type || '')).join(' ');
+  if (/dovi|dolby vision/i.test(sd) || /^dv(h1|he|a1|av)$/i.test(vs.codec_tag_string || '')) return 'Dolby Vision';
+  const tr = String(vs.color_transfer || '');
+  if (tr === 'smpte2084') return /hdr10\+|dynamic hdr/i.test(sd) ? 'HDR10+' : 'HDR10';
+  if (tr === 'arib-std-b67') return 'HLG';
+  return '';
+}
+
 function probeOnce(url, ua) {
   return new Promise((resolve, reject) => {
     // only the start of the file: enough for codecs and tracks, and seconds faster on big MKVs over the internet
@@ -61,11 +71,14 @@ function probeOnce(url, ua) {
         const streams = j.streams || [];
         let ai = 0;
         let si = 0;
+        const vs = streams.find(s => s.codec_type === 'video' && !(s.disposition && s.disposition.attached_pic)) || {};
         const res = {
           dur: parseFloat(j.format && j.format.duration) || 0,
-          video: (streams.find(s => s.codec_type === 'video') || {}).codec_name || '',
-          height: (streams.find(s => s.codec_type === 'video') || {}).height || 0,
-          pix: (streams.find(s => s.codec_type === 'video') || {}).pix_fmt || '',
+          video: vs.codec_name || '',
+          height: vs.height || 0,
+          width: vs.width || 0,
+          pix: vs.pix_fmt || '',
+          hdr: hdrOf(vs),
           audio: [],
           subs: [],
         };

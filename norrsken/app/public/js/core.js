@@ -74,6 +74,8 @@
     del: '<path d="M9 5h11v14H9l-6-7z"/><path d="M12.5 9.5l5 5M17.5 9.5l-5 5"/>',
     space: '<path d="M4 10v4h16v-4"/>',
     episodes: '<path d="M4 6h16M4 12h16M4 18h10"/>',
+    guide: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M9 9v11M15 9v11"/>',
+    chans: '<rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8M9 2l3 3 3-3"/>',
     rw: '<path d="M11 6l-6 6 6 6M19 6l-6 6 6 6"/>',
     ff: '<path d="M13 6l6 6-6 6M5 6l6 6-6 6"/>',
     x: '<path d="M6 6l12 12M18 6L6 18"/>',
