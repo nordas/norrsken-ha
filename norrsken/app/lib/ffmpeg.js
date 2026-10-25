@@ -54,6 +54,28 @@ function hdrOf(vs) {
   return '';
 }
 
+/** Bitstream filters this ffmpeg has (to write the picture's shape into the video itself). */
+let bsfs = null;
+function hasBsf(name) {
+  if (bsfs === null) {
+    try { bsfs = new Set(String(spawnSync(FF, ['-hide_banner', '-bsfs'], { timeout: 5000 }).stdout || '').split(/\s+/)); } catch (_) { bsfs = new Set(); }
+  }
+  return bsfs.has(name);
+}
+/**
+ * Non-square pixels (anamorphic TV/DVD pictures, MKVs that only state the shape in the container): written into the
+ * copied video itself too, or a TV or AirPlay receiver shows the picture squeezed with black sides.
+ */
+function aspectArgs(info, p) {
+  const sar = info && info.sar;
+  if (!sar || sar === '1:1' || sar === '0:1') return [];
+  const out = [];
+  const bsf = /hevc|h265/.test(p.vcodec) ? 'hevc_metadata' : p.vcodec === 'h264' ? 'h264_metadata' : '';
+  if (bsf && hasBsf(bsf)) out.push('-bsf:v', bsf + '=sample_aspect_ratio=' + sar.replace(':', '/'));
+  if (info.dar) out.push('-aspect', info.dar);
+  return out;
+}
+
 function probeOnce(url, ua) {
   return new Promise((resolve, reject) => {
     // only the start of the file: enough for codecs and tracks, and seconds faster on big MKVs over the internet
@@ -79,6 +101,8 @@ function probeOnce(url, ua) {
           height: vs.height || 0,
           width: vs.width || 0,
           pix: vs.pix_fmt || '',
+          sar: /^\d+:\d+$/.test(vs.sample_aspect_ratio || '') ? vs.sample_aspect_ratio : '',
+          dar: /^\d+:\d+$/.test(vs.display_aspect_ratio || '') ? vs.display_aspect_ratio : '',
           hdr: hdrOf(vs),
           audio: [],
           subs: [],
@@ -164,6 +188,7 @@ async function remux(req, res, url, { ss = 0, a = 0, ua, audioMode = 'auto', max
   if (p.videoCopy) {
     args.push('-c:v', 'copy');
     if (/hevc|h265/.test(p.vcodec)) args.push('-tag:v', 'hvc1');
+    args.push(...aspectArgs(info, p));
   } else {
     // picture in a format the screen can't decode: H.264, in 4K unless "max 1080p" is chosen
     const vf = p.scale ? "scale='min(1920,iw)':-2" : "scale='min(3840,iw)':-2";
@@ -214,6 +239,7 @@ function argsFor(info, p, url, ss, a, ua, dir) {
   if (p.videoCopy) {
     args.push('-c:v', 'copy');
     if (/hevc|h265/.test(p.vcodec)) args.push('-tag:v', 'hvc1');
+    args.push(...aspectArgs(info, p));
   } else {
     const vf = p.scale ? "scale='min(1920,iw)':-2" : "scale='min(3840,iw)':-2";
     args.push('-c:v', 'libx264', '-preset', p.big ? 'ultrafast' : 'veryfast', '-tune', 'zerolatency', '-crf', p.big ? '23' : '21',
@@ -280,6 +306,7 @@ async function hlsSession(url, opts) {
         console.log('[remux] första bilden klar efter', ((Date.now() - t0) / 1000).toFixed(1), 's');
       }
       const now = Date.now();
+      if (outS > 0) { s.speed = outS / Math.max(0.5, (now - t0) / 1000); s.out = outS; }
       if (outS > 0 && now - lastLog > 20000) {
         lastLog = now;
         const el = (now - t0) / 1000;
@@ -345,4 +372,11 @@ function activeSessions() { return sessions.size; }
 /** The player was closed: free the provider connection at once instead of after 90 s. */
 function stopGroup(group) { for (const o of sessions.values()) if (o.group === group) stopSession(o); }
 
-module.exports = { stopGroup, activeSessions, has, probe, remux, subs, langName, plan, playsAsIs, hlsSession, hlsPlaylist, hlsFile };
+/** How a conversion keeps up: { speed: film seconds per second, out: seconds made } (newest session of the film). */
+function sessionStat(group) {
+  let best = null;
+  for (const s of sessions.values()) if (s.group === group && !s.dead && (!best || s.last > best.last)) best = s;
+  return best ? { speed: best.speed || 0, out: best.out || 0, done: !!best.done } : null;
+}
+
+module.exports = { stopGroup, activeSessions, has, probe, remux, subs, langName, plan, playsAsIs, hlsSession, hlsPlaylist, hlsFile, sessionStat, aspectArgs };

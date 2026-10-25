@@ -942,7 +942,7 @@ route('GET', '/api/stream/:type/:id', async (req, res, q, p) => {
     const a0 = info ? Math.max(0, info.audio.findIndex(x => x.def)) : 0;
     if (info && !ff.playsAsIs(info, caps, { a: a0, audioMode: o.audioMode, maxRes: o.maxRes })) order = [remux, ...sources.filter(x => x !== remux)];
   }
-  ok(res, { live: false, sources: order, t: ff.has() ? t : '', ext, media: info ? { h: info.height, w: info.width || 0, hdr: info.hdr || '', v: info.video, a: (info.audio.find(x => x.def) || info.audio[0] || {}).codec, ch: (info.audio.find(x => x.def) || info.audio[0] || {}).ch, na: info.audio.length } : null });
+  ok(res, { live: false, sources: order, t: ff.has() ? t : '', ext, media: info ? { h: info.height, w: info.width || 0, hdr: info.hdr || '', sar: info.sar || '', dar: info.dar || '', v: info.video, a: (info.audio.find(x => x.def) || info.audio[0] || {}).codec, ch: (info.audio.find(x => x.def) || info.audio[0] || {}).ch, na: info.audio.length } : null });
 });
 
 /* ------------------------------------------------------------------ match recording (the whole match, 24 h) */
@@ -1123,6 +1123,7 @@ route('GET', '/rx/play.m3u8', async (req, res, q) => {
 });
 
 route('POST', '/rx/stop', (req, res, q) => { ff.stopGroup(q.get('t') || ''); ok(res, { ok: true }); });
+route('GET', '/rx/stat', (req, res, q) => ok(res, ff.sessionStat(q.get('t') || '') || { speed: 0, out: 0, none: true }));
 
 route('GET', '/rx/:id/:name', (req, res, q, p) => {
   const f = ff.hlsFile(p.id, p.name);

@@ -582,6 +582,7 @@
     var self = this, v = this.video;
     if (!v.webkitShowPlaybackTargetPicker) { NS.toast('AirPlay finns i Safari på iPhone, iPad och Mac', 'info'); return; }
     try {
+      var ss = Math.floor(this.cur()); // airSrc() starts the film's own address here
       var src = this.airSrc();
       if (!src) { NS.toast('AirPlay: öppna Norrsken på tv-adressen (http://…:8787), inte från Home Assistant-menyn', 'info'); return; }
       if ((this.hls || (this.airBase && !this.live)) && !this.airNative) {
@@ -595,6 +596,7 @@
         v.disableRemotePlayback = false;
         v.setAttribute('x-webkit-airplay', 'allow');
         v.src = src;
+        if (this.airBase && !this.live) { this.kind = 'remux'; this.offset = ss; this.airWatch(ss); } // the time shown stays the film's
         var seek = function () { v.removeEventListener('loadedmetadata', seek); if (rel > 1 && (!self.live || self.tshift)) { try { v.currentTime = rel; } catch (e) { /* ignore */ } } };
         v.addEventListener('loadedmetadata', seek);
         this.playPromise();
@@ -604,10 +606,63 @@
       v.webkitShowPlaybackTargetPicker();
     } catch (e) { NS.toast('AirPlay gick inte att starta', 'info'); }
   };
+  /**
+   * 4K over AirPlay that can't keep up (the conversion on the server slower than the film, or the TV stopping to
+   * load again and again): carry on in the version the phone played, from the same spot.
+   */
+  Player.prototype.airWatch = function (ss) {
+    var self = this, v = this.video, t0 = Date.now();
+    var big = !this.airBaseSame && this.airTok; // a bigger version than the phone's
+    clearInterval(this.airWT);
+    this.airStalls = [];
+    if (!this._airWait) {
+      this._airWait = function () {
+        if (!self.airNative || !self.airWatching) return;
+        var now = Date.now();
+        self.airStalls = self.airStalls.filter(function (t) { return now - t < 60000; });
+        self.airStalls.push(now);
+      };
+      v.addEventListener('waiting', this._airWait);
+    }
+    this.airWatching = !!big;
+    if (!big) return;
+    this.airWT = setInterval(function () {
+      if (!self.airNative) { clearInterval(self.airWT); self.airWatching = false; return; }
+      var el = Date.now() - t0;
+      if (self.airStalls.length >= 3 && el > 15000) { self.airDown('stannar för att ladda'); return; }
+      if (el < 20000) return;
+      NS.api.get('rx/stat?t=' + encodeURIComponent(self.airTok)).then(function (st) {
+        if (!self.airWatching) return;
+        if (st && st.out > 20 && st.speed > 0 && st.speed < 1.1 && !st.done) self.airDown('servern får bara ' + st.speed.toFixed(2) + '× från leverantören');
+        else if (el > 120000) { clearInterval(self.airWT); self.airWatching = false; } // two minutes fine: it keeps up
+      }).catch(function () {});
+    }, 5000);
+  };
+  Player.prototype.airDown = function (why) {
+    var v = this.video;
+    clearInterval(this.airWT);
+    this.airWatching = false;
+    var pos = Math.floor(this.cur());
+    var rx = (this.sources || []).find(function (x) { return x.kind === 'remux'; });
+    var file = (this.sources || []).find(function (x) { return x.kind === 'file' && !x.direct; }) || (this.sources || []).find(function (x) { return x.kind === 'file'; });
+    var caps = 'hevc,hevc10,ac3,eac3' + (NS.store.get('airAudio', 'eac3') === 'flac' ? ',flac' : '');
+    var url = rx ? this.lanify(rx.url + '&ss=' + pos + '&a=' + (this.audioIdx || 0) + '&caps=' + caps) : file ? this.lanify(file.url) : '';
+    if (!url) return;
+    try { var su = 'rx/stop?t=' + encodeURIComponent(this.airTok); if (navigator.sendBeacon) navigator.sendBeacon(su); } catch (e) { /* ignore */ }
+    NS.diag('AirPlay: ' + (this.airQ || 'den större versionen') + ' hinner inte (' + why + '), fortsätter i mobilens version vid ' + pos + ' s');
+    NS.toast((this.airQ || 'Den större versionen') + ' hinner inte laddas – AirPlay fortsätter i ' + (this.item.q || 'standardversionen'), 'info');
+    this.airBase = '';
+    v.src = url;
+    if (rx) { this.kind = 'remux'; this.offset = pos; }
+    else { this.kind = 'file'; this.offset = 0; var sk = function () { v.removeEventListener('loadedmetadata', sk); try { v.currentTime = pos; } catch (e) { /* ignore */ } }; v.addEventListener('loadedmetadata', sk); }
+    this.playPromise();
+  };
   /** AirPlay ended: back to hls.js on the phone, where it was. */
   Player.prototype.airBack = function () {
     if (!this.airNative || this.suspended) return;
     this.airNative = false;
+    this.airWatching = false;
+    clearInterval(this.airWT);
     clearTimeout(this.airT);
     this.startSource(this.live ? 0 : this.cur());
   };
@@ -1834,7 +1889,7 @@
     var q = v.getVideoPlaybackQuality ? v.getVideoPlaybackQuality() : null;
     rows.push(['Källa', this.live && this.tshift && this.tshift.url ? (this.tshift.match ? 'Matchinspelning' : 'Pausinspelning') + ' (servern)' : src ? srcLabel(src) : '–']);
     rows.push(['Spelare', engine]);
-    rows.push(['Bild', (v.videoWidth ? v.videoWidth + '×' + v.videoHeight + ' (' + resLabel(v.videoWidth, v.videoHeight) + ')' : '–') + ((pr.video || m.v) ? ' · ' + String(pr.video || m.v).toUpperCase() : '') + ((pr.hdr || m.hdr) ? ' · ' + (pr.hdr || m.hdr) : '')]);
+    rows.push(['Bild', (v.videoWidth ? v.videoWidth + '×' + v.videoHeight + ' (' + resLabel(v.videoWidth, v.videoHeight) + ')' : '–') + ((pr.video || m.v) ? ' · ' + String(pr.video || m.v).toUpperCase() : '') + ((pr.hdr || m.hdr) ? ' · ' + (pr.hdr || m.hdr) : '') + ((pr.sar || m.sar) && (pr.sar || m.sar) !== '1:1' ? ' · bildpunkter ' + (pr.sar || m.sar) + ', visas ' + (pr.dar || m.dar) : '')]);
     if (lvl && (lvl.codecSet || lvl.videoCodec)) rows.push(['Kodek', [lvl.videoCodec, lvl.audioCodec].filter(Boolean).join(' / ')]);
     rows.push(['Ljud', audioLabel(a.codec, a.ch) || '–']);
     if (lvl && lvl.bitrate) rows.push(['Bithastighet', (lvl.bitrate / 1e6).toFixed(1) + ' Mbit/s']);
