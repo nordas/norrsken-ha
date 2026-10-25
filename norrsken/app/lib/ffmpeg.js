@@ -74,6 +74,7 @@ function probeOnce(url, ua) {
         const vs = streams.find(s => s.codec_type === 'video' && !(s.disposition && s.disposition.attached_pic)) || {};
         const res = {
           dur: parseFloat(j.format && j.format.duration) || 0,
+          br: parseInt(j.format && j.format.bit_rate, 10) || 0,
           video: vs.codec_name || '',
           height: vs.height || 0,
           width: vs.width || 0,

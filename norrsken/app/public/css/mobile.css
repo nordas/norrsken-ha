@@ -387,3 +387,4 @@ html .player.touch.lshift .osd .chan { bottom: calc(64px + env(safe-area-inset-b
 .player.touch .sinfo .sr { gap: 12px; padding: 2px 0; }
 .player.touch .qbadge { top: calc(62px + env(safe-area-inset-top)); gap: 6px; white-space: nowrap; }
 .player.touch .qbadge span { font-size: 12px; padding: 4px 8px; border-radius: 6px; }
+.player.touch .sinfo .sv { max-width: none; margin-top: 8px; }

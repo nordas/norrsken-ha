@@ -1051,6 +1051,47 @@ route('GET', '/pause/:id/:name', (req, res, q, p) => {
   });
 });
 
+/*
+ * Speed test: how fast the provider sends this title to the server (the leg other players skip: they fetch
+ * straight from the provider), and how fast the server sends to the device. Run with the player stopped:
+ * the provider gives one connection.
+ */
+route('GET', '/api/speedtest', async (req, res, q) => {
+  const url = proxy.untoken(q.get('t'));
+  if (!proxy.isAllowed(url)) return bad(res, 'forbidden', 403);
+  const sec = Math.min(15, Math.max(3, +q.get('sec') || 8));
+  const t0 = Date.now();
+  let bytes = 0, first = 0, err = '';
+  try {
+    const { r, done } = await require('./lib/util').fetchRaw(url, { ua: catalog.ua(), timeout: (sec + 10) * 1000 });
+    try {
+      if (!r.ok) throw new Error('leverantören svarade ' + r.status);
+      const rd = r.body.getReader();
+      for (;;) {
+        const { value, done: end } = await rd.read();
+        if (end) break;
+        if (!first) first = Date.now();
+        bytes += value.length;
+        if (Date.now() - t0 > sec * 1000 || bytes > 200e6) { try { await rd.cancel(); } catch (_) { /* ignore */ } break; }
+      }
+    } finally { done(); }
+  } catch (e) { err = e.message; }
+  const ms = Math.max(1, Date.now() - (first || t0));
+  let br = 0;
+  try { br = (await ff.probe(url, catalog.ua())).br || 0; } catch (_) { /* unknown */ }
+  const mbps = bytes * 8 / ms / 1000;
+  console.log('[hastighet] leverantören → servern', mbps.toFixed(1), 'Mbit/s', br ? '· filmen behöver ' + (br / 1e6).toFixed(1) + ' Mbit/s' : '', err ? '· ' + err : '');
+  ok(res, { mbps, bytes, ms, firstMs: first ? first - t0 : 0, need: br / 1e6, err });
+});
+route('GET', '/api/speedtest/down', (req, res, q) => {
+  const mb = Math.min(60, Math.max(2, +q.get('mb') || 20));
+  const chunk = require('crypto').randomBytes(1 << 20); // random: nothing on the way can compress it
+  res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': mb << 20, 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' });
+  let n = 0;
+  const more = () => { while (n < mb) { n++; if (!res.write(chunk)) { res.once('drain', more); return; } } res.end(); };
+  more();
+});
+
 route('GET', '/api/probe', async (req, res, q) => {
   if (!ff.has()) return bad(res, 'ffmpeg saknas', 501);
   const url = proxy.untoken(q.get('t'));

@@ -237,7 +237,7 @@
     this.every(3000, function () { self.watchdog(); });
     this.every(1000, function () { if (self.infoOn) self.paintInfo(); });
     this.every(500, function () { if (self.cuSeek) self.cuCatch(); });
-    this.every(15000, function () { self.saveProgress(); });
+    this.every(15000, function () { self.saveProgress(); if (self.hls && self.airBase && !self.airNative) self.addAirSource(); });
     if (this.live) this.every(30000, function () { NS.needEpg([self.item.id]); });
     if (this.live) this.every(1000, function () { if (self.tshift || self.livePausedAt) self.paintTshift(); self.paintLBar(); });
   };
@@ -344,6 +344,7 @@
       self.tok = res.t || '';
       self.si = 0;
       if (!self.sources.length) return self.fail('Ingen ström hittades');
+      self.prepAir();
       var go = function () { if (req !== self.reqId) return; self.waitStart = false; self.startSource(self.start); };
       // converted playback: read the tracks first (the server already did, so it's instant), so the chosen
       // audio language goes into the first request instead of restarting the conversion a moment later
@@ -509,15 +510,47 @@
    * provider's, which may refuse it), and the network address instead of Home Assistant's menu (needs a login).
    */
   Player.prototype.airSrc = function () {
+    if (!this.live && this.airBase) {
+      // a film: the best version (4K when there is one), with a picture and sound for a big screen
+      var caps = 'hevc,hevc10,ac3,eac3' + (NS.store.get('airAudio', 'eac3') === 'flac' ? ',flac' : '');
+      var u0 = this.airBase + '&ss=' + Math.floor(this.airBaseSame ? this.cur() : this.cur()) + '&a=' + (this.airBaseSame ? this.audioIdx || 0 : 0) + '&caps=' + caps;
+      return this.lanify(u0);
+    }
     var cur = this.sources && this.sources[this.si];
     var via = this.sources && this.sources.find(function (x) { return x.kind === 'hls' && !x.direct; });
     var src = this.airUrl || (via && via.url) || (cur && cur.url) || '';
+    return this.lanify(src);
+  };
+  /** Home Assistant's menu (ingress) → the add-on's network address, which an Apple TV or a TV can reach. */
+  Player.prototype.lanify = function (src) {
     if (/\/api\/hassio_ingress\//.test(src)) {
       var lan = NS.status && NS.status.lan;
       if (!lan) return '';
       src = src.replace(/^(https?:\/\/[^/]+)?\/api\/hassio_ingress\/[\w-]+/, lan);
     }
     return src ? new URL(src, location.href).href : '';
+  };
+  /** A film in Safari: find its best version ahead of time, so the AirPlay button can hand it over at once. */
+  Player.prototype.prepAir = function () {
+    var self = this, it = this.item;
+    this.airBase = '';
+    if (!window.WebKitPlaybackTargetAvailabilityEvent || this.live || (it.t !== 'movie' && it.t !== 'episode')) return;
+    var useOwn = function () {
+      var rx = (self.sources || []).find(function (x) { return x.kind === 'remux'; });
+      if (rx && self.item === it) { self.airBase = rx.url; self.airBaseSame = true; self.airQ = it.q || ''; }
+    };
+    if (it.t !== 'movie') { useOwn(); return; }
+    NS.api.info('movie', it.id).then(function (d) {
+      var vs = (d && d.versions) || [];
+      var best = vs[0];
+      if (!best || best.id === it.id) { useOwn(); return; }
+      return NS.api.stream('movie', best.id, best.ext).then(function (r) {
+        var rx = (r.sources || []).find(function (x) { return x.kind === 'remux'; });
+        if (!rx || self.item !== it) { useOwn(); return; }
+        self.airBase = rx.url; self.airBaseSame = false; self.airQ = best.q || ''; self.airTok = r.t || '';
+        if (self.hls) self.addAirSource();
+      });
+    }).catch(useOwn);
   };
 
   /** With hls.js in Safari: a plain HLS <source> after hls.js's own, which is what AirPlay (also the system's own button) hands to the Apple TV. */
@@ -546,9 +579,11 @@
     try {
       var src = this.airSrc();
       if (!src) { NS.toast('AirPlay: öppna Norrsken på tv-adressen (http://…:8787), inte från Home Assistant-menyn', 'info'); return; }
-      if (this.hls && !this.airNative) {
-        var rel = v.currentTime || 0;
-        try { this.hls.destroy(); } catch (e) { /* ignore */ }
+      if ((this.hls || (this.airBase && !this.live)) && !this.airNative) {
+        var rel = this.airBase ? 0 : v.currentTime || 0; // the film's own address already starts at the spot
+        if (this.airBase && this.tok) { try { var su = 'rx/stop?t=' + encodeURIComponent(this.tok); if (navigator.sendBeacon) navigator.sendBeacon(su); } catch (e) { /* ignore */ } }
+        if (this.airBase && !this.airBaseSame && this.airQ) NS.toast('AirPlay i ' + this.airQ, 'info');
+        if (this.hls) { try { this.hls.destroy(); } catch (e) { /* ignore */ } }
         this.hls = null;
         this.airNative = true;
         [].slice.call(v.querySelectorAll('source')).forEach(function (s) { s.remove(); });
@@ -1739,7 +1774,16 @@
     add('Spelare', srcs);
     var size = NS.store.get('subSize', 'm');
     add('Undertextstorlek', SUB_SIZES.map(function (z) { return { label: z[1], on: z[0] === size, act: function () { self.setSubSize(z[0]); self.openSettings(); } }; }));
-    add('Information', [{ label: this.infoOn ? 'Dölj streaminformation' : 'Visa streaminformation', on: !!this.infoOn, act: function () { self.closePanel(); self.toggleInfo(); } }]);
+    var info = [{ label: this.infoOn ? 'Dölj streaminformation' : 'Visa streaminformation', on: !!this.infoOn, act: function () { self.closePanel(); self.toggleInfo(); } }];
+    if (!this.live && this.tok) info.push({ label: 'Testa hastigheten', note: 'leverantör → server → den här skärmen', act: function () { self.closePanel(); self.speedTest(); } });
+    add('Information', info);
+    if (window.WebKitPlaybackTargetAvailabilityEvent && !this.live) {
+      var aa = NS.store.get('airAudio', 'eac3');
+      add('Ljud via AirPlay', [
+        { label: 'Dolby Digital Plus 5.1', note: 'fungerar överallt', on: aa !== 'flac', act: function () { NS.store.set('airAudio', 'eac3'); self.openSettings(); } },
+        { label: 'Okomprimerat (FLAC upp till 7.1)', note: 'om tv:n klarar det', on: aa === 'flac', act: function () { NS.store.set('airAudio', 'flac'); self.openSettings(); } }
+      ]);
+    }
     this.sideR.innerHTML = '';
     this.sideR.appendChild(h('div', { class: 'ph', text: 'Inställningar' }));
     this.sideR.appendChild(box);
@@ -1814,6 +1858,48 @@
       requestAnimationFrame(function () { b.classList.add('on'); });
       setTimeout(function () { b.classList.remove('on'); setTimeout(function () { b.remove(); }, 900); }, 5000);
     }, 800);
+  };
+  /**
+   * Is it the internet or the server? Measures the provider → server leg (other players fetch straight from the
+   * provider and skip it) and the server → this screen leg, against what the film needs. Playback stops meanwhile:
+   * the provider allows one connection.
+   */
+  Player.prototype.speedTest = function () {
+    var self = this, tok = this.tok, at = this.cur();
+    if (!tok) { NS.toast('Hastighetstestet finns för filmer och serier', 'info'); return; }
+    if (!this.infoEl) { this.infoEl = h('div', { class: 'sinfo' }); this.el.appendChild(this.infoEl); }
+    var show = function (rows, title) {
+      self.infoOn = false; // the live numbers would overwrite the result
+      self.infoEl.classList.add('on');
+      self.infoEl.innerHTML = '';
+      self.infoEl.appendChild(h('div', { class: 'sh', text: title || 'Hastighetstest' }));
+      rows.forEach(function (r) { self.infoEl.appendChild(r.length === 1 ? h('p', { class: 'sv', text: r[0] }) : h('div', { class: 'sr' }, [h('span', { text: r[0] }), h('b', { text: r[1] })])); });
+    };
+    show([['Mäter leverantören → servern …']]);
+    this.teardown();
+    try { var u = 'rx/stop?t=' + encodeURIComponent(tok); if (navigator.sendBeacon) navigator.sendBeacon(u); else NS.api.post(u, {}); } catch (e) { /* ignore */ }
+    var f = function (x) { return x ? x.toFixed(x < 10 ? 1 : 0) + ' Mbit/s' : '–'; };
+    setTimeout(function () {
+      NS.api.get('api/speedtest?t=' + encodeURIComponent(tok) + '&sec=8', 30000).then(function (a) {
+        show([['Leverantören → servern', f(a.mbps)], ['Filmen behöver', a.need ? f(a.need) : 'okänt'], ['Mäter servern → den här skärmen …']]);
+        var t0 = performance.now();
+        return fetch('api/speedtest/down?mb=25', { cache: 'no-store' }).then(function (r) { return r.arrayBuffer(); }).then(function (b) {
+          var dev = b.byteLength * 8 / ((performance.now() - t0) / 1000) / 1e6;
+          var need = a.need || 0, verdict;
+          if (a.err) verdict = 'Leverantören svarade inte ordentligt (' + a.err + ').';
+          else if (need && a.mbps < need * 1.1) verdict = 'Leverantören hinner inte skicka filmen till servern i den takt den spelas. Det är din internetanslutning eller leverantörens gräns per uppkoppling, inte mobilen eller wifi:t. Välj en mindre version (1080p).';
+          else if (need && dev < need * 1.1) verdict = 'Servern får filmen tillräckligt snabbt, men nätet till den här skärmen (wifi) är för långsamt.';
+          else if (need) verdict = 'Hastigheten räcker hela vägen. Stannar det ändå är det servern som inte hinner bearbeta filmen.';
+          else verdict = 'Filmens bithastighet gick inte att läsa; jämför siffrorna med 25–80 Mbit/s för 4K och 8–15 Mbit/s för 1080p.';
+          show([['Leverantören → servern', f(a.mbps)], ['Servern → den här skärmen', f(dev)], ['Filmen behöver', need ? f(need) : 'okänt'], [verdict]]);
+          NS.diag('hastighet: leverantör→server ' + f(a.mbps) + ', server→skärm ' + f(dev) + ', filmen ' + f(need));
+        });
+      }).catch(function (e) { show([['Testet gick inte att köra: ' + ((e && e.message) || 'fel')]]); }).then(function () {
+        self.start = at;
+        self.startSource(at);
+        setTimeout(function () { if (self.infoEl && !self.infoOn) self.infoEl.classList.remove('on'); }, 20000);
+      });
+    }, 1200);
   };
   Player.prototype.closePanel = function () {
     this.panel = null;
