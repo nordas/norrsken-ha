@@ -16,8 +16,17 @@
   NS.playItem = function (item, opts) {
     opts = opts || {};
     var open = function () { NS.router.push(new NS.Player(Object.assign({ item: item }, opts))); };
-    if (item.t === 'live' && !opts.rec) NS.guardStream(item, open);
-    else open();
+    if (item.t === 'live' && !opts.rec) { NS.guardStream(item, open); return; }
+    // a film on a phone: the 1080p version when the 4K one is what was picked from a row
+    if (item.t === 'movie' && !opts.keepVersion && document.documentElement.classList.contains('m')) {
+      NS.api.info('movie', item.id).then(function (d) {
+        var v = d && d.versions && d.versions.length > 1 ? NS.bestVersion(d.versions) : null;
+        if (v && v.id !== item.id) item = Object.assign({}, item, { id: v.id, k: v.k, ext: v.ext, q: v.q });
+        open();
+      }, open);
+      return;
+    }
+    open();
   };
 
   /** A match is being recorded on one channel: starting another live channel asks first (yes = stop the recording). */

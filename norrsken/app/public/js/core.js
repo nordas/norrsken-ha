@@ -514,7 +514,9 @@
   NS.bestVersion = function (vs) {
     if (!vs || !vs.length) return null;
     var hevc = String(NS.caps || '').indexOf('hevc') >= 0;
-    for (var i = 0; i < vs.length; i++) if (hevc || vs[i].q !== '4K') return vs[i];
+    // a phone shows nothing of 4K and the files are 3–4 times bigger (they stutter over the provider): 1080p first
+    var phone = document.documentElement.classList.contains('m');
+    for (var i = 0; i < vs.length; i++) if ((hevc && !phone) || vs[i].q !== '4K') return vs[i];
     return vs[0];
   };
   NS.versionLabel = function (v) { return (v.q || 'Standard') + (v.cat ? '  ·  ' + v.cat : ''); };

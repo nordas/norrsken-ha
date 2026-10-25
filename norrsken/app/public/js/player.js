@@ -675,6 +675,7 @@
     return this.dur || 0;
   };
   Player.prototype.seekTo = function (t) {
+    this.seekAt = Date.now();
     var d = this.duration();
     t = Math.max(0, d ? Math.min(t, d - 2) : t);
     if (this.item.t === 'catchup') {
@@ -832,8 +833,37 @@
   Player.prototype.buffering = function (on) {
     var self = this;
     clearTimeout(this.bufT);
+    if (on) this.noteStall();
     if (on) this.bufT = setTimeout(function () { self.el.classList.add('buffering'); }, 250);
     else this.el.classList.remove('buffering');
+  };
+
+  /**
+   * A film that keeps stopping to load (the provider can't send a 4K file as fast as it plays): after the third stop
+   * within a minute and a half, go on with a smaller version of the same film from the same spot, if there is one.
+   */
+  var Q_RANK = { '4K': 4, FHD: 3, HD: 2, SD: 1 };
+  Player.prototype.noteStall = function () {
+    if (this.live || !this.played || this.item.t !== 'movie' || this.downTried) return;
+    if (this.seekAt && Date.now() - this.seekAt < 4000) return; // loading after a jump is not a stall
+    var now = Date.now();
+    this.stalls = (this.stalls || []).filter(function (t) { return now - t < 90000; });
+    this.stalls.push(now);
+    if (this.stalls.length >= 3) { this.downTried = true; this.lowerVersion(); }
+  };
+  Player.prototype.lowerVersion = function () {
+    var self = this, it = this.item;
+    NS.api.info('movie', it.id).then(function (d) {
+      var vs = (d && d.versions) || [];
+      var rank = function (v) { return v.q ? Q_RANK[v.q] || 0 : 2; }; // no tag: the ordinary (HD) version
+      var cur = vs.find(function (v) { return v.id === it.id; }) || { q: it.q || '4K' };
+      var to = vs.find(function (v) { return v.id !== it.id && rank(v) < rank(cur) && rank(v) >= 2; });
+      if (!to || self.item !== it) { NS.diag('buffrar ofta, ingen mindre version finns (' + (cur.q || '?') + ')'); return; }
+      var name = to.q || 'standardversionen';
+      NS.toast((cur.q || 'Den här versionen') + ' hinner inte laddas – byter till ' + name, 'info');
+      NS.diag('buffrar ofta: byter ' + (cur.q || '?') + ' → ' + name);
+      self.play(Object.assign({}, it, { id: to.id, k: to.k, ext: to.ext, q: to.q }), self.cur());
+    }).catch(function () {});
   };
 
   /** Subtitles move up while the controls are showing, so the buttons never cover them. */
