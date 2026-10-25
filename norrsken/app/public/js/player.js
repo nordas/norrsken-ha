@@ -473,8 +473,13 @@
     var url = NS.remuxUrl(src.url, this.offset, this.audioIdx, this.safeMode);
     // during AirPlay Safari's own player keeps going (a new sound track or position too): hls.js would send only sound
     if (window.Hls && window.Hls.isSupported() && !this.airNative) {
+      // 4K is uneven: action scenes need two to three times the average. hls.js stops filling at 60 MB by default,
+      // only 10–20 s of 4K, so a slow stretch from the provider empties it. Phones and computers keep far more ahead
+      // (the TV has less memory: it keeps the default).
+      var bigBuf = document.documentElement.classList.contains('m') || !/Titan|SmartTV|Web0S|webOS|Tizen|VIDAA|\bTV\b/i.test(navigator.userAgent);
       var hls = this.hls = new window.Hls({
-        enableWorker: true, startPosition: 0, maxBufferLength: 60, maxMaxBufferLength: 180, backBufferLength: 60,
+        enableWorker: true, startPosition: 0, maxBufferLength: bigBuf ? 120 : 60, maxMaxBufferLength: bigBuf ? 300 : 180, backBufferLength: 30,
+        maxBufferSize: bigBuf ? 400 * 1000 * 1000 : 60 * 1000 * 1000,
         manifestLoadingTimeOut: 60000, manifestLoadingMaxRetry: 1, levelLoadingTimeOut: 30000, fragLoadingTimeOut: 60000,
         liveSyncDurationCount: 9999, liveDurationInfinity: false
       });
@@ -1887,7 +1892,8 @@
           var dev = b.byteLength * 8 / ((performance.now() - t0) / 1000) / 1e6;
           var need = a.need || 0, verdict;
           if (a.err) verdict = 'Leverantören svarade inte ordentligt (' + a.err + ').';
-          else if (need && a.mbps < need * 1.1) verdict = 'Leverantören hinner inte skicka filmen till servern i den takt den spelas. Det är din internetanslutning eller leverantörens gräns per uppkoppling, inte mobilen eller wifi:t. Välj en mindre version (1080p).';
+          else if (need && a.mbps < need * 1.1) verdict = 'Leverantören hinner inte skicka filmen till servern i den takt den spelas. Det är leverantörens gräns per uppkoppling, inte mobilen eller wifi:t. Välj en mindre version (1080p).';
+          else if (need && a.mbps < need * 2.2 && /4K/.test(resLabel(self.video.videoWidth, self.video.videoHeight) || '') ) verdict = 'Räcker i snitt, men 4K har toppar på 2–3 gånger snittet i actionscener. Leverantören skickar bara ' + f(a.mbps) + ' till den här filmen, så det kan stanna i de scenerna. Spelaren buffrar nu mer i förväg för att klara det.';
           else if (need && dev < need * 1.1) verdict = 'Servern får filmen tillräckligt snabbt, men nätet till den här skärmen (wifi) är för långsamt.';
           else if (need) verdict = 'Hastigheten räcker hela vägen. Stannar det ändå är det servern som inte hinner bearbeta filmen.';
           else verdict = 'Filmens bithastighet gick inte att läsa; jämför siffrorna med 25–80 Mbit/s för 4K och 8–15 Mbit/s för 1080p.';
