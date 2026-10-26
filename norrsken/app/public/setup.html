@@ -131,6 +131,7 @@ summary { cursor: pointer; font-weight: 650; color: #c9d3df; padding: 10px 0; }
     </div>
     <div class="row" style="margin-top:16px"><button type="button" class="btn" id="testBtn">Testa anslutningen</button></div>
     <div class="result" id="testRes"></div>
+    <div class="notice" id="vaultBox" style="margin-top:16px"></div>
   </section>
 
   <section>
@@ -480,6 +481,32 @@ summary { cursor: pointer; font-weight: 650; color: #c9d3df; padding: 10px 0; }
       .catch(function (e) { result($('catRes'), false, e.message); });
   };
 
+  /** Is the provider's account encrypted with the key in Home Assistant's secrets.yaml? */
+  function paintVault(v) {
+    var b = $('vaultBox');
+    b.innerHTML = '';
+    var p = function (t, strong) { var e = document.createElement(strong ? 'b' : 'p'); e.textContent = t; if (!strong) e.style.margin = '6px 0 0'; b.appendChild(e); };
+    if (v.locked) {
+      p('Uppgifterna går inte att läsa', true);
+      p('De är krypterade, men nyckeln ' + v.name + ' i Home Assistants secrets.yaml saknas eller har ändrats. Lägg tillbaka raden, eller skriv in användarnamn och lösenord igen och spara.');
+    } else if (v.on) {
+      p('🔒 Krypterat', true);
+      p('Användarnamn och lösenord sparas krypterade. Nyckeln ligger i Home Assistants secrets.yaml (' + v.name + '), inte hos appen.');
+    } else {
+      p('Kryptera användarnamn och lösenord', true);
+      p('Lägg till den här raden i Home Assistants secrets.yaml (Filredigeraren eller Studio Code Server, mappen /homeassistant). Starta sedan om tillägget, så krypteras uppgifterna.');
+      var code = document.createElement('code');
+      code.textContent = v.line || '';
+      code.style.cssText = 'display:block;margin:10px 0;padding:10px 12px;border-radius:8px;background:rgba(255,255,255,.08);font-family:ui-monospace,Menlo,monospace;word-break:break-all;user-select:all';
+      b.appendChild(code);
+      var btn = document.createElement('button');
+      btn.type = 'button'; btn.className = 'btn small'; btn.textContent = 'Kopiera raden';
+      btn.onclick = function () { try { navigator.clipboard.writeText(v.line); btn.textContent = 'Kopierad'; } catch (e) { /* select it by hand */ } };
+      b.appendChild(btn);
+      if (!v.file) p('Hittade ingen secrets.yaml: uppdatera tillägget först (det behöver läsrätt till Home Assistants konfiguration).');
+    }
+  }
+
   function fill() {
     $('appTitle').textContent = cfg.options.appName || 'Norrsken';
     document.title = 'Inställningar – ' + (cfg.options.appName || 'Norrsken');
@@ -488,6 +515,7 @@ summary { cursor: pointer; font-weight: 650; color: #c9d3df; padding: 10px 0; }
     $('passHelp').textContent = cfg.xtream.hasPassword ? 'Ett lösenord är sparat. Lämna fältet tomt för att behålla det.' : '';
     $('xPass').placeholder = cfg.xtream.hasPassword ? '••••••••' : '';
     $('mUrl').value = cfg.m3u.url || '';
+    paintVault(cfg.vault || {});
     $('mEpg').value = cfg.m3u.epgUrl || '';
     var o = cfg.options;
     $('appName').value = o.appName || '';

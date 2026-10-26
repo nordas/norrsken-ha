@@ -1,6 +1,7 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
+const vault = require('./vault');
 
 const DEFAULT_CONFIG = {
   configured: false,
@@ -48,6 +49,11 @@ class Store {
     this.dir = dir;
     fs.mkdirSync(dir, { recursive: true });
     this.config = merge(clone(DEFAULT_CONFIG), this.read('config.json') || {});
+    // the provider's account is encrypted on disk with the key in Home Assistant's secrets.yaml (see vault.js)
+    const v = vault.openConfig(this.config);
+    this.locked = v.locked;
+    if (v.locked) console.error('[nyckel] Leverantörens uppgifter är krypterade men nyckeln i secrets.yaml saknas eller har ändrats: lägg tillbaka raden ' + vault.KEY_NAME + ', eller skriv in uppgifterna igen under /setup');
+    if (v.plain) { this.saveConfig(); console.log('[nyckel] Leverantörens uppgifter är nu krypterade med nyckeln i secrets.yaml'); }
     this.state = this.read('state.json') || { profiles: {} };
     if (!this.state.profiles) this.state.profiles = {};
     this._stateTimer = null;
@@ -66,7 +72,10 @@ class Store {
     fs.renameSync(tmp, f);
   }
 
-  saveConfig() { this.write('config.json', this.config); }
+  saveConfig() {
+    this.write('config.json', vault.sealConfig(this.config));
+    if (this.locked && !vault.FIELDS.some(p => vault.isSealed(p.reduce((x, k) => (x ? x[k] : undefined), this.config)))) this.locked = false;
+  }
 
   saveState() {
     clearTimeout(this._stateTimer);

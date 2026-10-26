@@ -1,7 +1,7 @@
 #!/bin/sh
 # Settings, lists and history live in /data, which Home Assistant keeps between updates and backups.
 PIN="$(jq -r '.setup_pin // empty' /data/options.json 2>/dev/null)"
-export DATA_DIR=/data PORT=8787
+export DATA_DIR=/data PORT=8787 NSK_SECRETS_FILE=/homeassistant/secrets.yaml
 [ -n "$PIN" ] && export SETUP_PIN="$PIN"
 # Ask the Supervisor for the host's real LAN address so the app shows a URL the TV and phone can reach.
 if [ -n "$SUPERVISOR_TOKEN" ]; then

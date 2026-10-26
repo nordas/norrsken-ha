@@ -359,13 +359,16 @@ function status() {
 
 /* ------------------------------------------------------------------ setup */
 
+const vaultClear = (v) => (require('./lib/vault').isSealed(v) ? '' : v);
 function publicConfig() {
   const c = store.config;
   return {
     configured: c.configured,
     source: c.source,
-    xtream: { server: c.xtream.server, username: c.xtream.username, hasPassword: !!c.xtream.password },
-    m3u: { url: c.m3u.url, epgUrl: c.m3u.epgUrl },
+    // fields that couldn't be opened (key missing) are shown empty: type them in again
+    xtream: { server: c.xtream.server, username: vaultClear(c.xtream.username), hasPassword: !!vaultClear(c.xtream.password) },
+    m3u: { url: vaultClear(c.m3u.url), epgUrl: vaultClear(c.m3u.epgUrl) },
+    vault: { ...require('./lib/vault').status(), locked: !!store.locked },
     profiles: publicProfiles(),
     // the key itself never goes back out; '••••' means "one is saved"
     options: { ...c.options, tmdbKey: c.options.tmdbKey ? '••••' : '' },
