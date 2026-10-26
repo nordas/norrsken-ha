@@ -23,7 +23,7 @@ const PORT = +process.env.PORT || 8787;
 const HOST = process.env.HOST || '0.0.0.0';
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const PUBLIC = path.join(__dirname, 'public');
-const SETUP_PIN = process.env.SETUP_PIN || '';
+const SETUP_PIN_OPTION = process.env.SETUP_PIN || ''; // the add-on's own setting (setup_pin)
 
 const store = new Store(DATA_DIR);
 const catalog = new Catalog(store);
@@ -352,7 +352,7 @@ function status() {
     pause: { mode: store.config.options.pauseMode || 'auto', max: +store.config.options.pauseMax || 60, rec: ff.has() },
     parentPin: (store.config.profiles || []).some(p => !p.kids && p.pin),
     profiles: publicProfiles(),
-    pinRequired: !!SETUP_PIN,
+    pinRequired: !!setupPin(),
     urls: process.env.PUBLIC_URL ? [process.env.PUBLIC_URL.replace(/\/$/, '')] : lanUrls(),
   };
 }
@@ -427,10 +427,46 @@ function publicProfiles() {
   return (store.config.profiles || []).map(p => ({ id: p.id, name: p.name, color: p.color, kids: !!p.kids, hasPin: !!p.pin }));
 }
 
+/**
+ * /setup always has a PIN (it holds the provider account): the add-on's setup_pin if set, otherwise one made on the
+ * first start and shown only in the add-on log in Home Assistant. NSK_SETUP_OPEN=1 turns it off (tests only).
+ */
+function setupPin() {
+  if (process.env.NSK_SETUP_OPEN === '1') return '';
+  if (SETUP_PIN_OPTION) return SETUP_PIN_OPTION;
+  if (!store.config.setupPin) { store.config.setupPin = String(require('crypto').randomInt(100000, 1000000)); store.saveConfig(); }
+  return store.config.setupPin;
+}
+
+/** Wrong PINs from one address: after five, a wait that doubles (2 s … 15 min) before the next try is looked at. */
+const pinFails = new Map(); // key → { n, until }
+function pinLocked(key) {
+  const f = pinFails.get(key);
+  return f && f.until > Date.now() ? Math.ceil((f.until - Date.now()) / 1000) : 0;
+}
+function pinFailed(key) {
+  const f = pinFails.get(key) || { n: 0, until: 0 };
+  f.n++;
+  if (f.n >= 5) f.until = Date.now() + Math.min(15 * 60, 2 ** (f.n - 4)) * 1000;
+  pinFails.set(key, f);
+  if (pinFails.size > 500) pinFails.clear();
+}
+function sameText(a, b) {
+  const x = Buffer.from(String(a)), y = Buffer.from(String(b));
+  return x.length === y.length && require('crypto').timingSafeEqual(x, y);
+}
+function clientKey(req) { return String((req.socket && req.socket.remoteAddress) || '?'); }
+
 function checkPin(req, res) {
-  if (!SETUP_PIN) return true;
-  if (req.headers['x-pin'] === SETUP_PIN) return true;
-  bad(res, 'Fel PIN-kod', 401);
+  const pin = setupPin();
+  if (!pin) return true;
+  const key = 'setup:' + clientKey(req);
+  const wait = pinLocked(key);
+  if (wait) { bad(res, 'För många fel PIN-koder – vänta ' + (wait > 90 ? Math.ceil(wait / 60) + ' min' : wait + ' s'), 429); return false; }
+  const sent = req.headers['x-pin'];
+  if (sent && sameText(sent, pin)) { pinFails.delete(key); return true; }
+  if (sent) pinFailed(key);
+  bad(res, sent ? 'Fel PIN-kod' : 'PIN-kod krävs', 401);
   return false;
 }
 
@@ -685,6 +721,9 @@ route('POST', '/api/profile/:id/unlock', async (req, res, q, p) => {
   const b = await readBody(req);
   const prof = (store.config.profiles || []).find(x => x.id === p.id);
   if (!prof) return bad(res, 'profil', 404);
+  const lockKey = 'prof:' + clientKey(req);
+  const wait = pinLocked(lockKey);
+  if (wait) return bad(res, 'För många fel PIN-koder – vänta ' + (wait > 90 ? Math.ceil(wait / 60) + ' min' : wait + ' s'), 429);
   const all = store.config.profiles || [];
   const from = all.find(x => x.id === b.from);
   // accepted codes: the profile's own PIN; leaving a kids profile also takes any parent's PIN
@@ -692,6 +731,7 @@ route('POST', '/api/profile/:id/unlock', async (req, res, q, p) => {
   if (prof.pin) codes.push(prof.pin);
   if (from && from.kids && !prof.kids) for (const x of all) if (!x.kids && x.pin) codes.push(x.pin);
   if (!codes.length || codes.includes(String(b.pin || ''))) return ok(res, { ok: true, token: prof.pin ? profToken(prof) : '' });
+  pinFailed(lockKey);
   await new Promise(r => setTimeout(r, 600)); // slow down guessing
   bad(res, 'Fel PIN-kod', 403);
 });
@@ -1433,7 +1473,8 @@ function start() {
     console.log(`\n  ${store.config.options.appName || 'Norrsken'} ${pkg.version} kör på port ${PORT}`);
     console.log('  TV-appen:      ' + (urls[0] || 'http://localhost:' + PORT) + '/');
     console.log('  Inställningar: ' + (urls[0] || 'http://localhost:' + PORT) + '/setup');
-    console.log('  ffmpeg:        ' + (ff.has() ? 'ja (MKV, ljudspår och undertexter stöds)' : 'nej (installera för MKV/undertexter)') + '\n');
+    console.log('  ffmpeg:        ' + (ff.has() ? 'ja (MKV, ljudspår och undertexter stöds)' : 'nej (installera för MKV/undertexter)'));
+    console.log('  PIN för /setup: ' + (SETUP_PIN_OPTION ? '(den du valt i tilläggets konfiguration)' : setupPin() ? setupPin() + '  (byt den under tilläggets Konfiguration → setup_pin)' : 'av') + '\n');
   });
   if (store.config.configured) catalog.load();
   // background refresh: catalog every 12 h, EPG every 6 h

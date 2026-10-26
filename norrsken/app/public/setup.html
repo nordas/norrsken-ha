@@ -258,16 +258,21 @@ summary { cursor: pointer; font-weight: 650; color: #c9d3df; padding: 10px 0; }
     var headers = { 'Content-Type': 'application/json' };
     if (pin) headers['X-Pin'] = pin;
     return fetch(path, { method: method, headers: headers, body: body ? JSON.stringify(body) : undefined, cache: 'no-store' })
-      .then(function (r) { return r.json().then(function (j) { if (r.status === 401) { askPin(); throw new Error(j.error); } if (!r.ok) throw new Error(j.error || 'Fel ' + r.status); return j; }); });
+      .then(function (r) { return r.json().then(function (j) { if (r.status === 401) { askPin(pin ? j.error : ''); throw new Error(j.error); } if (r.status === 429) { askPin(j.error); throw new Error(j.error); } if (!r.ok) throw new Error(j.error || 'Fel ' + r.status); return j; }); });
   }
 
-  function askPin() {
-    if (document.querySelector('.pin')) return;
+  function askPin(why) {
+    var old = document.querySelector('.pin');
+    if (old) old.remove();
     var d = document.createElement('div');
     d.className = 'pin';
-    d.innerHTML = '<div class="box"><h2 style="font-size:20px">Ange PIN-kod</h2><p class="help">Servern är skyddad med en PIN-kod.</p><input type="password" inputmode="numeric" id="pinIn" style="margin-top:14px"><div class="row" style="margin-top:14px"><button class="btn primary" id="pinOk">Fortsätt</button></div></div>';
+    d.innerHTML = '<div class="box"><h2 style="font-size:20px">Ange PIN-kod</h2><p class="help">Inställningarna är skyddade. PIN-koden står i tilläggets logg i Home Assistant (Inställningar → Tillägg → Norrsken → Logg), eller är den du valt under tilläggets Konfiguration.</p><p class="help" id="pinWhy" style="color:#ff8a8a"></p><input type="password" inputmode="numeric" autocomplete="one-time-code" id="pinIn" style="margin-top:14px"><div class="row" style="margin-top:14px"><button class="btn primary" id="pinOk">Fortsätt</button></div></div>';
     document.body.appendChild(d);
-    $('pinOk').onclick = function () { pin = $('pinIn').value; try { sessionStorage.setItem('nsk.pin', pin); } catch (e) {} d.remove(); load(); };
+    $('pinWhy').textContent = why || '';
+    var go = function () { pin = $('pinIn').value; try { sessionStorage.setItem('nsk.pin', pin); } catch (e) {} d.remove(); load(); };
+    $('pinOk').onclick = go;
+    $('pinIn').onkeydown = function (e) { if (e.key === 'Enter') go(); };
+    setTimeout(function () { try { $('pinIn').focus(); } catch (e) {} }, 50);
   }
 
   function setSource(s) {

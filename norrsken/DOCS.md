@@ -22,3 +22,15 @@ Adresserna gäller så länge Home Assistant har IP-adressen 192.168.85.51. Ge d
 - **Sidan öppnas inte:** kontrollera att tillägget kör och att du är på hemmanätverket.
 
 Inställningar, listor och historik sparas i tilläggets data och följer med i Home Assistants säkerhetskopior.
+
+## PIN-kod för inställningarna
+
+Sidan `/setup` innehåller ditt konto hos leverantören och kräver därför alltid en PIN-kod.
+
+- Vid första starten skapas en sexsiffrig PIN-kod. Den står i tilläggets **Logg** (raden `PIN för /setup`).
+- Vill du välja en egen: skriv den under tilläggets **Konfiguration → setup_pin** och starta om tillägget.
+- Fem fel i rad ger en väntetid som fördubblas för varje nytt fel (upp till 15 minuter).
+
+## Kryptering av leverantörens uppgifter
+
+Lägg raden som visas under Leverantör på `/setup` (`norrsken_nyckel: …`) i Home Assistants `secrets.yaml` och starta om tillägget. Då sparas användarnamn och lösenord krypterade.

@@ -22,6 +22,7 @@ before(async () => {
   prov = await mock.listen();
   process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'nsk-'));
   process.env.PORT = '0';
+  process.env.NSK_SETUP_OPEN = '1'; // the setup PIN has its own test (pin.test.js)
   app = require('../server');
   await new Promise(ok => app.server.listen(0, '127.0.0.1', ok));
   base = 'http://127.0.0.1:' + app.server.address().port;
