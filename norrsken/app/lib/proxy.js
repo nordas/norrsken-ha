@@ -49,7 +49,7 @@ class Proxy {
         return Buffer.concat([d.update(b.subarray(28)), d.final()]).toString('utf8');
       } catch (_) { return ''; }
     }
-    // older plain tokens still work (only hosts we handed out are fetched either way)
+    if (this.key) return ''; // with a key, only encrypted tokens: an address can't be made up by hand
     try { return Buffer.from(t, 'base64url').toString('utf8'); } catch (_) { return ''; }
   }
 

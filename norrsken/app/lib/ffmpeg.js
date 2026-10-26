@@ -229,6 +229,13 @@ const os = require('os');
 const path = require('path');
 const HLS_ROOT = path.join(os.tmpdir(), 'norrsken-hls');
 const sessions = new Map(); // key -> session
+const starting = new Map(); // key -> promise of the session being set up (two requests at once get one ffmpeg)
+const HLS_MIN_FREE = 1.5e9; // leave room on the disk, like the pause recordings
+// whatever an earlier run left behind
+try { fs.rmSync(HLS_ROOT, { recursive: true, force: true }); } catch (_) { /* nothing */ }
+function freeBytes(dir) {
+  try { const st = fs.statfsSync(dir); return st.bavail * st.bsize; } catch (_) { return Infinity; }
+}
 
 function argsFor(info, p, url, ss, a, ua, dir) {
   const args = ['-hide_banner', '-loglevel', 'error', '-nostats', '-progress', 'pipe:1', '-user_agent', ua || DEFAULT_UA,
@@ -273,17 +280,30 @@ setInterval(() => {
  * Get (or start) a conversion session. opts: { group, ss, a, ua, audioMode, maxRes, caps, safe }
  * group identifies the film: starting a new position stops the old one, so the provider only sees one connection.
  */
-async function hlsSession(url, opts) {
-  const { group, ss = 0, a = 0, ua, audioMode = 'auto', maxRes = 'orig', caps = {}, safe = false } = opts;
+function hlsSession(url, opts) {
+  const { group, ss = 0, a = 0, safe = false, caps = {} } = opts;
   const key = group + '|' + Math.floor(ss) + '|' + a + '|' + (safe ? 's' : Object.keys(caps).sort().join(','));
-  let s = sessions.get(key);
-  if (s && !s.dead) { s.last = Date.now(); return s; }
-  // one provider connection: a new title also stops conversions nobody is fetching any more
-  for (const o of sessions.values()) if (o.group === group || Date.now() - o.last > 8000) stopSession(o);
+  const s = sessions.get(key);
+  if (s && !s.dead) { s.last = Date.now(); return Promise.resolve(s); }
+  // a second request for the same thing while the first is still being set up (hls.js retries, double taps)
+  if (starting.has(key)) return starting.get(key);
+  const pr = startSession(url, key, opts).finally(() => starting.delete(key));
+  starting.set(key, pr);
+  return pr;
+}
+
+async function startSession(url, key, opts) {
+  const { group, ss = 0, a = 0, ua, audioMode = 'auto', maxRes = 'orig', caps = {}, safe = false } = opts;
+  let s;
+  // the provider gives one connection: a new conversion ends every other one (another film, another device)
+  for (const o of sessions.values()) stopSession(o);
+  fs.mkdirSync(HLS_ROOT, { recursive: true });
+  if (freeBytes(HLS_ROOT) < HLS_MIN_FREE) throw new Error('För lite ledigt diskutrymme för att konvertera filmen');
   let info = null;
   try { info = await probe(url, ua); } catch (_) { /* go blind */ }
   const p = plan(info, safe ? {} : caps, { a, audioMode, maxRes: safe ? '1080' : maxRes });
   if (safe && !p.videoCopy) p.scale = true;
+  for (const o of sessions.values()) stopSession(o); // started meanwhile (the probe takes a moment)
   const id = Math.random().toString(36).slice(2, 10);
   const dir = path.join(HLS_ROOT, id);
   fs.mkdirSync(dir, { recursive: true });
@@ -368,7 +388,8 @@ function hlsFile(id, name) {
   return null;
 }
 
-function activeSessions() { return sessions.size; }
+function activeSessions() { return sessions.size + starting.size; }
+function stopAll() { for (const o of sessions.values()) stopSession(o); }
 /** The player was closed: free the provider connection at once instead of after 90 s. */
 function stopGroup(group) { for (const o of sessions.values()) if (o.group === group) stopSession(o); }
 
@@ -379,4 +400,4 @@ function sessionStat(group) {
   return best ? { speed: best.speed || 0, out: best.out || 0, done: !!best.done } : null;
 }
 
-module.exports = { stopGroup, activeSessions, has, probe, remux, subs, langName, plan, playsAsIs, hlsSession, hlsPlaylist, hlsFile, sessionStat, aspectArgs };
+module.exports = { stopGroup, stopAll, activeSessions, has, probe, remux, subs, langName, plan, playsAsIs, hlsSession, hlsPlaylist, hlsFile, sessionStat, aspectArgs };

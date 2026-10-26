@@ -388,3 +388,10 @@ html .player.touch.lshift .osd .chan { bottom: calc(64px + env(safe-area-inset-b
 .player.touch .qbadge { top: calc(62px + env(safe-area-inset-top)); gap: 6px; white-space: nowrap; }
 .player.touch .qbadge span { font-size: 12px; padding: 4px 8px; border-radius: 6px; }
 .player.touch .sinfo .sv { max-width: none; margin-top: 8px; }
+
+/* film controls on a phone: seven round buttons fit without scrolling off the edges */
+@media (orientation: portrait) {
+  html.m .player.touch .osd .obtns { left: 8px; right: 8px; gap: 4px; overflow: visible; justify-content: space-between; }
+  html.m .player.touch .osd .obtns .btn { width: 44px; height: 44px; flex: 0 0 44px; }
+}
+.countdown .cd-btns .btn { height: 48px; font-size: 16px; padding: 0 22px; }

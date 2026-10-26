@@ -34,8 +34,15 @@
   }
   /** What a source is, in words, for the player choice. */
   function srcLabel(x) {
-    var k = { hls: 'HLS', ts: 'MPEG-TS', file: 'Fil', remux: 'Konverterad av servern' }[x.kind] || x.kind;
-    return x.kind === 'remux' ? k : k + (x.direct ? ' · direkt från leverantören' : ' · via servern');
+    if (x.kind === 'remux') return 'Anpassad av servern';
+    if (x.kind === 'ts') return x.direct ? 'Reserv: direkt (MPEG-TS)' : 'Reserv: via servern (MPEG-TS)';
+    return x.direct ? 'Direkt från leverantören' : 'Via servern';
+  }
+  /** One line on when to pick it. */
+  function srcNote(x) {
+    if (x.kind === 'remux') return 'för filer skärmen inte spelar själv';
+    if (x.kind === 'ts') return 'om bilden hackar eller fryser';
+    return x.direct ? 'snabbast' : 'stabilast';
   }
   var SUB_SIZES = [['s', 'Liten'], ['m', 'Normal'], ['l', 'Stor'], ['xl', 'Extra stor']];
 
@@ -102,12 +109,12 @@
       this.lGo = h('button', { class: 'tsgo', onclick: function (e) { e.stopPropagation(); self.goLive(); } }, ['Titta live', h('span', { class: 'arr', text: ' →' })]);
       this.lctl = h('div', { class: 'lctl' }, [
         this.lPP,
-        lb('rw', '', function () { self.seekRec(self.recPos() - 10); }),
-        lb('ff', '', function () { self.seekRec(self.recPos() + 10); }),
+        lb('rw', '10 s', function () { self.seekRec(self.recPos() - 10); }),
+        lb('ff', '10 s', function () { self.seekRec(self.recPos() + 10); }),
         h('div', { class: 'lspace' }),
         this.lAudB,
         this.lSubB,
-        this.lSetB = lb('settings', '', function () { self.openSettings(); }),
+        this.lSetB = lb('settings', 'Inställningar', function () { self.openSettings(); }),
         this.lGo
       ]);
       this.osd.appendChild(this.lctl);
@@ -262,6 +269,8 @@
     this.suspended = true;
   };
   Player.prototype.destroy = function () {
+    this.dead = true;
+    this.reqId = {};
     this.saveProgress(true);
     // let the server stop converting right away (frees the provider connection for the next title)
     if (this.tok) { try { var u = 'rx/stop?t=' + encodeURIComponent(this.tok); if (navigator.sendBeacon) navigator.sendBeacon(u); else NS.api.post(u, {}); } catch (e) { /* ignore */ } }
@@ -479,7 +488,7 @@
       var bigBuf = document.documentElement.classList.contains('m') || !/Titan|SmartTV|Web0S|webOS|Tizen|VIDAA|\bTV\b/i.test(navigator.userAgent);
       var hls = this.hls = new window.Hls({
         enableWorker: true, startPosition: 0, maxBufferLength: bigBuf ? 120 : 60, maxMaxBufferLength: bigBuf ? 300 : 180, backBufferLength: 30,
-        maxBufferSize: bigBuf ? 400 * 1000 * 1000 : 60 * 1000 * 1000,
+        maxBufferSize: bigBuf ? (/iPhone|iPad/.test(navigator.userAgent) ? 200 : 400) * 1000 * 1000 : 60 * 1000 * 1000,
         manifestLoadingTimeOut: 60000, manifestLoadingMaxRetry: 1, levelLoadingTimeOut: 30000, fragLoadingTimeOut: 60000,
         liveSyncDurationCount: 9999, liveDurationInfinity: false
       });
@@ -928,7 +937,8 @@
   Player.prototype.buffering = function (on) {
     var self = this;
     clearTimeout(this.bufT);
-    if (on) this.noteStall();
+    if (on && !this._buffering && this.played) this.noteStall();
+    this._buffering = !!on;
     if (on) this.bufT = setTimeout(function () { self.el.classList.add('buffering'); }, 250);
     else this.el.classList.remove('buffering');
   };
@@ -1820,12 +1830,12 @@
     };
     // the sources of this title, and the screen's own player for HLS (if something stutters, try another)
     var srcs = (this.sources || []).map(function (x, i) {
-      return { label: srcLabel(x), on: i === self.si && !(self.live && self.tshift && self.tshift.url), act: function () { self.closePanel(); self.switchSource(i); } };
+      return { label: srcLabel(x), note: srcNote(x), on: i === self.si && !(self.live && self.tshift && self.tshift.url), act: function () { self.closePanel(); self.switchSource(i); } };
     });
     var cur = this.sources && this.sources[this.si];
     if (cur && cur.kind === 'hls' && window.Hls && window.Hls.isSupported() && this.video.canPlayType('application/vnd.apple.mpegurl')) {
       var own = NS.store.get('engine', '') === 'native';
-      srcs.push({ label: own ? 'Byt till Norrskens spelare (hls.js)' : 'Byt till tv:ns egen spelare', note: own ? 'tv:ns egen används' : '', act: function () {
+      srcs.push({ label: own ? 'Använd Norrskens spelare' : 'Använd skärmens egen spelare', note: own ? 'skärmens egen används nu' : 'om inget annat hjälper', act: function () {
         NS.store.set('engine', own ? '' : 'native');
         self.closePanel();
         self.switchSource(self.si);
@@ -1956,6 +1966,7 @@
           NS.diag('hastighet: leverantör→server ' + f(a.mbps) + ', server→skärm ' + f(dev) + ', filmen ' + f(need));
         });
       }).catch(function (e) { show([['Testet gick inte att köra: ' + ((e && e.message) || 'fel')]]); }).then(function () {
+        if (self.dead || NS.router.stack.indexOf(self) < 0) return; // closed during the test: stay closed
         self.start = at;
         self.startSource(at);
         setTimeout(function () { if (self.infoEl && !self.infoOn) self.infoEl.classList.remove('on'); }, 20000);
@@ -2157,8 +2168,8 @@
       fsb.addEventListener('click', function (e) { e.stopPropagation(); if (document.fullscreenElement) document.exitFullscreen(); else el.requestFullscreen(); });
       this.osd.appendChild(fsb);
     }
-    if (this.live) {
-      // live: a pause button (the space bar works too)
+    if (this.live && !this.lctl) {
+      // live: a pause button (the space bar works too); the TV4 Play-style control row has its own
       var pp = h('button', { class: 'mbtn mpp', 'aria-label': 'Pausa' }, NS.icon('pause'));
       pp.addEventListener('click', function (e) { e.stopPropagation(); self.livePlayPause(); });
       var syncPP = function () { pp.innerHTML = ''; var p0 = self.tshift ? !self.tshift.playing || self.video.paused : self.video.paused; pp.appendChild(NS.icon(p0 ? 'play' : 'pause')); };

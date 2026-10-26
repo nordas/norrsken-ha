@@ -397,7 +397,7 @@
       h('h2', { text: m.title }),
       h('div', { class: 'm-sport-meta' }, [logo, h('span', { text: (m.chName || m.ch.n) + '  ·  ' + NS.fmtClock(m.s) + '–' + NS.fmtClock(m.e) })]),
       live ? NS.progEl(NS.livePct(m)) : null,
-      h('div', { class: 'm-sport-btns' }, [h('button', { class: 'm-btn', onclick: function (e) { e.stopPropagation(); go(); } }, [NS.icon('play'), live ? (rec ? 'Börja från start' : 'Titta nu') : m.state === 'ended' ? (rec ? 'Börja från start' : 'Tv-guide') : 'Titta från start']), second])
+      h('div', { class: 'm-sport-btns' }, [h('button', { class: 'm-btn', onclick: function (e) { e.stopPropagation(); go(); } }, [NS.icon('play'), live ? (rec ? 'Från start' : 'Titta nu') : m.state === 'ended' ? (rec ? 'Från start' : 'Tv-guide') : 'Från start']), second])
     ]);
     el.addEventListener('click', go);
     return el;

@@ -392,6 +392,10 @@ test('services: a wrong key says so instead of failing quietly', async () => {
 /* ------------------------------------------------------------------ match recording (Luleå, 24 h) */
 
 test('match: the favourite\'s match is recorded from the start, kept for a day, one stream at a time', async () => {
+  // someone watching (a stream started a moment ago): the recording waits instead of taking the connection
+  app._matchRecTick();
+  assert.equal((await get('/api/matchrec')).json.recs.length, 0, 'waits while a stream is in use');
+  app._streamIdle();
   app._matchRecTick();
   const r = (await get('/api/matchrec')).json;
   assert.equal(r.recs.length, 1, JSON.stringify(r));

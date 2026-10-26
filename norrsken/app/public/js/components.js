@@ -247,9 +247,10 @@
     var rem = !live && NS.hasReminder(m.ch.id, m.s);
     var rec = !!(m.rec && m.rec.id); // the match is recorded: from its start, or live
     var first = live ? (rec ? 'Börja från start' : 'Titta nu') : m.state === 'ended' ? (rec ? 'Börja från start' : 'Tv-guide') : 'Titta från start';
-    this.btnEls = [h('div', { class: 'btn' }, [NS.icon(!live && m.state === 'ended' && !rec ? 'episodes' : 'play'), first]),
-      h('div', { class: 'btn' }, live ? (rec ? [NS.icon('live'), 'Titta live'] : [NS.icon('episodes'), 'Tv-guide'])
-        : m.state === 'ended' ? [NS.icon('episodes'), 'Tv-guide'] : [NS.icon(rem ? 'check' : 'bell'), rem ? 'Påminnelse satt' : 'Påminn mig'])];
+    this.btnEls = [h('div', { class: 'btn' }, [NS.icon(!live && m.state === 'ended' && !rec ? 'episodes' : 'play'), first])];
+    var second = live ? (rec ? [NS.icon('live'), 'Titta live'] : [NS.icon('episodes'), 'Tv-guide'])
+      : m.state === 'ended' ? (rec ? [NS.icon('episodes'), 'Tv-guide'] : null) : [NS.icon(rem ? 'check' : 'bell'), rem ? 'Påminnelse satt' : 'Påminn mig'];
+    if (second) this.btnEls.push(h('div', { class: 'btn' }, second));
     this.btnEls.forEach(function (b) { this.hint.appendChild(b); }, this);
     t.appendChild(this.hint);
     this.paintBtns();

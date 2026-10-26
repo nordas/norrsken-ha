@@ -359,7 +359,20 @@ function status() {
 
 /* ------------------------------------------------------------------ setup */
 
-const vaultClear = (v) => (require('./lib/vault').isSealed(v) ? '' : v);
+const vault = require('./lib/vault');
+const vaultClear = (v) => (vault.isSealed(v) ? '' : v);
+/** A link with the account in it, shown without the password: "…password=***" (Xtream paths too). */
+/** Text that may contain the provider's address: the user name and password taken out. */
+function redactAcct(msg) {
+  const c = store.config;
+  return redact(msg, [c.xtream.username, c.xtream.password].filter(x => x && !vault.isSealed(x)));
+}
+function maskUrl(u) {
+  if (!u || vault.isSealed(u)) return '';
+  let s = String(u).replace(/((?:password|pass|pwd)=)[^&#]*/gi, '$1***');
+  s = s.replace(/(\/(?:live|movie|series|get\.php|xmltv\.php)\/[^/]+\/)[^/]+\//i, '$1***/');
+  return s;
+}
 function publicConfig() {
   const c = store.config;
   return {
@@ -367,11 +380,11 @@ function publicConfig() {
     source: c.source,
     // fields that couldn't be opened (key missing) are shown empty: type them in again
     xtream: { server: c.xtream.server, username: vaultClear(c.xtream.username), hasPassword: !!vaultClear(c.xtream.password) },
-    m3u: { url: vaultClear(c.m3u.url), epgUrl: vaultClear(c.m3u.epgUrl) },
+    m3u: { url: maskUrl(c.m3u.url), epgUrl: maskUrl(c.m3u.epgUrl) },
     vault: { ...require('./lib/vault').status(), locked: !!store.locked },
     profiles: publicProfiles(),
     // the key itself never goes back out; '••••' means "one is saved"
-    options: { ...c.options, tmdbKey: c.options.tmdbKey ? '••••' : '' },
+    options: { ...c.options, tmdbKey: c.options.tmdbKey ? '••••' : '', epgUrl: maskUrl(c.options.epgUrl) },
   };
 }
 
@@ -408,7 +421,8 @@ function cleanProfiles(list) {
 async function testConnection(body) {
   const ua = (body.options && body.options.userAgent) || store.config.options.userAgent || '';
   if (body.source === 'm3u') {
-    const url = String((body.m3u && body.m3u.url) || '').trim();
+    let url = String((body.m3u && body.m3u.url) || '').trim();
+    if (url && url === maskUrl(store.config.m3u.url)) url = store.config.m3u.url; // shown masked, means the saved one
     if (!url) throw new Error('Ange en M3U-länk');
     const text = await fetchText(url, { ua: ua || undefined, timeout: 120000 });
     const n = (text.match(/#EXTINF/g) || []).length;
@@ -416,7 +430,10 @@ async function testConnection(body) {
     return { ok: true, entries: n };
   }
   const x = body.xtream || {};
-  const pass = x.password || store.config.xtream.password;
+  // the saved password only goes to the saved server and user name: never to an address someone else typed in
+  const same = normServer(x.server || '') === store.config.xtream.server && String(x.username || '').trim() === store.config.xtream.username;
+  const pass = x.password || (same ? store.config.xtream.password : '');
+  if (!pass) throw new Error('Ange lösenordet');
   const xt = new Xtream(x.server, x.username, pass, ua || undefined);
   if (!xt.base || !xt.u) throw new Error('Ange server och användarnamn');
   const r = await xt.api('', {}, 20000);
@@ -954,6 +971,7 @@ const MATCH_LEAD_MS = 5 * 60e3; // start a little before the puck drops
 const MATCH_TAIL_MS = 10 * 60e3; // and go on a little after the final whistle
 const KEEP_MATCH_MS = 24 * 3600e3;
 const matchRecs = new Map(); // team|start → { key, s, e, title, chId, chName, sessId }
+let matchWaitLog = 0;
 
 function recInfo(r, base) {
   const s = r && tsbuf.get(r.sessId);
@@ -966,22 +984,37 @@ function matchRecTick() {
   if (!catalog.ready()) return;
   const now = Date.now();
   for (const [k, r] of matchRecs) {
-    if (now - r.s > KEEP_MATCH_MS) { const s = tsbuf.get(r.sessId); if (s) tsbuf.stop(s, 'ett dygn gånget'); matchRecs.delete(k); }
+    if (now - r.s > KEEP_MATCH_MS) { for (const id of [r.sessId].concat(r.parts || [])) { const s = tsbuf.get(id); if (s) tsbuf.stop(s, 'ett dygn gånget'); } matchRecs.delete(k); }
   }
   if ((store.config.options || {}).matchRec === false) return;
   let list = [];
   try { list = sport.matchesToday(MATCH_TEAM, catalog.list('live', 'all', store.profile('')), catalog.epg, { now }); } catch (e) { return; }
   for (const m of list) {
     const key = MATCH_TEAM + '|' + m.s;
-    if (matchRecs.has(key)) continue;
     if (now < m.s - MATCH_LEAD_MS || now > m.e + MATCH_TAIL_MS) continue;
+    const had = matchRecs.get(key);
+    if (had) {
+      // still recording, or finished as planned: nothing to do; it stopped early (provider dropped it): go on
+      const hs = tsbuf.get(had.sessId);
+      if (hs && (!hs.done || hs.full)) continue;
+      if (!hs) continue; // removed by the viewer
+      if (now - (had.restartAt || 0) < 60e3) continue;
+      had.restartAt = now;
+      console.log('[match] inspelningen av', m.title, 'avbröts – startar om');
+    }
     if (tsbuf.matchSession()) break; // the provider gives one connection: the recording that runs goes on
+    // someone is watching (a conversion, or a stream started in the last few minutes): their picture isn't cut off;
+    // the recording starts as soon as the connection is free
+    if (ff.activeSessions() > 0 || Date.now() - lastStreamAt < 3 * 60e3) {
+      if (now - (matchWaitLog || 0) > 5 * 60e3) { matchWaitLog = now; console.log('[match]', m.title, 'börjar snart – väntar med inspelningen tills ingen annan ström används'); }
+      break;
+    }
     const src = catalog.streamUrl('live', m.ch.id);
     if (!src || !src.primary) continue;
     try {
       const sess = tsbuf.start(src.primary, { ua: catalog.ua(), maxMin: Math.ceil((m.e + MATCH_TAIL_MS - now) / 60e3), ch: m.title + ' på ' + (m.chName || m.ch.n), match: true });
-      matchRecs.set(key, { key, s: m.s, e: m.e, title: m.title, chId: m.ch.id, chName: m.chName || m.ch.n, sessId: sess.id });
-      lastStreamAt = Date.now();
+      if (had) { const old = tsbuf.get(had.sessId); had.sessId = sess.id; had.parts = (had.parts || []).concat(old ? [old.id] : []); }
+      else matchRecs.set(key, { key, s: m.s, e: m.e, title: m.title, chId: m.ch.id, chName: m.chName || m.ch.n, sessId: sess.id });
     } catch (e) { console.error('[match]', e.message); }
   }
 }
@@ -995,8 +1028,10 @@ route('GET', '/api/matchrec', (req, res) => {
 route('POST', '/api/matchrec/stop', (req, res) => {
   let n = 0;
   for (const [k, r] of matchRecs) {
-    const s = tsbuf.get(r.sessId);
-    if (s && !s.dead) { tsbuf.stop(s, 'borttagen av användaren'); n++; }
+    for (const id of [r.sessId].concat(r.parts || [])) { // a recording that was restarted has earlier parts too
+      const s = tsbuf.get(id);
+      if (s && !s.dead) { tsbuf.stop(s, 'borttagen av användaren'); n++; }
+    }
     matchRecs.delete(k);
   }
   ok(res, { ok: true, stopped: n });
@@ -1059,9 +1094,16 @@ route('GET', '/pause/:id/:name', (req, res, q, p) => {
  * straight from the provider), and how fast the server sends to the device. Run with the player stopped:
  * the provider gives one connection.
  */
+let speedBusy = false;
 route('GET', '/api/speedtest', async (req, res, q) => {
   const url = proxy.untoken(q.get('t'));
   if (!proxy.isAllowed(url)) return bad(res, 'forbidden', 403);
+  if (tsbuf.matchSession()) return bad(res, 'En match spelas in just nu – testa efter matchen', 409);
+  if (speedBusy) return bad(res, 'Ett test pågår redan', 409);
+  speedBusy = true;
+  try { await speedTest(req, res, q, url); } finally { speedBusy = false; }
+});
+async function speedTest(req, res, q, url) {
   const sec = Math.min(15, Math.max(3, +q.get('sec') || 8));
   const t0 = Date.now();
   let bytes = 0, first = 0, err = '';
@@ -1083,11 +1125,16 @@ route('GET', '/api/speedtest', async (req, res, q) => {
   let br = 0;
   try { br = (await ff.probe(url, catalog.ua())).br || 0; } catch (_) { /* unknown */ }
   const mbps = bytes * 8 / ms / 1000;
+  err = redactAcct(err);
   console.log('[hastighet] leverantören → servern', mbps.toFixed(1), 'Mbit/s', br ? '· filmen behöver ' + (br / 1e6).toFixed(1) + ' Mbit/s' : '', err ? '· ' + err : '');
   ok(res, { mbps, bytes, ms, firstMs: first ? first - t0 : 0, need: br / 1e6, err });
-});
+}
+let downBusy = 0;
 route('GET', '/api/speedtest/down', (req, res, q) => {
-  const mb = Math.min(60, Math.max(2, +q.get('mb') || 20));
+  if (downBusy >= 2) return bad(res, 'Ett test pågår redan', 429);
+  downBusy++;
+  res.on('close', () => { downBusy--; });
+  const mb = Math.min(40, Math.max(2, +q.get('mb') || 20));
   const chunk = require('crypto').randomBytes(1 << 20); // random: nothing on the way can compress it
   res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': mb << 20, 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' });
   let n = 0;
@@ -1122,7 +1169,7 @@ route('GET', '/rx/play.m3u8', async (req, res, q) => {
       audioMode: o.audioMode, maxRes: o.maxRes, caps: parseCaps(q.get('caps')), safe: q.get('safe') === '1' });
     const text = await ff.hlsPlaylist(s, ingressBase(req) + '/rx');
     send(res, 200, text, 'application/vnd.apple.mpegurl', { 'Access-Control-Allow-Origin': '*' });
-  } catch (e) { bad(res, e.message, 502); }
+  } catch (e) { bad(res, redactAcct(e.message), 502); }
 });
 
 route('POST', '/rx/stop', (req, res, q) => { ff.stopGroup(q.get('t') || ''); ok(res, { ok: true }); });
@@ -1176,13 +1223,22 @@ route('POST', '/api/setup', async (req, res) => {
   const before = catalog.sig();
   if (b.source === 'm3u' || b.source === 'xtream') c.source = b.source;
   if (b.xtream) {
-    c.xtream.server = normServer(b.xtream.server || '');
-    c.xtream.username = String(b.xtream.username || '').trim();
+    const server = normServer(b.xtream.server || '');
+    const user = String(b.xtream.username || '').trim();
+    // a field the page showed empty because it couldn't be opened (key missing) is kept as it is
+    const keepUser = !user && vault.isSealed(c.xtream.username);
+    const moved = server !== c.xtream.server || (!keepUser && user !== c.xtream.username);
+    c.xtream.server = server;
+    if (!keepUser) c.xtream.username = user;
     if (b.xtream.password) c.xtream.password = String(b.xtream.password).trim();
+    else if (moved) c.xtream.password = ''; // another server or account: the old password doesn't go with it
   }
   if (b.m3u) {
-    c.m3u.url = String(b.m3u.url || '').trim();
-    c.m3u.epgUrl = String(b.m3u.epgUrl || '').trim();
+    // links come back masked (password=***): the saved one is kept unless a new link was typed
+    const url = String(b.m3u.url || '').trim();
+    if (!(url === '' && vault.isSealed(c.m3u.url)) && url !== maskUrl(c.m3u.url)) c.m3u.url = url;
+    const epg = String(b.m3u.epgUrl || '').trim();
+    if (!(epg === '' && vault.isSealed(c.m3u.epgUrl)) && epg !== maskUrl(c.m3u.epgUrl)) c.m3u.epgUrl = epg;
     // An Xtream get.php link works better as Xtream (movies/series metadata, EPG)
     const xt = c.source === 'm3u' && b.preferXtream ? xtreamFromM3uUrl(c.m3u.url) : null;
     if (xt) { c.source = 'xtream'; c.xtream = xt; }
@@ -1202,7 +1258,12 @@ route('POST', '/api/setup', async (req, res) => {
     if ([30, 60, 120, 180].includes(+o.pauseMax)) opt.pauseMax = +o.pauseMax;
     if (typeof o.tmdbKey === 'string' && o.tmdbKey !== '••••') opt.tmdbKey = o.tmdbKey.trim().slice(0, 400);
     if (Array.isArray(o.services)) opt.services = o.services.filter(x => ['netflix', 'max', 'disney', 'prime'].includes(x));
-    for (const k of ['userAgent', 'epgUrl', 'kidsPattern']) if (typeof o[k] === 'string') opt[k] = o[k].trim().slice(0, 500);
+    for (const k of ['userAgent', 'epgUrl', 'kidsPattern']) {
+      if (typeof o[k] !== 'string') continue;
+      const v = o[k].trim().slice(0, 500);
+      if (k === 'epgUrl' && (v === maskUrl(opt.epgUrl) || (v === '' && vault.isSealed(opt.epgUrl)))) continue;
+      opt[k] = v;
+    }
   }
   const hasSource = c.source === 'm3u' ? !!c.m3u.url : !!(c.xtream.server && c.xtream.username && c.xtream.password);
   c.configured = hasSource;
@@ -1321,4 +1382,4 @@ for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { store.flush(); 
 
 if (require.main === module) start();
 
-module.exports = { server, store, catalog, proxy, start, _pool: pool, _matchRecTick: matchRecTick };
+module.exports = { server, store, catalog, proxy, start, _pool: pool, _matchRecTick: matchRecTick, _streamIdle: () => { lastStreamAt = 0; ff.stopAll(); } };

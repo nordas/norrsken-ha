@@ -485,6 +485,7 @@ summary { cursor: pointer; font-weight: 650; color: #c9d3df; padding: 10px 0; }
   function paintVault(v) {
     var b = $('vaultBox');
     b.innerHTML = '';
+    b.classList.add('on');
     var p = function (t, strong) { var e = document.createElement(strong ? 'b' : 'p'); e.textContent = t; if (!strong) e.style.margin = '6px 0 0'; b.appendChild(e); };
     if (v.locked) {
       p('Uppgifterna går inte att läsa', true);

@@ -108,7 +108,7 @@ function eventOf(name, now = Date.now()) {
   }
   return { s: best, title, label: label.replace(/^\s*tv4\s*play\s*$/i, 'TV4 Play').trim() };
 }
-const EVENT_LEN = 3 * 3600e3; // the name only says when it starts: a hockey broadcast is about three hours
+const EVENT_LEN = 4 * 3600e3; // the name only says when it starts: a hockey broadcast with overtime and shootout
 
 /* What the start page follows besides the favourite team: Sweden (hockey or football) and the skiing world cups. */
 const SWE_SIDE = /(^|[:\s])(sverige|tre kronor|damkronorna|sweden)\s+[-–—]\s+\S|\S\s+[-–—]\s+(sverige|tre kronor|damkronorna|sweden)(\s|$|[,(])/i;
@@ -152,7 +152,8 @@ function collect(follows, channels, epg, now) {
   const day = stockholmDay(now);
   const hits = new Map(); // follow + start + teams → { f, prog, chans: [] }
   const add = (ch, s, e, t, d, label, ev) => {
-    if (s >= day.end || s < day.start) return;
+    if (s >= day.end) return;
+    if (s < day.start && now >= e) return; // yesterday's: only while it is still on (a late match past midnight)
     if (NOT_LIVE.test(t)) return;
     d = d || '';
     for (const f of follows) {

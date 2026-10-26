@@ -595,7 +595,12 @@ html.m .player .tap-play { width: 84px; height: 84px; margin: -42px 0 0 -42px; f
 .countdown .cd-sub { font-size: 1.8rem; opacity: .75; }
 .countdown .cd-big { margin-top: 2rem; font-size: 9rem; font-weight: 300; font-variant-numeric: tabular-nums; letter-spacing: .02em; }
 .countdown .cd-left { font-size: 2rem; opacity: .85; }
-.countdown .cd-hint { margin-top: 3rem; font-size: 1.4rem; opacity: .45; }
+.countdown .cd-hint { margin-top: 3rem; font-size: 2.2rem; opacity: .75; }
+.countdown .cd-btns { margin-top: 3rem; display: flex; gap: 1.6rem; }
+.countdown .cd-btns .btn { cursor: pointer; }
+/* the remote (no pointer): OK and Back, said in words; touch and mouse: buttons */
+@media (pointer: none) { .countdown .cd-btns { display: none; } }
+@media (pointer: fine), (pointer: coarse) { .countdown .cd-hint { display: none; } }
 @keyframes livepulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
 .billboard.sport h1 { font-size: 9rem; }
 .billboard.sport h1.long { font-size: 6.6rem; }
@@ -677,3 +682,5 @@ html.m .player .tap-play { width: 84px; height: 84px; margin: -42px 0 0 -42px; f
 .player .qbadge span.k4 { background: #fff; color: #0b0c10; border-color: #fff; }
 .player .qbadge span.hdr { border-color: #f5c400; color: #f5c400; }
 .player .sinfo .sv { margin: 1.2rem 0 0; max-width: 52rem; line-height: 1.4; font-weight: 600; }
+.player.lshift .osd .chan { bottom: 12.5rem; } /* above the live control row, not under it */
+.player.lshift .osd .tsrow { bottom: 34rem; }

@@ -35,8 +35,8 @@
     NS.api.get('api/matchrec' + NS.pq()).then(function (r) {
       var a = r && r.active;
       if (!a || a.chId === item.id) { go(); return; }
-      NS.confirm({ title: 'Avbryta matchinspelningen?', text: a.title + ' spelas in på ' + a.chName + '. Det går bara en ström åt gången. Vill du avbryta inspelningen och byta kanal?',
-        buttons: [{ label: 'Ja, avbryt', value: true }, { label: 'Nej, behåll', value: false }], cancel: false }).then(function (yes) {
+      NS.confirm({ title: 'Matchen spelas in', text: a.title + ' spelas in på ' + a.chName + '. Din leverantör kan bara skicka en kanal åt gången, så inspelningen måste stoppas för att byta kanal. Det som redan spelats in tas bort.',
+        buttons: [{ label: 'Fortsätt spela in', value: false }, { label: 'Stoppa och byt kanal', value: true }], focus: 0, cancel: false }).then(function (yes) {
         if (!yes) return;
         NS.api.post('api/matchrec/stop' + NS.pq(), {}).then(go, go);
       });
@@ -52,7 +52,13 @@
   NS.watchMatch = function (m, list, cat) {
     var rec = m.rec && m.rec.id;
     if (m.state === 'soon') {
-      NS.router.push(new NS.Countdown({ at: m.s, title: m.title, sub: m.chName || m.ch.n, go: function () { if (rec) NS.watchRec(m, true); else NS.playItem(m.ch, { list: list, cat: cat }); } }));
+      NS.router.push(new NS.Countdown({ at: m.s, title: m.title, sub: m.chName || m.ch.n, go: function () {
+        // the recording starts five minutes before: look again now instead of using what the start page had
+        NS.api.get('api/sport').then(function (r) {
+          var now = r && r.match && r.match.s === m.s && r.match.rec && r.match.rec.id ? r.match : null;
+          if (now) NS.watchRec(now, true); else if (rec) NS.watchRec(m, true); else NS.playItem(m.ch, { list: list, cat: cat });
+        }, function () { if (rec) NS.watchRec(m, true); else NS.playItem(m.ch, { list: list, cat: cat }); });
+      } }));
       return;
     }
     if (rec) { NS.watchRec(m, false); return; }
@@ -65,10 +71,16 @@
     this.o = o; // { at, title, sub, go }: go() runs when the time comes
     this.big = NS.h('div', { class: 'cd-big' });
     this.left = NS.h('div', { class: 'cd-left' });
+    var self = this;
     this.el = NS.h('div', { class: 'countdown' }, [
       NS.h('div', { class: 'cd-title', text: o.title }),
       NS.h('div', { class: 'cd-sub', text: o.sub + '  ·  börjar ' + NS.fmtClock(o.at) }),
       this.big, this.left,
+      // phones and mice: buttons; the remote: OK and Back
+      NS.h('div', { class: 'cd-btns' }, [
+        NS.h('button', { class: 'btn primary', onclick: function () { self.start(); } }, [NS.icon('play'), 'Starta nu']),
+        NS.h('button', { class: 'btn', onclick: function () { NS.router.pop(); } }, 'Avbryt')
+      ]),
       NS.h('div', { class: 'cd-hint', text: 'OK startar nu  ·  Tillbaka avbryter' })
     ]);
   }
