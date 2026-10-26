@@ -245,6 +245,8 @@
     this.every(1000, function () { if (self.infoOn) self.paintInfo(); });
     this.every(500, function () { if (self.cuSeek) self.cuCatch(); });
     this.every(15000, function () { self.saveProgress(); if (self.hls && self.airBase && !self.airNative) self.addAirSource(); });
+    // tell the server something is playing (direct streams included): a match recording waits for it
+    this.every(60000, function () { if (self.played && !self.suspended && !self.video.paused && !(self.tshift && self.tshift.url)) NS.api.post('api/watching', {}).catch(function () {}); });
     if (this.live) this.every(30000, function () { NS.needEpg([self.item.id]); });
     if (this.live) this.every(1000, function () { if (self.tshift || self.livePausedAt) self.paintTshift(); self.paintLBar(); });
   };

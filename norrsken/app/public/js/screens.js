@@ -35,7 +35,18 @@
     if (!item || (item.t !== 'live' && item.t !== 'movie' && item.t !== 'episode' && item.t !== 'catchup')) { go(); return; }
     NS.api.get('api/matchrec' + NS.pq()).then(function (r) {
       var a = r && r.active;
-      if (!a || (item.t === 'live' && a.chId === item.id)) { go(); return; }
+      if (!a) { go(); return; }
+      if (item.t === 'live' && a.chId === item.id) {
+        // the channel being recorded: watch the recording at its live edge (one connection, and it can be paused)
+        var rec = (r.recs || []).find(function (x) { return x.id === a.id; });
+        if (rec && rec.url) {
+          var pl = new NS.Player({ item: item, rec: { id: rec.id, url: rec.url, edge: true } });
+          if (NS.router.top() instanceof NS.Player) NS.router.replace(pl); else NS.router.push(pl); // no player under a player
+          return;
+        }
+        go();
+        return;
+      }
       var live = item.t === 'live';
       NS.confirm({ title: 'Matchen spelas in', text: a.title + ' spelas in på ' + a.chName + '. Din leverantör kan bara skicka en sak åt gången, så inspelningen måste stoppas för att ' + (live ? 'byta kanal' : 'starta ' + (item.n || 'det här')) + '. Det som redan spelats in tas bort.',
         buttons: [{ label: 'Fortsätt spela in', value: false }, { label: live ? 'Stoppa och byt kanal' : 'Stoppa och spela', value: true }], focus: 0, cancel: false }).then(function (yes) {

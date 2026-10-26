@@ -381,13 +381,24 @@ function linkSecrets(u) {
   return out;
 }
 /** A link sent back from the page: *** where the saved link had its password is filled in again from the saved one. */
+/**
+ * A link sent back from the page with *** in it: each *** gets back exactly what stood in that place in the saved
+ * link (that parameter, that path segment, that user:password), and only for the same server. A link to another
+ * server never gets the saved password: null, and the password has to be typed in again.
+ */
 function unmaskUrl(sent, saved) {
-  if (!sent || sent.indexOf('***') < 0 || !saved || vault.isSealed(saved)) return sent;
-  const q = /(?:password|passwd|pass|pwd|token|key)=([^&#]*)/i.exec(saved);
-  const a = /^[a-z]+:\/\/[^:@/]+:([^@/]+)@/i.exec(saved);
-  const p = /\/(?:live|movie|series|hls|playlist|timeshift)\/[^/]+\/([^/]+)(?:\/|$)/i.exec(saved);
-  const secret = (q && q[1]) || (a && a[1]) || (p && p[1]) || '';
-  return secret ? sent.split('***').join(secret) : sent;
+  if (!sent || sent.indexOf('***') < 0) return sent;
+  if (!saved || vault.isSealed(saved)) return null;
+  let a, b;
+  try { a = new URL(sent); b = new URL(saved); } catch (_) { return null; }
+  if (a.protocol !== b.protocol || a.host.toLowerCase() !== b.host.toLowerCase()) return null;
+  if (a.password === '***') a.password = b.password;
+  for (const [k, v] of a.searchParams) if (v === '***') { const sv = b.searchParams.get(k); if (sv === null) return null; a.searchParams.set(k, sv); }
+  const sp = a.pathname.split('/'), bp = b.pathname.split('/');
+  for (let i = 0; i < sp.length; i++) if (sp[i] === '***') { if (bp[i] === undefined || sp.length !== bp.length) return null; sp[i] = bp[i]; }
+  a.pathname = sp.join('/');
+  const out = a.toString();
+  return out.indexOf('***') >= 0 || out.indexOf('%2A%2A%2A') >= 0 ? null : out;
 }
 function maskUrl(u) {
   if (!u || vault.isSealed(u)) return '';
@@ -446,6 +457,7 @@ async function testConnection(body) {
   if (body.source === 'm3u') {
     let url = String((body.m3u && body.m3u.url) || '').trim();
     url = url && url === maskUrl(store.config.m3u.url) ? store.config.m3u.url : unmaskUrl(url, store.config.m3u.url); // shown masked: the saved one
+    if (url === null) throw new Error('Länken pekar på en annan server – skriv in lösenordet i länken igen');
     if (!url) throw new Error('Ange en M3U-länk');
     const text = await fetchText(url, { ua: ua || undefined, timeout: 120000 });
     const n = (text.match(/#EXTINF/g) || []).length;
@@ -907,11 +919,15 @@ route('GET', '/api/services/title/:mt/:id', async (req, res, q, p) => {
 });
 
 catalog.isBusy = () => Date.now() - lastStreamAt < 15 * 60e3 || ff.activeSessions() > 0 || tsbuf.active() > 0;
+/* A device that plays (also straight from the provider, which the server never sees) says so every minute:
+   the match recording then waits instead of taking the one connection. */
+route('POST', '/api/watching', (req, res) => { lastStreamAt = Date.now(); ok(res, { ok: true }); });
+
 route('POST', '/api/prepare/:type/:id', (req, res, q, p) => {
   // Read the file's format in the background so pressing Play starts faster – but never at the cost of a
   // provider connection someone needs: one at a time, not while anything plays, not on 1–2 connection accounts.
   const maxConn = (catalog.data && catalog.data.maxConn) || 0;
-  const busy = preparing || Date.now() - lastStreamAt < 20000 || ff.activeSessions() > 0 || (maxConn && maxConn <= 2);
+  const busy = preparing || Date.now() - lastStreamAt < 20000 || ff.activeSessions() > 0 || tsbuf.matchSession() || (maxConn && maxConn <= 2);
   if (!busy && catalog.ready() && ff.has() && (p.type === 'movie' || p.type === 'episode')) {
     const src = catalog.streamUrl(p.type, decodeURIComponent(p.id), q.get('ext'));
     if (src && src.primary) {
@@ -1033,10 +1049,8 @@ function matchRecTick() {
       if (hs && (!hs.done || hs.full)) continue;
       if (!hs) continue; // removed by the viewer
       had.tries = had.tries || 0;
-      if (had.tries >= 6 || now - (had.restartAt || 0) < Math.min(8, 2 ** had.tries) * 60e3) continue;
-      had.restartAt = now;
-      had.tries++;
-      console.log('[match] inspelningen av', m.title, 'avbröts – startar om');
+      if (had.tries >= 6) { if (!had.gaveUp) { had.gaveUp = true; console.log('[match] inspelningen av', m.title, 'avbröts sex gånger – försöker inte mer'); } continue; }
+      if (now - (had.restartAt || 0) < Math.min(8, 2 ** had.tries) * 60e3) continue;
     }
     if (tsbuf.matchSession()) break; // the provider gives one connection: the recording that runs goes on
     // someone is watching (a conversion, or a stream started in the last few minutes): their picture isn't cut off;
@@ -1049,7 +1063,11 @@ function matchRecTick() {
     if (!src || !src.primary) continue;
     try {
       const sess = tsbuf.start(src.primary, { ua: catalog.ua(), maxMin: Math.ceil((m.e + MATCH_TAIL_MS - now) / 60e3), ch: m.title + ' på ' + (m.chName || m.ch.n), match: true });
-      if (had) { const old = tsbuf.get(had.sessId); had.sessId = sess.id; had.parts = (had.parts || []).concat(old ? [old.id] : []); }
+      if (had) {
+        console.log('[match] inspelningen av', m.title, 'avbröts – startar om');
+        had.restartAt = now; had.tries++;
+        const old = tsbuf.get(had.sessId); had.sessId = sess.id; had.parts = (had.parts || []).concat(old ? [old.id] : []);
+      }
       else matchRecs.set(key, { key, s: m.s, e: m.e, title: m.title, chId: m.ch.id, chName: m.chName || m.ch.n, sessId: sess.id });
     } catch (e) { console.error('[match]', e.message); }
   }
@@ -1162,7 +1180,8 @@ async function speedTest(req, res, q, url) {
   } catch (e) { err = e.message; }
   const ms = Math.max(1, Date.now() - (first || t0));
   let br = 0;
-  try { br = (await ff.probe(url, catalog.ua())).br || 0; } catch (_) { /* unknown */ }
+  // the device went away: no new provider connection for the probe (it is cached when the film played anyway)
+  if (!res.writableEnded && !res.destroyed) { try { br = (await ff.probe(url, catalog.ua())).br || 0; } catch (_) { /* unknown */ } }
   const mbps = bytes * 8 / ms / 1000;
   err = redactAcct(err);
   console.log('[hastighet] leverantören → servern', mbps.toFixed(1), 'Mbit/s', br ? '· filmen behöver ' + (br / 1e6).toFixed(1) + ' Mbit/s' : '', err ? '· ' + err : '');
@@ -1251,13 +1270,16 @@ route('POST', '/api/setup/test', async (req, res) => {
   const b = await readBody(req);
   try { ok(res, await testConnection(b)); } catch (e) {
     const x = b.xtream || {};
-    bad(res, redact(e.message === 'timeout' ? 'Servern svarade inte i tid' : e.message, [x.username, x.password, store.config.xtream.password]), 200);
+    const sent = [x.username, x.password].concat(linkSecrets(String((b.m3u && b.m3u.url) || '')));
+    bad(res, redactAcct(redact(e.message === 'timeout' ? 'Servern svarade inte i tid' : e.message, sent)), 200);
   }
 });
 
 route('POST', '/api/setup', async (req, res) => {
   if (!checkPin(req, res)) return;
   const b = await readBody(req);
+  const snap = JSON.stringify(store.config); // a refused save leaves everything as it was
+  const refuse = (msg) => { store.config = JSON.parse(snap); bad(res, msg, 400); };
   const c = store.config;
   const before = catalog.sig();
   if (b.source === 'm3u' || b.source === 'xtream') c.source = b.source;
@@ -1275,9 +1297,12 @@ route('POST', '/api/setup', async (req, res) => {
   if (b.m3u) {
     // links come back masked (password=***): the saved one is kept unless a new link was typed
     const url = String(b.m3u.url || '').trim();
-    if (!(url === '' && vault.isSealed(c.m3u.url)) && url !== maskUrl(c.m3u.url)) c.m3u.url = unmaskUrl(url, c.m3u.url);
     const epg = String(b.m3u.epgUrl || '').trim();
-    if (!(epg === '' && vault.isSealed(c.m3u.epgUrl)) && epg !== maskUrl(c.m3u.epgUrl)) c.m3u.epgUrl = unmaskUrl(epg, c.m3u.epgUrl);
+    const nu = !(url === '' && vault.isSealed(c.m3u.url)) && url !== maskUrl(c.m3u.url) ? unmaskUrl(url, c.m3u.url) : c.m3u.url;
+    const ne = !(epg === '' && vault.isSealed(c.m3u.epgUrl)) && epg !== maskUrl(c.m3u.epgUrl) ? unmaskUrl(epg, c.m3u.epgUrl) : c.m3u.epgUrl;
+    if (nu === null || ne === null) return refuse('Länken pekar på en annan server – skriv in lösenordet i länken igen');
+    c.m3u.url = nu;
+    c.m3u.epgUrl = ne;
     // An Xtream get.php link works better as Xtream (movies/series metadata, EPG)
     const xt = c.source === 'm3u' && b.preferXtream ? xtreamFromM3uUrl(c.m3u.url) : null;
     if (xt) { c.source = 'xtream'; c.xtream = xt; }
@@ -1301,7 +1326,7 @@ route('POST', '/api/setup', async (req, res) => {
       if (typeof o[k] !== 'string') continue;
       const v = o[k].trim().slice(0, 500);
       if (k === 'epgUrl' && (v === maskUrl(opt.epgUrl) || (v === '' && vault.isSealed(opt.epgUrl)))) continue;
-      opt[k] = k === 'epgUrl' ? unmaskUrl(v, opt.epgUrl) : v;
+      if (k === 'epgUrl') { const u = unmaskUrl(v, opt.epgUrl); if (u === null) return refuse('Tv-guide-länken pekar på en annan server – skriv in lösenordet igen'); opt[k] = u; } else opt[k] = v;
     }
   }
   const hasSource = c.source === 'm3u' ? !!c.m3u.url : !!(c.xtream.server && c.xtream.username && c.xtream.password);
@@ -1385,7 +1410,7 @@ const server = http.createServer(async (req, res) => {
       return res.end();
     }
     const px = /^\/px\/([A-Za-z0-9_-]+)(?:\/.*)?$/.exec(pathname);
-    if (px && (req.method === 'GET' || req.method === 'HEAD')) { lastStreamAt = Date.now(); return await proxy.handle(req, res, px[1], catalog.ua(), ingressBase(req)); }
+    if (px && (req.method === 'GET' || req.method === 'HEAD')) { if (proxy.isAllowed(proxy.untoken(px[1]))) lastStreamAt = Date.now(); return await proxy.handle(req, res, px[1], catalog.ua(), ingressBase(req)); }
     for (const r of routes) {
       if (r.method !== req.method && !(r.method === 'GET' && req.method === 'HEAD')) continue;
       const m = r.re.exec(pathname);
