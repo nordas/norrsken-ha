@@ -378,6 +378,8 @@ function linkSecrets(u) {
   for (const q of String(u).matchAll(/(?:username|user|password|passwd|pass|pwd|token|key)=([^&#]+)/gi)) out.push(q[1]);
   m = /\/(?:live|movie|series|hls|playlist|timeshift)\/([^/]+)\/([^/]+)(?:\/|$)/i.exec(u);
   if (m) out.push(m[1], m[2]);
+  // as written in the link and as they read decoded ("a%20b" and "a b")
+  for (const x of out.slice()) { try { const d = decodeURIComponent(x.replace(/\+/g, ' ')); if (d !== x) out.push(d); } catch (_) { /* not encoded */ } }
   return out;
 }
 /** A link sent back from the page: *** where the saved link had its password is filled in again from the saved one. */
@@ -393,12 +395,18 @@ function unmaskUrl(sent, saved) {
   try { a = new URL(sent); b = new URL(saved); } catch (_) { return null; }
   if (a.protocol !== b.protocol || a.host.toLowerCase() !== b.host.toLowerCase()) return null;
   if (a.password === '***') a.password = b.password;
-  for (const [k, v] of a.searchParams) if (v === '***') { const sv = b.searchParams.get(k); if (sv === null) return null; a.searchParams.set(k, sv); }
   const sp = a.pathname.split('/'), bp = b.pathname.split('/');
   for (let i = 0; i < sp.length; i++) if (sp[i] === '***') { if (bp[i] === undefined || sp.length !== bp.length) return null; sp[i] = bp[i]; }
   a.pathname = sp.join('/');
-  const out = a.toString();
-  return out.indexOf('***') >= 0 || out.indexOf('%2A%2A%2A') >= 0 ? null : out;
+  let out = a.origin.replace(/^([a-z]+:\/\/)/i, '$1' + (a.username ? a.username + (a.password ? ':' + a.password : '') + '@' : '')) + a.pathname + sent.replace(/^[^?#]*/, '');
+  // query: each name=*** gets that parameter's value from the saved link, as it was written there
+  let bad = false;
+  out = out.replace(/([?&])([^=&#]+)=\*\*\*/g, (m, sep, name) => {
+    const r = new RegExp('[?&]' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=([^&#]*)').exec(saved);
+    if (!r) { bad = true; return m; }
+    return sep + name + '=' + r[1];
+  });
+  return bad || out.indexOf('***') >= 0 ? null : out;
 }
 function maskUrl(u) {
   if (!u || vault.isSealed(u)) return '';
@@ -493,7 +501,7 @@ async function testConnection(body) {
   if (body.source === 'm3u') {
     let url = String((body.m3u && body.m3u.url) || '').trim();
     url = url && url === maskUrl(store.config.m3u.url) ? store.config.m3u.url : unmaskUrl(url, store.config.m3u.url); // shown masked: the saved one
-    if (url === null) throw new Error('Länken pekar på en annan server – skriv in lösenordet i länken igen');
+    if (url === null) throw new Error('Lösenordet i länken kan inte fyllas i automatiskt (ny server eller ändrad länk) – skriv in det igen');
     if (!url) throw new Error('Ange en M3U-länk');
     const text = await fetchText(url, { ua: ua || undefined, timeout: 120000 });
     const n = (text.match(/#EXTINF/g) || []).length;
@@ -730,7 +738,7 @@ route('POST', '/api/profile/:id/unlock', async (req, res, q, p) => {
   const codes = [];
   if (prof.pin) codes.push(prof.pin);
   if (from && from.kids && !prof.kids) for (const x of all) if (!x.kids && x.pin) codes.push(x.pin);
-  if (!codes.length || codes.includes(String(b.pin || ''))) return ok(res, { ok: true, token: prof.pin ? profToken(prof) : '' });
+  if (!codes.length || codes.includes(String(b.pin || ''))) { pinFails.delete(lockKey); return ok(res, { ok: true, token: prof.pin ? profToken(prof) : '' }); }
   pinFailed(lockKey);
   await new Promise(r => setTimeout(r, 600)); // slow down guessing
   bad(res, 'Fel PIN-kod', 403);
@@ -1052,6 +1060,7 @@ const MATCH_LEAD_MS = 5 * 60e3; // start a little before the puck drops
 const MATCH_TAIL_MS = 10 * 60e3; // and go on a little after the final whistle
 const KEEP_MATCH_MS = 24 * 3600e3;
 const matchRecs = new Map(); // team|start → { key, s, e, title, chId, chName, sessId }
+const matchStopped = new Map(); // team|start → when the viewer stopped it: not started again for that match
 let matchWaitLog = 0;
 
 /** A match is being recorded on another channel: the reason to refuse a new stream (the provider gives one). */
@@ -1073,6 +1082,7 @@ function recInfo(r, base) {
 function matchRecTick() {
   if (!catalog.ready()) return;
   const now = Date.now();
+  for (const [k, t] of matchStopped) if (now - t > KEEP_MATCH_MS) matchStopped.delete(k);
   for (const [k, r] of matchRecs) {
     if (now - r.s > KEEP_MATCH_MS) { for (const id of [r.sessId].concat(r.parts || [])) { const s = tsbuf.get(id); if (s) tsbuf.stop(s, 'ett dygn gånget'); } matchRecs.delete(k); }
   }
@@ -1082,6 +1092,7 @@ function matchRecTick() {
   for (const m of list) {
     const key = MATCH_TEAM + '|' + m.s;
     if (now < m.s - MATCH_LEAD_MS || now > m.e + MATCH_TAIL_MS) continue;
+    if (matchStopped.has(key)) continue; // the viewer said stop
     const had = matchRecs.get(key);
     if (had) {
       // still recording, or finished as planned: nothing to do; it stopped early (provider dropped it): go on
@@ -1095,7 +1106,7 @@ function matchRecTick() {
     if (tsbuf.matchSession()) break; // the provider gives one connection: the recording that runs goes on
     // someone is watching (a conversion, or a stream started in the last few minutes): their picture isn't cut off;
     // the recording starts as soon as the connection is free
-    if (ff.activeSessions() > 0 || Date.now() - lastStreamAt < 3 * 60e3) {
+    if (ff.activeSessions() > 0 || tsbuf.pauseActive() > 0 || Date.now() - lastStreamAt < 3 * 60e3) {
       if (now - (matchWaitLog || 0) > 5 * 60e3) { matchWaitLog = now; console.log('[match]', m.title, 'börjar snart – väntar med inspelningen tills ingen annan ström används'); }
       break;
     }
@@ -1122,6 +1133,7 @@ route('GET', '/api/matchrec', (req, res) => {
 route('POST', '/api/matchrec/stop', (req, res) => {
   let n = 0;
   for (const [k, r] of matchRecs) {
+    matchStopped.set(k, Date.now());
     for (const id of [r.sessId].concat(r.parts || [])) { // a recording that was restarted has earlier parts too
       const s = tsbuf.get(id);
       if (s && !s.dead) { tsbuf.stop(s, 'borttagen av användaren'); n++; }
@@ -1160,6 +1172,7 @@ route('POST', '/api/pause/start', async (req, res, q) => {
 });
 route('POST', '/api/pause/:id/alive', (req, res, q, p) => {
   const s = tsbuf.get(p.id);
+  if (s && !s.match) lastStreamAt = Date.now(); // someone is paused on a channel: still watching
   if (!s) return bad(res, 'slut', 404);
   ok(res, { ok: true, sec: tsbuf.length(s), full: s.full, done: s.done });
 });
@@ -1261,6 +1274,8 @@ route('GET', '/rx/play.m3u8', async (req, res, q) => {
   const t = q.get('t') || '';
   const url = proxy.untoken(t);
   if (!proxy.isAllowed(url)) return bad(res, 'forbidden', 403);
+  const busy = matchRecBusy('movie', '');
+  if (busy) return bad(res, busy, 409);
   const o = store.config.options;
   try {
     const s = await ff.hlsSession(url, { group: t, ss: Math.max(0, +q.get('ss') || 0), a: +q.get('a') || 0, ua: catalog.ua(),
@@ -1340,7 +1355,7 @@ route('POST', '/api/setup', async (req, res) => {
     const epg = String(b.m3u.epgUrl || '').trim();
     const nu = !(url === '' && vault.isSealed(c.m3u.url)) && url !== maskUrl(c.m3u.url) ? unmaskUrl(url, c.m3u.url) : c.m3u.url;
     const ne = !(epg === '' && vault.isSealed(c.m3u.epgUrl)) && epg !== maskUrl(c.m3u.epgUrl) ? unmaskUrl(epg, c.m3u.epgUrl) : c.m3u.epgUrl;
-    if (nu === null || ne === null) return refuse('Länken pekar på en annan server – skriv in lösenordet i länken igen');
+    if (nu === null || ne === null) return refuse('Lösenordet i länken kan inte fyllas i automatiskt (ny server eller ändrad länk) – skriv in det igen');
     c.m3u.url = nu;
     c.m3u.epgUrl = ne;
     // An Xtream get.php link works better as Xtream (movies/series metadata, EPG)
@@ -1366,7 +1381,7 @@ route('POST', '/api/setup', async (req, res) => {
       if (typeof o[k] !== 'string') continue;
       const v = o[k].trim().slice(0, 500);
       if (k === 'epgUrl' && (v === maskUrl(opt.epgUrl) || (v === '' && vault.isSealed(opt.epgUrl)))) continue;
-      if (k === 'epgUrl') { const u = unmaskUrl(v, opt.epgUrl); if (u === null) return refuse('Tv-guide-länken pekar på en annan server – skriv in lösenordet igen'); opt[k] = u; } else opt[k] = v;
+      if (k === 'epgUrl') { const u = unmaskUrl(v, opt.epgUrl); if (u === null) return refuse('Lösenordet i tv-guide-länken kan inte fyllas i automatiskt – skriv in det igen'); opt[k] = u; } else opt[k] = v;
     }
   }
   const hasSource = c.source === 'm3u' ? !!c.m3u.url : !!(c.xtream.server && c.xtream.username && c.xtream.password);
@@ -1468,6 +1483,8 @@ const server = http.createServer(async (req, res) => {
 server.keepAliveTimeout = 65000;
 
 function start() {
+  ff.cleanStart();
+  tsbuf.cleanStart();
   server.listen(PORT, HOST, () => {
     const urls = process.env.PUBLIC_URL ? [process.env.PUBLIC_URL.replace(/\/$/, '')] : lanUrls();
     console.log(`\n  ${store.config.options.appName || 'Norrsken'} ${pkg.version} kör på port ${PORT}`);
@@ -1487,4 +1504,4 @@ for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { store.flush(); 
 
 if (require.main === module) start();
 
-module.exports = { server, store, catalog, proxy, start, _pool: pool, _matchRecTick: matchRecTick, _streamIdle: () => { lastStreamAt = 0; ff.stopAll(); } };
+module.exports = { server, store, catalog, proxy, start, _pool: pool, _maskUrl: (u) => maskUrl(u), _unmaskUrl: (a, b) => unmaskUrl(a, b), _linkSecrets: (u) => linkSecrets(u), _matchRecTick: matchRecTick, _streamIdle: () => { lastStreamAt = 0; ff.stopAll(); } };

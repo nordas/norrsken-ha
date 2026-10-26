@@ -19,8 +19,9 @@ const IDLE_MS = 3 * 60e3; // the player checks in every 30 s, also while paused
 const MIN_FREE = 1.5e9; // leave room on the disk: Home Assistant needs it more than we do
 const sessions = new Map();
 
-// whatever an earlier run left behind
-try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch (_) { /* nothing */ }
+/** Whatever an earlier run left behind (called when the server starts, not when the module is loaded). */
+function cleanStart() { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch (_) { /* nothing */ } }
+cleanStart.done = false;
 
 function freeBytes(dir) {
   try {
@@ -155,5 +156,7 @@ setInterval(() => {
 }, 20e3).unref();
 
 function active() { return sessions.size; }
+/** Pause recordings someone is using (a paused channel), not match recordings. */
+function pauseActive() { let n = 0; for (const s of sessions.values()) if (!s.match && !s.dead) n++; return n; }
 
-module.exports = { start, get, stop, stopAll, matchSession, playlist, file, length, active, ROOT };
+module.exports = { start, get, stop, stopAll, matchSession, playlist, file, length, active, pauseActive, cleanStart, ROOT };

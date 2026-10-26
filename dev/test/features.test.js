@@ -396,6 +396,13 @@ test('match: the favourite\'s match is recorded from the start, kept for a day, 
   // someone watching (a stream started a moment ago): the recording waits instead of taking the connection
   app._matchRecTick();
   assert.equal((await get('/api/matchrec')).json.recs.length, 0, 'waits while a stream is in use');
+  // someone has paused a channel (a pause recording): still watching, the match waits
+  app._streamIdle();
+  const pz = (await post('/api/pause/start?profile=p1', { id: '111' })).json;
+  app._streamIdle();
+  app._matchRecTick();
+  assert.equal((await get('/api/matchrec')).json.recs.length, 0, 'waits while a channel is paused');
+  await post('/api/pause/' + pz.id + '/stop');
   app._streamIdle();
   app._matchRecTick();
   const r = (await get('/api/matchrec')).json;
@@ -422,4 +429,8 @@ test('match: the favourite\'s match is recorded from the start, kept for a day, 
   assert.ok(stopped.stopped >= 0);
   await until(async () => (await get(rec.url)).status === 404, 5000);
   assert.equal((await get('/api/matchrec')).json.active, null);
+  // stopped by the viewer: not started again for this match
+  app._streamIdle();
+  app._matchRecTick();
+  assert.equal((await get('/api/matchrec')).json.recs.length, 0, 'a stopped match stays stopped');
 });

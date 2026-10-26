@@ -1364,7 +1364,8 @@
   Player.prototype.restartProgramme = function () {
     var e = NS.epgFor(this.item.id);
     if (!this.item.arc || !e || !e.now) { NS.toast('Kanalen har inget arkiv att spola tillbaka i', 'info'); return; }
-    NS.router.replace(new Player({ item: NS.catchupItem(this.item, e.now, this.list) }));
+    var it = NS.catchupItem(this.item, e.now, this.list);
+    NS.guardStream(it, function () { NS.router.replace(new Player({ item: it })); });
   };
   /** Catch-up: how far one may go (a programme still on air can't go past "now"). */
   Player.prototype.cuMax = function () {
@@ -1674,7 +1675,7 @@
       if (!nx) { self.toLive(); return; }
       var n = NS.catchupItem(it.ch, nx, it.chList);
       n.fromPause = true;
-      NS.router.replace(new Player({ item: n, start: 0 }));
+      NS.guardStream(n, function () { NS.router.replace(new Player({ item: n, start: 0 })); });
     }).catch(function () { self.toLive(); });
   };
 
@@ -1686,7 +1687,8 @@
   /** From an archived programme back to the channel's live broadcast. */
   Player.prototype.toLive = function () {
     var it = this.item;
-    NS.router.replace(new Player({ item: it.ch, list: it.chList || [it.ch], cat: it.ch.cat }));
+    var ch = Object.assign({ t: 'live' }, it.ch);
+    NS.guardStream(ch, function () { NS.router.replace(new Player({ item: it.ch, list: it.chList || [it.ch], cat: it.ch.cat })); });
   };
 
   Player.prototype.zap = function (dir) {

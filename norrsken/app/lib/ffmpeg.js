@@ -231,8 +231,8 @@ const HLS_ROOT = process.env.NSK_HLS_DIR || path.join(os.tmpdir(), 'norrsken-hls
 const sessions = new Map(); // key -> session
 const starting = new Map(); // key -> promise of the session being set up (two requests at once get one ffmpeg)
 const HLS_MIN_FREE = 1.5e9; // leave room on the disk, like the pause recordings
-// whatever an earlier run left behind
-try { fs.rmSync(HLS_ROOT, { recursive: true, force: true }); } catch (_) { /* nothing */ }
+/** Whatever an earlier run left behind (called when the server starts, not when the module is loaded). */
+function cleanStart() { try { fs.rmSync(HLS_ROOT, { recursive: true, force: true }); } catch (_) { /* nothing */ } }
 function freeBytes(dir) {
   try { const st = fs.statfsSync(dir); return st.bavail * st.bsize; } catch (_) { return Infinity; }
 }
@@ -401,4 +401,4 @@ function sessionStat(group) {
   return best ? { speed: best.speed || 0, out: best.out || 0, done: !!best.done } : null;
 }
 
-module.exports = { stopGroup, stopAll, activeSessions, has, probe, remux, subs, langName, plan, playsAsIs, hlsSession, hlsPlaylist, hlsFile, sessionStat, aspectArgs };
+module.exports = { cleanStart, stopGroup, stopAll, activeSessions, has, probe, remux, subs, langName, plan, playsAsIs, hlsSession, hlsPlaylist, hlsFile, sessionStat, aspectArgs };
