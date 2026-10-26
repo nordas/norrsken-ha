@@ -684,3 +684,8 @@ html.m .player .tap-play { width: 84px; height: 84px; margin: -42px 0 0 -42px; f
 .player .sinfo .sv { margin: 1.2rem 0 0; max-width: 52rem; line-height: 1.4; font-weight: 600; }
 .player.lshift .osd .chan { bottom: 12.5rem; } /* above the live control row, not under it */
 .player.lshift .osd .tsrow { bottom: 34rem; }
+
+/* settings: the explanation on its own line, under the label */
+.tracks .ti.two { height: auto; min-height: 6.6rem; padding: 1.1rem 2rem; }
+.tracks .ti.two .tl { display: flex; flex-direction: column; gap: .3rem; min-width: 0; }
+.tracks .ti.two small { font-size: 1.8rem; font-weight: 500; opacity: .7; }

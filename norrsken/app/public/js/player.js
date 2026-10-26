@@ -35,13 +35,13 @@
   /** What a source is, in words, for the player choice. */
   function srcLabel(x) {
     if (x.kind === 'remux') return 'Anpassad av servern';
-    if (x.kind === 'ts') return x.direct ? 'Reserv: direkt (MPEG-TS)' : 'Reserv: via servern (MPEG-TS)';
+    if (x.kind === 'ts') return x.direct ? 'Reserv, direkt' : 'Reserv, via servern';
     return x.direct ? 'Direkt från leverantören' : 'Via servern';
   }
   /** One line on when to pick it. */
   function srcNote(x) {
     if (x.kind === 'remux') return 'för filer skärmen inte spelar själv';
-    if (x.kind === 'ts') return 'om bilden hackar eller fryser';
+    if (x.kind === 'ts') return 'MPEG-TS · om bilden hackar eller fryser';
     return x.direct ? 'snabbast' : 'stabilast';
   }
   var SUB_SIZES = [['s', 'Liten'], ['m', 'Normal'], ['l', 'Stor'], ['xl', 'Extra stor']];
@@ -103,7 +103,7 @@
       this.osd.appendChild(this.lrow);
       // controls under the bar, like TV4 Play: pause, 10 s back and forward, sound and subtitles
       var lb = function (icon, label, fn) { return h('button', { class: 'btn', 'aria-label': label || icon, onclick: function (e) { e.stopPropagation(); fn(); self.showOsd(); } }, [NS.icon(icon), label || '']); };
-      this.lPP = lb('pause', '', function () { self.livePlayPause(); });
+      this.lPP = lb('pause', 'Pausa', function () { self.livePlayPause(); });
       this.lSubB = lb('sub', '', function () { self.openTracks(); });
       this.lAudB = lb('audio', '', function () { self.openTracks(); });
       this.lGo = h('button', { class: 'tsgo', onclick: function (e) { e.stopPropagation(); self.goLive(); } }, ['Titta live', h('span', { class: 'arr', text: ' →' })]);
@@ -1125,6 +1125,11 @@
     b.push({ id: 'restart', icon: 'restart', label: 'Från början' });
     if (this.item.t === 'catchup') b.push({ id: 'live', icon: 'live', label: 'Gå till live' });
     b.push({ id: 'settings', icon: 'settings', label: 'Inställningar' });
+    if (document.documentElement.classList.contains('m')) {
+      // a phone: an icon with a short word under it, so all of them fit in one row
+      var short = { pp: this.video.paused ? 'Spela' : 'Paus', rw: '−10 s', ff: '+10 s', subs: 'Text', audio: 'Ljud', next: 'Nästa', restart: 'Början', live: 'Live', settings: 'Mer' };
+      b.forEach(function (x) { if (short[x.id]) x.label = short[x.id]; });
+    }
     this.btns = b;
     this.obtns.innerHTML = '';
     this.btnEls = b.map(function (x, i) {
@@ -1592,7 +1597,7 @@
     var rec = !!(ts && ts.mode === 'rec' && ts.url);
     // on live TV the bar and the controls are always there, as on TV4 Play
     this.el.classList.add('lshift');
-    if (this.lPP) { var pausedNow = rec ? !ts.playing || this.video.paused : this.video.paused; this.lPP.innerHTML = ''; this.lPP.appendChild(NS.icon(pausedNow ? 'play' : 'pause')); }
+    if (this.lPP) { var pausedNow = rec ? !ts.playing || this.video.paused : this.video.paused; this.lPP.innerHTML = ''; this.lPP.appendChild(NS.icon(pausedNow ? 'play' : 'pause')); this.lPP.appendChild(document.createTextNode(pausedNow ? 'Spela' : 'Pausa')); }
     this.paintTrackBtns();
     if (this.lDrag) return;
     if (!rec) {
@@ -1822,7 +1827,8 @@
       if (!list.length) return;
       box.appendChild(h('h3', { text: title }));
       list.forEach(function (t) {
-        var e = h('div', { class: 'ti', onclick: function () { self.ti = self.trItems.indexOf(t); self.pickTrack(); } }, [h('span', { class: 'chk' }, t.on ? NS.icon('check') : null), t.label, t.note ? h('span', { class: 'note', text: t.note }) : null]);
+        var e = h('div', { class: 'ti two', onclick: function () { self.ti = self.trItems.indexOf(t); self.pickTrack(); } }, [h('span', { class: 'chk' }, t.on ? NS.icon('check') : null),
+          h('span', { class: 'tl' }, [h('span', { text: t.label }), t.note ? h('small', { text: t.note }) : null])]);
         t.el = e; t.group = title;
         self.trItems.push(t);
         box.appendChild(e);

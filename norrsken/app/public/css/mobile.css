@@ -390,8 +390,14 @@ html .player.touch.lshift .osd .chan { bottom: calc(64px + env(safe-area-inset-b
 .player.touch .sinfo .sv { max-width: none; margin-top: 8px; }
 
 /* film controls on a phone: seven round buttons fit without scrolling off the edges */
-@media (orientation: portrait) {
-  html.m .player.touch .osd .obtns { left: 8px; right: 8px; gap: 4px; overflow: visible; justify-content: space-between; }
-  html.m .player.touch .osd .obtns .btn { width: 44px; height: 44px; flex: 0 0 44px; }
-}
+/* film controls on a phone (both ways round): icons with a short word under each, one row that fits */
+html.m .player.touch .osd .obtns { left: 8px; right: 8px; gap: 2px; overflow: visible; justify-content: space-between; }
+html.m .player.touch .osd .obtns .btn { flex: 1 1 0; min-width: 0; max-width: 72px; width: auto; height: auto; padding: 6px 0; border-radius: 12px; background: none; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font-size: 11px; font-weight: 600; white-space: nowrap; overflow: hidden; }
+html.m .player.touch .osd .obtns .btn svg { width: 22px; height: 22px; font-size: 22px; flex: none; }
+html.m .player.touch .osd .obtns .btn.focus, html.m .player.touch .osd .obtns .btn:active { background: rgba(255,255,255,.14); color: #fff; }
+.player.touch .tracks .ti.two { height: auto; min-height: 46px; padding: 8px 12px; }
+.player.touch .tracks .ti.two small { font-size: 12px; }
 .countdown .cd-btns .btn { height: 48px; font-size: 16px; padding: 0 22px; }
+/* the taller button row (icon + word): time and seek bar sit above it */
+html.m .player.touch .osd .times { bottom: calc(68px + env(safe-area-inset-bottom)); }
+html.m .player.touch .osd .bar { bottom: calc(90px + env(safe-area-inset-bottom)); }
