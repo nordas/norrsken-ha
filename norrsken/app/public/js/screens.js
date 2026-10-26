@@ -16,6 +16,7 @@
   NS.playItem = function (item, opts) {
     opts = opts || {};
     var open = function () { NS.router.push(new NS.Player(Object.assign({ item: item }, opts))); };
+    if (!opts.rec && item.t !== 'live') { var open0 = open; open = function () { NS.guardStream(item, open0); }; }
     if (item.t === 'live' && !opts.rec) { NS.guardStream(item, open); return; }
     // a film on a phone: the 1080p version when the 4K one is what was picked from a row
     if (item.t === 'movie' && !opts.keepVersion && document.documentElement.classList.contains('m')) {
@@ -31,10 +32,10 @@
 
   /** A match is being recorded on one channel: starting another live channel asks first (yes = stop the recording). */
   NS.guardStream = function (item, go) {
-    if (!item || item.t !== 'live') { go(); return; }
+    if (!item || (item.t !== 'live' && item.t !== 'movie' && item.t !== 'episode' && item.t !== 'catchup')) { go(); return; }
     NS.api.get('api/matchrec' + NS.pq()).then(function (r) {
       var a = r && r.active;
-      if (!a || a.chId === item.id) { go(); return; }
+      if (!a || (item.t === 'live' && a.chId === item.id)) { go(); return; }
       NS.confirm({ title: 'Matchen spelas in', text: a.title + ' spelas in på ' + a.chName + '. Din leverantör kan bara skicka en kanal åt gången, så inspelningen måste stoppas för att byta kanal. Det som redan spelats in tas bort.',
         buttons: [{ label: 'Fortsätt spela in', value: false }, { label: 'Stoppa och byt kanal', value: true }], focus: 0, cancel: false }).then(function (yes) {
         if (!yes) return;

@@ -365,20 +365,35 @@ const vaultClear = (v) => (vault.isSealed(v) ? '' : v);
 /** Text that may contain the provider's address: the user name and password taken out. */
 function redactAcct(msg) {
   const c = store.config;
-  return redact(msg, [c.xtream.username, c.xtream.password].filter(x => x && !vault.isSealed(x)));
+  const secrets = [c.xtream.username, c.xtream.password];
+  for (const u of [c.m3u.url, c.m3u.epgUrl, c.options.epgUrl]) secrets.push(...linkSecrets(u));
+  return maskUrl(redact(msg, secrets.filter(x => x && x.length > 2 && !vault.isSealed(x))));
+}
+/** The account parts of a link: user:pass@, ?password=/token=…, /live/<user>/<pass>/. */
+function linkSecrets(u) {
+  const out = [];
+  if (!u || vault.isSealed(u)) return out;
+  let m = /^[a-z]+:\/\/([^:@/]+):([^@/]+)@/i.exec(u);
+  if (m) out.push(m[1], m[2]);
+  for (const q of String(u).matchAll(/(?:username|user|password|passwd|pass|pwd|token|key)=([^&#]+)/gi)) out.push(q[1]);
+  m = /\/(?:live|movie|series|hls|playlist|timeshift)\/([^/]+)\/([^/]+)(?:\/|$)/i.exec(u);
+  if (m) out.push(m[1], m[2]);
+  return out;
 }
 /** A link sent back from the page: *** where the saved link had its password is filled in again from the saved one. */
 function unmaskUrl(sent, saved) {
   if (!sent || sent.indexOf('***') < 0 || !saved || vault.isSealed(saved)) return sent;
-  const q = /(?:password|pass|pwd)=([^&#]*)/i.exec(saved);
-  const p = /\/(?:live|movie|series|get\.php|xmltv\.php)\/[^/]+\/([^/]+)\//i.exec(saved);
-  const secret = (q && q[1]) || (p && p[1]) || '';
+  const q = /(?:password|passwd|pass|pwd|token|key)=([^&#]*)/i.exec(saved);
+  const a = /^[a-z]+:\/\/[^:@/]+:([^@/]+)@/i.exec(saved);
+  const p = /\/(?:live|movie|series|hls|playlist|timeshift)\/[^/]+\/([^/]+)(?:\/|$)/i.exec(saved);
+  const secret = (q && q[1]) || (a && a[1]) || (p && p[1]) || '';
   return secret ? sent.split('***').join(secret) : sent;
 }
 function maskUrl(u) {
   if (!u || vault.isSealed(u)) return '';
-  let s = String(u).replace(/((?:password|pass|pwd)=)[^&#]*/gi, '$1***');
-  s = s.replace(/(\/(?:live|movie|series|get\.php|xmltv\.php)\/[^/]+\/)[^/]+\//i, '$1***/');
+  let s = String(u).replace(/((?:password|passwd|pass|pwd|token|key)=)[^&#\s]*/gi, '$1***');
+  s = s.replace(/^([a-z]+:\/\/[^:@/]+:)[^@/]+@/i, '$1***@');
+  s = s.replace(/(\/(?:live|movie|series|hls|playlist|timeshift)\/[^/]+\/)[^/\s]+(\/|$)/gi, '$1***$2');
   return s;
 }
 function publicConfig() {
@@ -915,6 +930,8 @@ route('GET', '/api/stream/:type/:id', async (req, res, q, p) => {
   const prof = profileOf(q);
   if (prof.kids && !catalog.allowed(type, id, prof)) return bad(res, 'Det här finns inte i barnprofilen', 403);
   if (!pinOk(q, prof)) return bad(res, 'Profilen är låst – välj den igen och ange PIN-koden', 401);
+  const busy = matchRecBusy(type, id);
+  if (busy) return bad(res, busy, 409);
   lastStreamAt = Date.now();
   let src = catalog.streamUrl(type, id, q.get('ext'));
   if (type === 'live' && q.get('start')) src = catalog.timeshiftUrl(id, +q.get('start'), +q.get('dur') || 60) || src;
@@ -981,6 +998,15 @@ const KEEP_MATCH_MS = 24 * 3600e3;
 const matchRecs = new Map(); // team|start → { key, s, e, title, chId, chName, sessId }
 let matchWaitLog = 0;
 
+/** A match is being recorded on another channel: the reason to refuse a new stream (the provider gives one). */
+function matchRecBusy(type, id) {
+  const ms = tsbuf.matchSession();
+  if (!ms) return '';
+  const r = [...matchRecs.values()].find(x => x.sessId === ms.id);
+  if (r && type === 'live' && r.chId === id) return '';
+  return 'Matchen ' + (r ? r.title + ' ' : '') + 'spelas in. Stoppa inspelningen först (leverantören skickar bara en kanal åt gången).';
+}
+
 function recInfo(r, base) {
   const s = r && tsbuf.get(r.sessId);
   if (!s) return null;
@@ -1006,8 +1032,10 @@ function matchRecTick() {
       const hs = tsbuf.get(had.sessId);
       if (hs && (!hs.done || hs.full)) continue;
       if (!hs) continue; // removed by the viewer
-      if (now - (had.restartAt || 0) < 60e3) continue;
+      had.tries = had.tries || 0;
+      if (had.tries >= 6 || now - (had.restartAt || 0) < Math.min(8, 2 ** had.tries) * 60e3) continue;
       had.restartAt = now;
+      had.tries++;
       console.log('[match] inspelningen av', m.title, 'avbröts – startar om');
     }
     if (tsbuf.matchSession()) break; // the provider gives one connection: the recording that runs goes on

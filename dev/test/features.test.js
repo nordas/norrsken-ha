@@ -407,6 +407,9 @@ test('match: the favourite\'s match is recorded from the start, kept for a day, 
   if (rec.recording) assert.equal(other.status, 409, JSON.stringify(other.json));
   const same = await post('/api/pause/start?profile=p1', { id: rec.chId });
   if (rec.recording) assert.equal(same.json && same.json.id, rec.id);
+  // the server refuses another stream itself too (not only the app's question)
+  const st = await get('/api/stream/live/111?profile=p1');
+  if ((await get('/api/matchrec')).json.active) assert.equal(st.status, 409, JSON.stringify(st.json));
   // the playlist is there, growing from the start
   const pl = await until(async () => { const x = await get(rec.url); return x.status === 200 && x.text; }, 30000);
   assert.match(pl, /#EXT-X-PLAYLIST-TYPE:EVENT/);
