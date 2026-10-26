@@ -187,7 +187,7 @@ summary { cursor: pointer; font-weight: 650; color: #c9d3df; padding: 10px 0; }
     <h2>Paus i live-tv</h2>
     <label for="pauseMode">När du pausar en kanal</label>
     <select id="pauseMode">
-      <option value="auto">Fortsätt där du pausade (arkivet, annars inspelning på servern)</option>
+      <option value="auto">Fortsätt där du pausade</option>
       <option value="archive">Bara kanaler med arkiv</option>
       <option value="off">Av – fortsätter från live</option>
     </select>
@@ -207,7 +207,7 @@ summary { cursor: pointer; font-weight: 650; color: #c9d3df; padding: 10px 0; }
       <label class="toggle"><span>Prime Video</span><span class="sw"><input type="checkbox" value="prime"><i></i></span></label>
     </div>
     <label for="tmdbKey">TMDB-nyckel</label>
-    <input type="password" id="tmdbKey" placeholder="API-nyckel eller läsnyckel (Read Access Token)" autocapitalize="off" spellcheck="false" autocomplete="off">
+    <input type="password" id="tmdbKey" placeholder="API-nyckel eller läsnyckel" autocapitalize="off" spellcheck="false" autocomplete="off">
     <p class="help" id="tmdbHelp">Gratis: skapa ett konto på themoviedb.org, gå till Inställningar → API och kopiera API-nyckeln. Utan nyckel visas bara det som finns i ditt eget utbud.</p>
   </section>
 
@@ -541,7 +541,7 @@ summary { cursor: pointer; font-weight: 650; color: #c9d3df; padding: 10px 0; }
     [].forEach.call(document.querySelectorAll('#svcList input'), function (x) { x.checked = sv.indexOf(x.value) >= 0; });
     $('tmdbKey').value = '';
     $('tmdbKey').dataset.saved = o.tmdbKey ? '1' : '';
-    $('tmdbKey').placeholder = o.tmdbKey ? 'En nyckel är sparad – lämna tomt för att behålla den' : 'API-nyckel eller läsnyckel (Read Access Token)';
+    $('tmdbKey').placeholder = o.tmdbKey ? 'En nyckel är sparad – lämna tomt för att behålla den' : 'API-nyckel eller läsnyckel';
     profiles = (cfg.profiles || []).map(function (p) { return { id: p.id, name: p.name, color: p.color, kids: p.kids, hasPin: p.hasPin }; });
     renderProfiles();
     setSource(cfg.source || 'xtream');

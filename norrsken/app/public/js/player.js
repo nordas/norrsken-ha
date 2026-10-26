@@ -1221,6 +1221,9 @@
   Player.prototype.paintTracks = function () {
     var self = this;
     this.trItems.forEach(function (t, i) { t.el.classList.toggle('focus', i === self.ti); });
+    // a long list (the settings) scrolls so the chosen row is always in view
+    var f = this.trItems[this.ti];
+    if (f && f.el && f.el.scrollIntoView) { try { f.el.scrollIntoView({ block: 'nearest' }); } catch (e) { f.el.scrollIntoView(false); } }
   };
   Player.prototype.pickTrack = function () {
     var t = this.trItems[this.ti];
@@ -2073,7 +2076,11 @@
       else if (a === 'down' || a === 'chdn') this.zap(-1);
       else if (a === 'ok' && !this.osdOn) this.showOsd();
       else if (a === 'ok' || a === 'left') this.openChannels();
-      else if (a === 'right') this.openTracks();
+      else if (a === 'right') {
+        var o = this.trackOptions();
+        if (o.audio.length > 1 || o.subs.length > 1) this.openTracks();
+        else { this.showOsd(); NS.toast('Den här kanalen har inga fler ljudspår eller undertexter', 'info'); }
+      }
       else if (a === 'yellow' || a === 'num0' && !this.numBuf) { this.lastChannel(); }
       else if (a === 'back') this.exit();
       else if (a.indexOf('num') === 0) this.numKey(a.slice(3));
