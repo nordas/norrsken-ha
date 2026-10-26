@@ -52,7 +52,7 @@
     this.item = opts.item;
     this.live = this.item.t === 'live';
     // a match recording (the whole match, on the server): play it from its start or at its live edge
-    if (opts.rec && this.live) this.tshift = { mode: 'rec', match: true, chId: this.item.id, id: opts.rec.id, url: opts.rec.url, at: Date.now(), playing: true, pos: 0, edge: !!opts.rec.edge };
+    if (opts.rec && this.live) this.tshift = { mode: 'rec', match: true, chId: this.item.id, id: opts.rec.id, url: opts.rec.url, at: Date.now(), playing: true, pos: 0, edge: !!opts.rec.edge, done: opts.rec.recording === false };
     this.list = opts.list && opts.list.length ? opts.list.slice() : [this.item];
     this.cat = opts.cat || this.item.cat || null;
     this.series = opts.series || null;
@@ -1447,9 +1447,7 @@
       var it = NS.catchupItem(this.item, prog, this.list);
       it.fromPause = true;
       var from = Math.max(0, (ts.at - prog.s) / 1000 - 8);
-      this.tshift = null;
-      this.livePausedAt = 0;
-      NS.router.replace(new Player({ item: it, start: from }));
+      NS.guardStream(it, function () { self.tshift = null; self.livePausedAt = 0; NS.router.replace(new Player({ item: it, start: from })); });
       return;
     }
     if (ts && ts.mode === 'rec') {
@@ -1543,6 +1541,8 @@
     NS.api.get('api/matchrec' + NS.pq()).then(function (r) {
       var a = (r.recs || []).find(function (x) { return x.id === ts.id; });
       if (self.tshift !== ts) return;
+      // the match is over and the recording finished: live is the channel itself again
+      if (a && !a.recording) { ts.done = true; self.endTshift(); self.startSource(0); return; }
       // a few seconds back from the newest piece: the playlist may be a little behind what the server has written
       ts.pos = a ? Math.max(0, a.sec - 6) : 0;
       ts.playing = true;
@@ -1665,6 +1665,7 @@
     el.appendChild(h('b', { text: '−' + NS.fmtTime(behind) }));
     var note = '';
     if (ts && ts.mode === 'arc') note = 'Fortsätter från arkivet där du pausade';
+    else if (ts && ts.mode === 'rec' && ts.match) note = ts.done ? 'Inspelad match' : 'Matchen spelas in';
     else if (ts && ts.mode === 'rec') note = ts.full ? 'Inspelningen är full (' + ts.max + ' min)' : ts.url ? (paused ? 'Spelar in medan du pausar · högst ' + ts.max + ' min' : 'Spelas in · högst ' + ts.max + ' min') : 'Startar inspelningen…';
     else if (this.livePausedAt) note = 'Bilden står still';
     if (note) el.appendChild(h('span', { class: 'ts-note', text: note }));

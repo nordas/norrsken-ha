@@ -245,6 +245,10 @@ test('pin-locked profile: unlock gives a token, playback needs it, kids need a p
   assert.equal((await post('/api/profile/p3/unlock', { pin: '', from: 'p2' })).status, 403);
   assert.equal((await post('/api/profile/p3/unlock', { pin: '1234', from: 'p2' })).status, 200);
   assert.equal((await post('/api/profile/p3/unlock', { pin: '' })).status, 200);
+  // wrong guesses lock that profile only: a child guessing at one profile doesn't lock the others
+  for (let i = 0; i < 5; i++) assert.equal((await post('/api/profile/p1/unlock', { pin: '000' + i })).status, 403);
+  assert.equal((await post('/api/profile/p1/unlock', { pin: '1234' })).status, 429, 'p1 locked after five wrong');
+  assert.equal((await post('/api/profile/p3/unlock', { pin: '1234', from: 'p2' })).status, 200, 'p3 still opens');
   // back to no PIN for the remaining tests
   await post('/api/setup', { source: 'xtream', xtream: { server: prov, username: 'demo', password: '' }, profiles: profiles.slice(0, 2).map((p, i) => i ? p : Object.assign({}, p, { pin: '' })) });
   await until(async () => { const s = (await get('/api/status')).json; return s.ready && !s.loading && s; });

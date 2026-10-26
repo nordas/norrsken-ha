@@ -240,8 +240,8 @@
     meta.appendChild(h('span', { text: m.chName || m.ch.n }));
     meta.appendChild(h('span', { text: NS.fmtClock(m.s) + '–' + NS.fmtClock(m.e) }));
     if (m.chans && m.chans.length > 1) meta.appendChild(h('span', { class: 'soft', text: 'på ' + m.chans.length + ' kanaler' }));
-    if (m.recWait) meta.appendChild(h('span', { class: 'soft', text: m.recWait }));
     t.appendChild(meta);
+    if (m.recWait) t.appendChild(h('div', { class: 'recwait', text: m.recWait })); // its own line: no separator dot
     if (live) t.appendChild(h('div', { class: 'sprog' }, NS.progEl(NS.livePct(m))));
     if (m.d) t.appendChild(h('div', { class: 'desc', text: m.d }));
     this.hint.innerHTML = '';

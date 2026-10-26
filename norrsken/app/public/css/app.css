@@ -96,6 +96,7 @@ svg.i.fill { fill: currentColor; stroke: none; }
 .billboard h1.long { font-size: 7.4rem; }
 .billboard .meta { margin-top: 2.4rem; }
 .billboard .desc { margin-top: 1.6rem; font-size: 2.5rem; line-height: 1.4; color: var(--text-2); max-width: 74rem; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.billboard .recwait { margin-top: 1rem; font-size: 2.2rem; font-weight: 600; color: var(--text-2); }
 .billboard .hint { position: absolute; right: 5rem; bottom: 5.6rem; display: flex; gap: 1.4rem; opacity: 0; transition: opacity 200ms; }
 .billboard.focus .hint { opacity: 1; }
 

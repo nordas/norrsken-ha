@@ -58,7 +58,7 @@
 
   /** The match recording of a favourite's match: from its start, or at its live edge. */
   NS.watchRec = function (m, edge) {
-    NS.router.push(new NS.Player({ item: m.ch, list: m.chans || [m.ch], cat: m.ch.cat, rec: { id: m.rec.id, url: m.rec.url, edge: !!edge } }));
+    NS.router.push(new NS.Player({ item: m.ch, list: m.chans || [m.ch], cat: m.ch.cat, rec: { id: m.rec.id, url: m.rec.url, edge: !!edge, recording: m.rec.recording } }));
   };
 
   /** A favourite's match: the recording when there is one, the channel when it is on, a countdown when it is not started yet. */

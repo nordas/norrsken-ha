@@ -455,6 +455,9 @@ test('one connection: a paused channel blocks the speed test, a new stream ends 
   assert.ok(pz.id, JSON.stringify(pz));
   const sp = await get('/api/speedtest?t=' + encodeURIComponent(st.t) + '&sec=3');
   assert.equal(sp.status, 409, 'the speed test waits for the paused channel');
+  // a preview (start page, guide) gives way to the paused channel instead of ending it
+  assert.equal((await get('/api/stream/live/112?profile=p1&pv=1')).status, 409);
+  assert.equal(tsbuf.pauseActive(), 1, 'the pause goes on');
   await get('/api/stream/movie/1002?profile=p1&ext=mkv&caps=vp9,opus');
   assert.equal(tsbuf.pauseActive(), 0, 'a new stream ends the paused channel');
   assert.equal((await get(pz.url)).status, 404);

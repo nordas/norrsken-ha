@@ -579,7 +579,7 @@ function sportNow(prof, st, base = '') {
   const r = matchRecs.get(m.team.id + '|' + m.s);
   const rec = r ? recInfo(r, base) : null;
   // not recorded yet because something else plays (the provider gives one connection): say so instead of nothing
-  const waits = !(rec && rec.recording) && Date.now() - (matchWait.get(m.team.id + '|' + m.s) || 0) < 90e3;
+  const waits = !rec && Date.now() - (matchWait.get(m.team.id + '|' + m.s) || 0) < 90e3;
   return Object.assign({}, m, { rec, recWait: waits ? 'Spelas in när det som spelas nu stängs' : '' });
 }
 const sportCache = new Map();
