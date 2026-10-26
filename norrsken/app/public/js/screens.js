@@ -36,8 +36,9 @@
     NS.api.get('api/matchrec' + NS.pq()).then(function (r) {
       var a = r && r.active;
       if (!a || (item.t === 'live' && a.chId === item.id)) { go(); return; }
-      NS.confirm({ title: 'Matchen spelas in', text: a.title + ' spelas in på ' + a.chName + '. Din leverantör kan bara skicka en kanal åt gången, så inspelningen måste stoppas för att byta kanal. Det som redan spelats in tas bort.',
-        buttons: [{ label: 'Fortsätt spela in', value: false }, { label: 'Stoppa och byt kanal', value: true }], focus: 0, cancel: false }).then(function (yes) {
+      var live = item.t === 'live';
+      NS.confirm({ title: 'Matchen spelas in', text: a.title + ' spelas in på ' + a.chName + '. Din leverantör kan bara skicka en sak åt gången, så inspelningen måste stoppas för att ' + (live ? 'byta kanal' : 'starta ' + (item.n || 'det här')) + '. Det som redan spelats in tas bort.',
+        buttons: [{ label: 'Fortsätt spela in', value: false }, { label: live ? 'Stoppa och byt kanal' : 'Stoppa och spela', value: true }], focus: 0, cancel: false }).then(function (yes) {
         if (!yes) return;
         NS.api.post('api/matchrec/stop' + NS.pq(), {}).then(go, go);
       });
