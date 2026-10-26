@@ -367,6 +367,14 @@ function redactAcct(msg) {
   const c = store.config;
   return redact(msg, [c.xtream.username, c.xtream.password].filter(x => x && !vault.isSealed(x)));
 }
+/** A link sent back from the page: *** where the saved link had its password is filled in again from the saved one. */
+function unmaskUrl(sent, saved) {
+  if (!sent || sent.indexOf('***') < 0 || !saved || vault.isSealed(saved)) return sent;
+  const q = /(?:password|pass|pwd)=([^&#]*)/i.exec(saved);
+  const p = /\/(?:live|movie|series|get\.php|xmltv\.php)\/[^/]+\/([^/]+)\//i.exec(saved);
+  const secret = (q && q[1]) || (p && p[1]) || '';
+  return secret ? sent.split('***').join(secret) : sent;
+}
 function maskUrl(u) {
   if (!u || vault.isSealed(u)) return '';
   let s = String(u).replace(/((?:password|pass|pwd)=)[^&#]*/gi, '$1***');
@@ -422,7 +430,7 @@ async function testConnection(body) {
   const ua = (body.options && body.options.userAgent) || store.config.options.userAgent || '';
   if (body.source === 'm3u') {
     let url = String((body.m3u && body.m3u.url) || '').trim();
-    if (url && url === maskUrl(store.config.m3u.url)) url = store.config.m3u.url; // shown masked, means the saved one
+    url = url && url === maskUrl(store.config.m3u.url) ? store.config.m3u.url : unmaskUrl(url, store.config.m3u.url); // shown masked: the saved one
     if (!url) throw new Error('Ange en M3U-länk');
     const text = await fetchText(url, { ua: ua || undefined, timeout: 120000 });
     const n = (text.match(/#EXTINF/g) || []).length;
@@ -1099,6 +1107,7 @@ route('GET', '/api/speedtest', async (req, res, q) => {
   const url = proxy.untoken(q.get('t'));
   if (!proxy.isAllowed(url)) return bad(res, 'forbidden', 403);
   if (tsbuf.matchSession()) return bad(res, 'En match spelas in just nu – testa efter matchen', 409);
+  if (ff.activeSessions() > 0) return bad(res, 'Något annat spelas via servern just nu – testa när det är stängt', 409);
   if (speedBusy) return bad(res, 'Ett test pågår redan', 409);
   speedBusy = true;
   try { await speedTest(req, res, q, url); } finally { speedBusy = false; }
@@ -1108,7 +1117,9 @@ async function speedTest(req, res, q, url) {
   const t0 = Date.now();
   let bytes = 0, first = 0, err = '';
   try {
-    const { r, done } = await require('./lib/util').fetchRaw(url, { ua: catalog.ua(), timeout: (sec + 10) * 1000 });
+    const ac = new AbortController();
+    res.on('close', () => ac.abort());
+    const { r, done } = await require('./lib/util').fetchRaw(url, { ua: catalog.ua(), timeout: (sec + 10) * 1000, signal: ac.signal });
     try {
       if (!r.ok) throw new Error('leverantören svarade ' + r.status);
       const rd = r.body.getReader();
@@ -1236,9 +1247,9 @@ route('POST', '/api/setup', async (req, res) => {
   if (b.m3u) {
     // links come back masked (password=***): the saved one is kept unless a new link was typed
     const url = String(b.m3u.url || '').trim();
-    if (!(url === '' && vault.isSealed(c.m3u.url)) && url !== maskUrl(c.m3u.url)) c.m3u.url = url;
+    if (!(url === '' && vault.isSealed(c.m3u.url)) && url !== maskUrl(c.m3u.url)) c.m3u.url = unmaskUrl(url, c.m3u.url);
     const epg = String(b.m3u.epgUrl || '').trim();
-    if (!(epg === '' && vault.isSealed(c.m3u.epgUrl)) && epg !== maskUrl(c.m3u.epgUrl)) c.m3u.epgUrl = epg;
+    if (!(epg === '' && vault.isSealed(c.m3u.epgUrl)) && epg !== maskUrl(c.m3u.epgUrl)) c.m3u.epgUrl = unmaskUrl(epg, c.m3u.epgUrl);
     // An Xtream get.php link works better as Xtream (movies/series metadata, EPG)
     const xt = c.source === 'm3u' && b.preferXtream ? xtreamFromM3uUrl(c.m3u.url) : null;
     if (xt) { c.source = 'xtream'; c.xtream = xt; }
@@ -1262,7 +1273,7 @@ route('POST', '/api/setup', async (req, res) => {
       if (typeof o[k] !== 'string') continue;
       const v = o[k].trim().slice(0, 500);
       if (k === 'epgUrl' && (v === maskUrl(opt.epgUrl) || (v === '' && vault.isSealed(opt.epgUrl)))) continue;
-      opt[k] = v;
+      opt[k] = k === 'epgUrl' ? unmaskUrl(v, opt.epgUrl) : v;
     }
   }
   const hasSource = c.source === 'm3u' ? !!c.m3u.url : !!(c.xtream.server && c.xtream.username && c.xtream.password);
@@ -1346,7 +1357,7 @@ const server = http.createServer(async (req, res) => {
       return res.end();
     }
     const px = /^\/px\/([A-Za-z0-9_-]+)(?:\/.*)?$/.exec(pathname);
-    if (px && (req.method === 'GET' || req.method === 'HEAD')) return await proxy.handle(req, res, px[1], catalog.ua(), ingressBase(req));
+    if (px && (req.method === 'GET' || req.method === 'HEAD')) { lastStreamAt = Date.now(); return await proxy.handle(req, res, px[1], catalog.ua(), ingressBase(req)); }
     for (const r of routes) {
       if (r.method !== req.method && !(r.method === 'GET' && req.method === 'HEAD')) continue;
       const m = r.re.exec(pathname);

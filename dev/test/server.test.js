@@ -131,10 +131,14 @@ test('live stream through proxy: redirect + playlist rewrite + segments', async 
   assert.equal(buf[0], 0x47, 'mpeg-ts sync byte');
 });
 
-test('proxy refuses unknown hosts', async () => {
-  const tok = Buffer.from('http://example.com/x').toString('base64url');
-  const r = await fetch(base + '/px/' + tok);
+test('proxy refuses unknown hosts, and hand-made tokens', async () => {
+  // a real (encrypted) token, but for a host the server never handed out
+  const r = await fetch(base + '/px/' + app.proxy.token('http://example.com/x'));
   assert.equal(r.status, 403);
+  // a plain token for a host it did hand out: refused too, addresses can't be made up
+  const ok = (await (await fetch(base + '/api/stream/live/100')).json()).sources.find(x => !x.direct);
+  const plain = Buffer.from(app.proxy.untoken(ok.url.split('/')[2])).toString('base64url');
+  assert.equal((await fetch(base + '/px/' + plain + '/x')).status, 403);
 });
 
 test('vod: range through proxy, probe, remux, subtitles', async () => {

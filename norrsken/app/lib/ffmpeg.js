@@ -227,7 +227,7 @@ function subs(req, res, url, { s = 0, ss = 0, ua } = {}) {
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const HLS_ROOT = path.join(os.tmpdir(), 'norrsken-hls');
+const HLS_ROOT = process.env.NSK_HLS_DIR || path.join(os.tmpdir(), 'norrsken-hls');
 const sessions = new Map(); // key -> session
 const starting = new Map(); // key -> promise of the session being set up (two requests at once get one ffmpeg)
 const HLS_MIN_FREE = 1.5e9; // leave room on the disk, like the pause recordings
@@ -295,10 +295,11 @@ function hlsSession(url, opts) {
 async function startSession(url, key, opts) {
   const { group, ss = 0, a = 0, ua, audioMode = 'auto', maxRes = 'orig', caps = {}, safe = false } = opts;
   let s;
-  // the provider gives one connection: a new conversion ends every other one (another film, another device)
-  for (const o of sessions.values()) stopSession(o);
+  // the disk first: a film that can't start doesn't stop the one that plays
   fs.mkdirSync(HLS_ROOT, { recursive: true });
   if (freeBytes(HLS_ROOT) < HLS_MIN_FREE) throw new Error('För lite ledigt diskutrymme för att konvertera filmen');
+  // the provider gives one connection: a new conversion ends every other one (another film, another device)
+  for (const o of sessions.values()) stopSession(o);
   let info = null;
   try { info = await probe(url, ua); } catch (_) { /* go blind */ }
   const p = plan(info, safe ? {} : caps, { a, audioMode, maxRes: safe ? '1080' : maxRes });
