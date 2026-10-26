@@ -691,5 +691,5 @@ html.m .player .tap-play { width: 84px; height: 84px; margin: -42px 0 0 -42px; f
 .tracks .ti.two small { font-size: 1.8rem; font-weight: 500; opacity: .7; }
 
 /* side panels scroll when the list is longer than the screen, with a fade that shows there is more */
-.panel-side .tracks { bottom: 0; overflow-y: auto; padding-bottom: 6rem; scrollbar-width: none; -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 8rem), transparent); mask-image: linear-gradient(180deg, #000 calc(100% - 8rem), transparent); }
+.panel-side .tracks { bottom: 0; overflow-y: auto; padding-bottom: 6rem; scroll-padding: 4rem 0 9rem; scrollbar-width: none; -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 8rem), transparent); mask-image: linear-gradient(180deg, #000 calc(100% - 8rem), transparent); }
 .panel-side .tracks::-webkit-scrollbar { display: none; }

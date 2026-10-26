@@ -992,8 +992,7 @@
     this.osdT = setTimeout(function () {
       if (self.video.paused && !self.live) return;
       if (self.scrubbing !== null && self.scrubbing !== undefined) return;
-      if (self.zone !== 'bar' && !self.live) return;
-      self.hideOsd();
+      self.hideOsd(); // also with focus on the buttons: everything leaves after 5 s without a press (the button is remembered)
     }, 5000);
   };
   Player.prototype.hideOsd = function () {
@@ -2114,7 +2113,7 @@
         else this.showOsd(v.paused);
       } else if (a === 'down') {
         if (wasHidden) { this.showOsd(); return; }
-        this.zone = 'btns'; this.paintZone(); this.showOsd(true);
+        this.zone = 'btns'; this.paintZone(); this.showOsd();
       } else if (a === 'up') this.showOsd();
       return;
     }
@@ -2124,7 +2123,7 @@
     else if (a === 'up') { this.zone = 'bar'; this.showOsd(); }
     else if (a === 'ok') { this.pressBtn(); return; }
     this.paintZone();
-    this.showOsd(true);
+    this.showOsd();
   };
 
   /* ------------------------------------------------------------ skip intro (learned per series) */
