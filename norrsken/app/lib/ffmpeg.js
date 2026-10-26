@@ -204,7 +204,7 @@ async function remux(req, res, url, { ss = 0, a = 0, ua, audioMode = 'auto', max
   killOnClose(res, proc);
   let err = '';
   proc.stderr.on('data', d => { if (err.length < 2000) err += d; });
-  proc.on('close', (code) => { if (code && code !== 255) console.error('[remux] ffmpeg fel', code, err.split('\n').slice(-4).join(' ')); });
+  proc.on('close', (code) => { if (code && code !== 255) console.error('[remux] ffmpeg fel', code, hideLinks(err.split('\n').slice(-4).join(' '))); });
   res.writeHead(200, { 'Content-Type': 'video/mp4', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' });
   proc.stdout.pipe(res);
 }
@@ -227,6 +227,8 @@ function subs(req, res, url, { s = 0, ss = 0, ua } = {}) {
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+/** ffmpeg names its input link in its errors, and the link carries the account: never pass it on (log or answer). */
+const hideLinks = (t) => String(t || '').replace(/[a-z][a-z0-9+.-]*:\/\/[^\s'"]+/gi, '<länk>');
 const HLS_ROOT = process.env.NSK_HLS_DIR || path.join(os.tmpdir(), 'norrsken-hls');
 const sessions = new Map(); // key -> session
 const starting = new Map(); // key -> promise of the session being set up (two requests at once get one ffmpeg)
@@ -275,6 +277,32 @@ setInterval(() => {
   const now = Date.now();
   for (const s of sessions.values()) if (now - s.last > 90e3) stopSession(s);
 }, 15e3).unref();
+
+const KEEP_BEHIND = 150; // segments (about 10 min) kept behind the viewer when the disk runs low
+/**
+ * The disk while converting (a long 4K film is tens of GB): when it runs low, free what the viewer has already
+ * watched (except the last 10 min); if that isn't enough, end the conversion where it is rather than fill the disk.
+ */
+function guardDisk(free = freeBytes) {
+  if (!sessions.size || free(HLS_ROOT) >= HLS_MIN_FREE * 0.6) return;
+  for (const s of sessions.values()) {
+    const upTo = (s.seen || 0) - KEEP_BEHIND;
+    if (upTo > 0) {
+      let n = 0;
+      for (let i = s.freed || 0; i < upTo; i++) { try { fs.unlinkSync(path.join(s.dir, 's' + String(i).padStart(5, '0') + '.m4s')); n++; } catch (_) { /* gone */ } }
+      s.freed = Math.max(s.freed || 0, upTo);
+      if (n) console.log('[remux] disken börjar bli full: tog bort', n, 'redan sedda delar');
+    }
+  }
+  if (free(HLS_ROOT) >= HLS_MIN_FREE * 0.3) return;
+  for (const s of sessions.values()) {
+    if (s.done || s.full) continue;
+    s.full = true;
+    console.log('[remux] disken är full: konverteringen stannar här');
+    try { s.proc.kill('SIGINT'); } catch (_) { /* gone */ }
+  }
+}
+setInterval(() => guardDisk(), 15e3).unref();
 
 /**
  * Get (or start) a conversion session. opts: { group, ss, a, ua, audioMode, maxRes, caps, safe }
@@ -347,7 +375,7 @@ async function startSession(url, key, opts) {
         return;
       }
       s.done = true;
-      if (code && code !== 255) console.error('[remux] ffmpeg fel', code, s.err.split('\n').slice(-4).join(' '));
+      if (code && code !== 255) console.error('[remux] ffmpeg fel', code, hideLinks(s.err.split('\n').slice(-4).join(' ')));
     });
   };
   start();
@@ -372,7 +400,7 @@ async function hlsPlaylist(s, prefix) {
         return l;
       }).join('\n');
     }
-    if (s.done || s.dead) throw new Error(s.err.split('\n').filter(Boolean).slice(-1)[0] || 'Konverteringen avbröts');
+    if (s.done || s.dead) throw new Error(hideLinks(s.err.split('\n').filter(Boolean).slice(-1)[0]) || 'Konverteringen avbröts');
     if (Date.now() - t0 > 45000) throw new Error('Konverteringen kom inte igång');
     await new Promise(ok => setTimeout(ok, 300));
   }
@@ -383,6 +411,8 @@ function hlsFile(id, name) {
     if (s.id === id) {
       s.last = Date.now();
       if (!/^(init\.mp4|s\d{5}\.m4s)$/.test(name)) return null;
+      const n = /^s(\d{5})/.exec(name);
+      if (n) s.seen = Math.max(s.seen || 0, +n[1]); // how far the viewer has got (for freeing the disk behind them)
       return path.join(s.dir, name);
     }
   }
@@ -401,4 +431,4 @@ function sessionStat(group) {
   return best ? { speed: best.speed || 0, out: best.out || 0, done: !!best.done } : null;
 }
 
-module.exports = { cleanStart, stopGroup, stopAll, activeSessions, has, probe, remux, subs, langName, plan, playsAsIs, hlsSession, hlsPlaylist, hlsFile, sessionStat, aspectArgs };
+module.exports = { _hideLinks: hideLinks, _guardDisk: guardDisk, _sessions: sessions, cleanStart, stopGroup, stopAll, activeSessions, has, probe, remux, subs, langName, plan, playsAsIs, hlsSession, hlsPlaylist, hlsFile, sessionStat, aspectArgs };

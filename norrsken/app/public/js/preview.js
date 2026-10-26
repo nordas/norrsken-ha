@@ -85,7 +85,7 @@
         resolve(it).then(function (t) {
           if (job.stopped || !t) return null;
           job.target = t;
-          return NS.api.stream(t.type, t.id, t.ext);
+          return NS.api.stream(t.type, t.id, t.ext, true); // a preview never ends a paused channel
         }).then(function (res) {
           if (job.stopped || !res || !res.sources || !res.sources.length) return;
           self._play(job, res);

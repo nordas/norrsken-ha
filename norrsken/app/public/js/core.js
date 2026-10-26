@@ -172,7 +172,7 @@
     item: function (type, id) { return NS.api.get('api/item/' + type + '/' + encodeURIComponent(id)); },
     search: function (s) { return NS.api.get('api/search?q=' + encodeURIComponent(s)); },
     cats: function (type) { return NS.api.get('api/cats/' + type); },
-    stream: function (type, id, ext) { return NS.api.get('api/stream/' + type + '/' + encodeURIComponent(id) + '?caps=' + NS.caps + (ext ? '&ext=' + ext : ''), 20000); },
+    stream: function (type, id, ext, pv) { return NS.api.get('api/stream/' + type + '/' + encodeURIComponent(id) + '?caps=' + NS.caps + (ext ? '&ext=' + ext : '') + (pv ? '&pv=1' : ''), 20000); },
     probe: function (t) { return req('GET', 'api/probe?t=' + t, null, 30000); },
     guide: function (id, h, back) { return NS.api.get('api/epg/channel/' + encodeURIComponent(id) + '?hours=' + (h || 6) + (back ? '&back=' + back : '')); },
     state: function () { return req('GET', 'api/state/' + NS.profile.id); },

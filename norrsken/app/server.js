@@ -394,7 +394,7 @@ function unmaskUrl(sent, saved) {
   let a, b;
   try { a = new URL(sent); b = new URL(saved); } catch (_) { return null; }
   if (a.protocol !== b.protocol || a.host.toLowerCase() !== b.host.toLowerCase()) return null;
-  if (a.password === '***') a.password = b.password;
+  if (a.password === '***') { if (!b.password) return null; a.password = b.password; }
   const sp = a.pathname.split('/'), bp = b.pathname.split('/');
   for (let i = 0; i < sp.length; i++) if (sp[i] === '***') { if (bp[i] === undefined || sp.length !== bp.length) return null; sp[i] = bp[i]; }
   a.pathname = sp.join('/');
@@ -577,7 +577,10 @@ function sportNow(prof, st, base = '') {
   const m = hit.m;
   if (!m) return m;
   const r = matchRecs.get(m.team.id + '|' + m.s);
-  return Object.assign({}, m, { rec: r ? recInfo(r, base) : null });
+  const rec = r ? recInfo(r, base) : null;
+  // not recorded yet because something else plays (the provider gives one connection): say so instead of nothing
+  const waits = !(rec && rec.recording) && Date.now() - (matchWait.get(m.team.id + '|' + m.s) || 0) < 90e3;
+  return Object.assign({}, m, { rec, recWait: waits ? 'Spelas in när det som spelas nu stängs' : '' });
 }
 const sportCache = new Map();
 
@@ -622,7 +625,7 @@ route('GET', '/api/info/:type/:id', async (req, res, q, p) => {
     const vs = p.type === 'movie' || p.type === 'series' ? catalog.versions(p.type, id, profileOf(q)) : [];
     const extra = { catName: catalog.catName(p.type, info.cat), versions: vs.length > 1 ? vs : undefined };
     ok(res, { ...info, ...extra });
-  } catch (e) { bad(res, redact(e.message, catalog.secrets()), 502); }
+  } catch (e) { bad(res, redactAcct(e.message), 502); }
 });
 
 route('GET', '/api/epg/now', async (req, res, q) => {
@@ -729,7 +732,7 @@ route('POST', '/api/profile/:id/unlock', async (req, res, q, p) => {
   const b = await readBody(req);
   const prof = (store.config.profiles || []).find(x => x.id === p.id);
   if (!prof) return bad(res, 'profil', 404);
-  const lockKey = 'prof:' + clientKey(req);
+  const lockKey = 'prof:' + prof.id + ':' + clientKey(req); // per profile: a child's guesses don't lock the parents' profile
   const wait = pinLocked(lockKey);
   if (wait) return bad(res, 'För många fel PIN-koder – vänta ' + (wait > 90 ? Math.ceil(wait / 60) + ' min' : wait + ' s'), 429);
   const all = store.config.profiles || [];
@@ -994,8 +997,15 @@ route('GET', '/api/stream/:type/:id', async (req, res, q, p) => {
   const prof = profileOf(q);
   if (prof.kids && !catalog.allowed(type, id, prof)) return bad(res, 'Det här finns inte i barnprofilen', 403);
   if (!pinOk(q, prof)) return bad(res, 'Profilen är låst – välj den igen och ange PIN-koden', 401);
-  const busy = matchRecBusy(type, id);
+  const busy = matchRecBusy(type, id, !!q.get('start'));
   if (busy) return bad(res, busy, 409);
+  // the channel whose match is being recorded: the recording at its live edge, never a second provider connection
+  const rec = type === 'live' && !q.get('start') ? sameChannelRec(id, ingressBase(req)) : null;
+  if (rec && q.get('pv')) return bad(res, 'Matchen spelas in på kanalen', 409); // no preview from the recording's start
+  if (rec) return ok(res, { live: true, sources: [{ kind: 'hls', url: rec.url }], rec });
+  // one connection: a new stream ends a paused channel; a preview (start page, guide) gives way to it instead
+  if (q.get('pv') && tsbuf.pauseActive() > 0) return bad(res, 'En pausad kanal spelas in', 409);
+  tsbuf.stopPauses('ny ström');
   lastStreamAt = Date.now();
   let src = catalog.streamUrl(type, id, q.get('ext'));
   if (type === 'live' && q.get('start')) src = catalog.timeshiftUrl(id, +q.get('start'), +q.get('dur') || 60) || src;
@@ -1062,14 +1072,24 @@ const KEEP_MATCH_MS = 24 * 3600e3;
 const matchRecs = new Map(); // team|start → { key, s, e, title, chId, chName, sessId }
 const matchStopped = new Map(); // team|start → when the viewer stopped it: not started again for that match
 let matchWaitLog = 0;
+const matchWait = new Map(); // team|start → when the recording last had to wait for another stream (shown on the start page)
 
 /** A match is being recorded on another channel: the reason to refuse a new stream (the provider gives one). */
-function matchRecBusy(type, id) {
+function matchRecBusy(type, id, archive) {
   const ms = tsbuf.matchSession();
   if (!ms) return '';
   const r = [...matchRecs.values()].find(x => x.sessId === ms.id);
-  if (r && type === 'live' && r.chId === id) return '';
+  if (r && type === 'live' && r.chId === id && !archive) return '';
   return 'Matchen ' + (r ? r.title + ' ' : '') + 'spelas in. Stoppa inspelningen först (leverantören skickar bara en kanal åt gången).';
+}
+
+/** The running match recording when it is on this channel: { id, url, edge } to play instead of the channel. */
+function sameChannelRec(id, base) {
+  const ms = tsbuf.matchSession();
+  if (!ms) return null;
+  const r = [...matchRecs.values()].find(x => x.sessId === ms.id);
+  if (!r || r.chId !== id) return null;
+  return { id: ms.id, url: base + '/pause/' + ms.id + '/index.m3u8', edge: true };
 }
 
 function recInfo(r, base) {
@@ -1108,6 +1128,7 @@ function matchRecTick() {
     // the recording starts as soon as the connection is free
     if (ff.activeSessions() > 0 || tsbuf.pauseActive() > 0 || Date.now() - lastStreamAt < 3 * 60e3) {
       if (now - (matchWaitLog || 0) > 5 * 60e3) { matchWaitLog = now; console.log('[match]', m.title, 'börjar snart – väntar med inspelningen tills ingen annan ström används'); }
+      matchWait.set(key, now);
       break;
     }
     const src = catalog.streamUrl('live', m.ch.id);
@@ -1207,6 +1228,7 @@ route('GET', '/api/speedtest', async (req, res, q) => {
   if (!proxy.isAllowed(url)) return bad(res, 'forbidden', 403);
   if (tsbuf.matchSession()) return bad(res, 'En match spelas in just nu – testa efter matchen', 409);
   if (ff.activeSessions() > 0) return bad(res, 'Något annat spelas via servern just nu – testa när det är stängt', 409);
+  if (tsbuf.pauseActive() > 0) return bad(res, 'En pausad kanal spelas in just nu – testa när den är stängd', 409);
   if (speedBusy) return bad(res, 'Ett test pågår redan', 409);
   speedBusy = true;
   try { await speedTest(req, res, q, url); } finally { speedBusy = false; }
@@ -1276,6 +1298,7 @@ route('GET', '/rx/play.m3u8', async (req, res, q) => {
   if (!proxy.isAllowed(url)) return bad(res, 'forbidden', 403);
   const busy = matchRecBusy('movie', '');
   if (busy) return bad(res, busy, 409);
+  tsbuf.stopPauses('film startad'); // one connection
   const o = store.config.options;
   try {
     const s = await ff.hlsSession(url, { group: t, ss: Math.max(0, +q.get('ss') || 0), a: +q.get('a') || 0, ua: catalog.ua(),
@@ -1476,7 +1499,7 @@ const server = http.createServer(async (req, res) => {
     bad(res, 'metod', 405);
   } catch (e) {
     console.error('[http]', req.method, pathname, e && e.message);
-    if (!res.headersSent) bad(res, redact((e && e.message) || 'fel', catalog.secrets()), 500);
+    if (!res.headersSent) bad(res, redactAcct((e && e.message) || 'fel'), 500);
     else res.end();
   }
 });

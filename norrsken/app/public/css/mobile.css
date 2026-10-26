@@ -339,6 +339,7 @@ html.m .dialog .box::before { content: ''; display: block; width: 36px; height: 
 .m-sport .live-pill::before { width: 7px; height: 7px; }
 .m-sport h2 { margin-top: 10px; font-size: 30px; line-height: 1.02; font-weight: 900; letter-spacing: -0.03em; text-wrap: balance; }
 .m-sport-meta { margin-top: 10px; display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--text-2); }
+.m-sport-wait { margin-top: 6px; font-size: 13px; color: var(--muted); }
 .m-sport-logo { display: inline-flex; height: 26px; padding: 3px 7px; border-radius: 6px; background: rgba(255,255,255,.92); }
 .m-sport-logo img { height: 100%; width: auto; max-width: 80px; object-fit: contain; }
 .m-sport .prog { margin-top: 12px; height: 4px; }

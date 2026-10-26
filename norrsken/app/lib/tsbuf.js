@@ -36,6 +36,8 @@ function dirBytes(dir) {
   return n;
 }
 
+/** ffmpeg names its input link in its errors, and the link carries the account: never pass it on (log or answer). */
+const hideLinks = (t) => String(t || '').replace(/[a-z][a-z0-9+.-]*:\/\/[^\s'"]+/gi, '<länk>');
 function stop(s, why) {
   if (!s || s.dead) return;
   s.dead = true;
@@ -47,6 +49,8 @@ function stop(s, why) {
 }
 
 function stopAll(why) { for (const s of [...sessions.values()]) stop(s, why); }
+/** The pause recordings only: a finished match recording stays (it is kept a day). */
+function stopPauses(why) { let n = 0; for (const s of [...sessions.values()]) if (!s.match) { stop(s, why); n++; } return n; }
 
 /** The match recording that is still running, if any (it keeps the provider connection). */
 function matchSession() {
@@ -63,7 +67,7 @@ function start(url, { ua, maxMin = 60, ch = '', match = false } = {}) {
   if (match) { for (const s of [...sessions.values()]) if (!s.match) stop(s, 'matchinspelning'); }
   else {
     if (matchSession()) throw new Error('Matchinspelningen pågår på en annan kanal');
-    stopAll('ny paus'); // one connection: a new pause ends the previous one
+    stopPauses('ny paus'); // one connection: a new pause ends the previous one (a finished match recording stays)
   }
   fs.mkdirSync(ROOT, { recursive: true });
   const free = freeBytes(ROOT);
@@ -88,7 +92,7 @@ function start(url, { ua, maxMin = 60, ch = '', match = false } = {}) {
     s.done = true;
     if (s.dead) return;
     if (Date.now() - s.started >= maxMin * 60e3 - 5000) { s.full = true; console.log('[paus] inspelningen nådde maxlängden', maxMin, 'min'); }
-    else if (code) console.error('[paus] ffmpeg fel', code, s.err.split('\n').filter(Boolean).slice(-2).join(' '));
+    else if (code) console.error('[paus] ffmpeg fel', code, hideLinks(s.err.split('\n').filter(Boolean).slice(-2).join(' ')));
   });
   // keep an eye on the disk while recording
   s.diskT = setInterval(() => {
@@ -124,7 +128,7 @@ async function playlist(s, prefix, { wait = 30000 } = {}) {
         return l && l[0] !== '#' ? prefix + '/' + s.id + '/' + path.basename(l.trim()) : l;
       }).join('\n');
     }
-    if (s.done || s.dead) throw new Error(s.err.split('\n').filter(Boolean).slice(-1)[0] || 'Inspelningen kom inte igång');
+    if (s.done || s.dead) throw new Error(hideLinks(s.err.split('\n').filter(Boolean).slice(-1)[0]) || 'Inspelningen kom inte igång');
     if (Date.now() - t0 > wait) throw new Error('Inspelningen kom inte igång');
     await new Promise(ok => setTimeout(ok, 300));
   }
@@ -159,4 +163,4 @@ function active() { return sessions.size; }
 /** Pause recordings someone is using (a paused channel), not match recordings. */
 function pauseActive() { let n = 0; for (const s of sessions.values()) if (!s.match && !s.dead) n++; return n; }
 
-module.exports = { start, get, stop, stopAll, matchSession, playlist, file, length, active, pauseActive, cleanStart, ROOT };
+module.exports = { _hideLinks: hideLinks, start, get, stop, stopAll, stopPauses, matchSession, playlist, file, length, active, pauseActive, cleanStart, ROOT };

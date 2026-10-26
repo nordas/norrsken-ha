@@ -411,13 +411,24 @@ test('match: the favourite\'s match is recorded from the start, kept for a day, 
   assert.match(rec.title, /Luleå – Färjestad/);
   assert.match(rec.url, /\/pause\/\w+\/index\.m3u8$/);
   // while it runs, a pause on another channel waits; the same channel pauses into the recording
+  assert.equal(rec.recording, true, 'the match recording runs');
   const other = await post('/api/pause/start?profile=p1', { id: '111' });
-  if (rec.recording) assert.equal(other.status, 409, JSON.stringify(other.json));
+  assert.equal(other.status, 409, JSON.stringify(other.json));
   const same = await post('/api/pause/start?profile=p1', { id: rec.chId });
-  if (rec.recording) assert.equal(same.json && same.json.id, rec.id);
+  assert.equal(same.json && same.json.id, rec.id);
   // the server refuses another stream itself too (not only the app's question)
+  assert.ok((await get('/api/matchrec')).json.active, 'still recording');
   const st = await get('/api/stream/live/111?profile=p1');
-  if ((await get('/api/matchrec')).json.active) assert.equal(st.status, 409, JSON.stringify(st.json));
+  assert.equal(st.status, 409, JSON.stringify(st.json));
+  // the same channel: the recording, never a second connection to the provider
+  const sc = await get('/api/stream/live/' + encodeURIComponent(rec.chId) + '?profile=p1');
+  assert.equal(sc.status, 200, JSON.stringify(sc.json));
+  assert.equal(sc.json.rec && sc.json.rec.id, rec.id);
+  assert.equal(sc.json.sources.length, 1);
+  assert.ok(!sc.json.sources.some(x => x.direct), 'no direct provider link');
+  // its archive would be a second connection: refused
+  const ar = await get('/api/stream/live/' + encodeURIComponent(rec.chId) + '?profile=p1&start=' + Math.floor(Date.now() / 1000 - 3600));
+  assert.equal(ar.status, 409, JSON.stringify(ar.json));
   // the playlist is there, growing from the start
   const pl = await until(async () => { const x = await get(rec.url); return x.status === 200 && x.text; }, 30000);
   assert.match(pl, /#EXT-X-PLAYLIST-TYPE:EVENT/);
@@ -433,4 +444,48 @@ test('match: the favourite\'s match is recorded from the start, kept for a day, 
   app._streamIdle();
   app._matchRecTick();
   assert.equal((await get('/api/matchrec')).json.recs.length, 0, 'a stopped match stays stopped');
+});
+
+test('one connection: a paused channel blocks the speed test, a new stream ends it; a finished match recording survives a new pause', async () => {
+  const tsbuf = require('../lib/tsbuf');
+  const st = (await get('/api/stream/movie/1002?profile=p1&ext=mkv&caps=vp9,opus')).json;
+  assert.ok(st.t, 'a token for the speed test');
+  app._streamIdle();
+  const pz = (await post('/api/pause/start?profile=p1', { id: '111' })).json;
+  assert.ok(pz.id, JSON.stringify(pz));
+  const sp = await get('/api/speedtest?t=' + encodeURIComponent(st.t) + '&sec=3');
+  assert.equal(sp.status, 409, 'the speed test waits for the paused channel');
+  await get('/api/stream/movie/1002?profile=p1&ext=mkv&caps=vp9,opus');
+  assert.equal(tsbuf.pauseActive(), 0, 'a new stream ends the paused channel');
+  assert.equal((await get(pz.url)).status, 404);
+  // a match recording that has finished is kept for a day, even when someone pauses another channel
+  const m = tsbuf.start(prov + '/live/demo/demo/110.ts', { maxMin: 1, ch: 'test', match: true });
+  m.done = true; try { m.proc.kill('SIGKILL'); } catch (_) { /* gone */ }
+  const pz2 = (await post('/api/pause/start?profile=p1', { id: '111' })).json;
+  assert.ok(pz2.id, JSON.stringify(pz2));
+  assert.ok(tsbuf.get(m.id), 'the finished match recording is still there');
+  tsbuf.stop(m, 'test'); await post('/api/pause/' + pz2.id + '/stop');
+});
+
+test('ffmpeg errors never pass on a link (it carries the account)', () => {
+  const ff = require('../lib/ffmpeg'), tsbuf = require('../lib/tsbuf');
+  const line = 'Error opening input file http://h:8080/live/anna/PW4/123.m3u8.';
+  for (const f of [ff._hideLinks, tsbuf._hideLinks]) { const o = f(line); assert.ok(!/anna|PW4/.test(o), o); assert.match(o, /<länk>/); }
+});
+
+test('converting: a low disk frees what was already watched, then ends the conversion instead of filling it', () => {
+  const ff = require('../lib/ffmpeg');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nsk-disk-'));
+  for (let i = 0; i < 200; i++) fs.writeFileSync(path.join(dir, 's' + String(i).padStart(5, '0') + '.m4s'), 'x');
+  let killed = '';
+  const s = { key: 'k', dir, seen: 190, done: false, proc: { kill: (sig) => { killed = sig; } } };
+  ff._sessions.set('k', s);
+  try {
+    ff._guardDisk(() => 6e8); // low (below 0.6 × 1.5 GB) but not critical (above 0.3 ×)
+    assert.ok(!fs.existsSync(path.join(dir, 's00000.m4s')), 'watched part freed');
+    assert.ok(fs.existsSync(path.join(dir, 's00040.m4s')), 'the last 10 min behind the viewer stay');
+    assert.equal(killed, '');
+    ff._guardDisk(() => 1e8); // critical
+    assert.equal(killed, 'SIGINT');
+  } finally { ff._sessions.delete('k'); fs.rmSync(dir, { recursive: true, force: true }); }
 });

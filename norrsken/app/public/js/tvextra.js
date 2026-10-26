@@ -297,10 +297,14 @@
     // opened from the player: hand the choice back to it instead of stacking a second player
     var watch = function (item, list) {
       if (pl && NS.router.stack.indexOf(pl) >= 0) {
+        if (item.t === 'catchup') {
+          // an archive is another provider connection: ask first when a match is being recorded
+          NS.guardStream(item, function () { pl.skipResume = true; NS.router.pop(); NS.router.replace(new NS.Player({ item: item })); });
+          return;
+        }
         pl.skipResume = true;
         NS.router.pop();
-        if (item.t === 'catchup') NS.router.replace(new NS.Player({ item: item }));
-        else { pl.suspended = false; pl.tune(item, list); }
+        pl.suspended = false; pl.tune(item, list);
         return;
       }
       if (item.t === 'catchup') NS.playItem(item); else NS.playItem(item, { list: list });
