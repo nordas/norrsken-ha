@@ -26,7 +26,9 @@ const PUBLIC = path.join(__dirname, 'public');
 const SETUP_PIN_OPTION = process.env.SETUP_PIN || ''; // the add-on's own setting (setup_pin)
 
 const store = new Store(DATA_DIR);
+const vault = require('./lib/vault');
 const catalog = new Catalog(store);
+catalog.secrets = () => acctSecrets(); // errors and logs from the catalog hide the M3U/guide link account too
 const proxy = new Proxy();
 // provider addresses (with the account's password) are encrypted in every address handed to a TV or phone
 if (!store.config.proxySecret) { store.config.proxySecret = require('crypto').randomBytes(32).toString('hex'); store.saveConfig(); }
@@ -291,10 +293,26 @@ function featured(page, prof) {
 
 const imgCache = new (require('./lib/util').LRU)(500, 24 * 3600e3);
 let imgBytes = 0;
+/** Loopback, private and link-local addresses (and localhost): the home network, not the internet. */
+function privateHost(h) {
+  h = String(h || '').toLowerCase().replace(/^\[|\]$/g, '');
+  if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.local')) return true;
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(h)) { const [a, b] = h.split('.').map(Number); return a === 127 || a === 10 || a === 0 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254); }
+  return h === '::1' || /^f[cd]/.test(h) || /^fe80/.test(h) || h.startsWith('::ffff:');
+}
+/** The provider's own hosts (its logos may live there even when it is on the local network). */
+function providerHosts() {
+  const c = store.config, out = [];
+  for (const u of [c.xtream && c.xtream.server, c.m3u && c.m3u.url, c.m3u && c.m3u.epgUrl, c.options && c.options.epgUrl]) {
+    try { if (u && !vault.isSealed(u)) out.push(new URL(/^https?:/i.test(u) ? u : 'http://' + u).hostname.toLowerCase()); } catch (_) { /* skip */ }
+  }
+  return out;
+}
 async function serveImage(req, res, u) {
   let url;
   try { url = new URL(u); } catch (_) { return bad(res, 'url'); }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return bad(res, 'url');
+  if (privateHost(url.hostname) && !providerHosts().includes(url.hostname.toLowerCase())) return bad(res, 'url', 403); // not a door into the home network
   const hit = imgCache.get(u);
   const head = { 'Cache-Control': 'public, max-age=86400', 'Access-Control-Allow-Origin': '*' };
   if (hit) { res.writeHead(200, { ...head, 'Content-Type': hit.type, 'Content-Length': hit.buf.length }); return res.end(hit.buf); }
@@ -359,16 +377,17 @@ function status() {
 
 /* ------------------------------------------------------------------ setup */
 
-const vault = require('./lib/vault');
 const vaultClear = (v) => (vault.isSealed(v) ? '' : v);
 /** A link with the account in it, shown without the password: "…password=***" (Xtream paths too). */
 /** Text that may contain the provider's address: the user name and password taken out. */
-function redactAcct(msg) {
+/** Everything that is the account: the Xtream login and the secret parts of the M3U and guide links. */
+function acctSecrets() {
   const c = store.config;
   const secrets = [c.xtream.username, c.xtream.password];
   for (const u of [c.m3u.url, c.m3u.epgUrl, c.options.epgUrl]) secrets.push(...linkSecrets(u));
-  return maskUrl(redact(msg, secrets.filter(x => x && x.length > 2 && !vault.isSealed(x))));
+  return secrets.filter(x => x && x.length > 2 && !vault.isSealed(x));
 }
+function redactAcct(msg) { return maskUrl(redact(msg, acctSecrets())); }
 /** The account parts of a link: user:pass@, ?password=/token=…, /live/<user>/<pass>/. */
 function linkSecrets(u) {
   const out = [];
@@ -1004,8 +1023,9 @@ route('GET', '/api/stream/:type/:id', async (req, res, q, p) => {
   if (rec && q.get('pv')) return bad(res, 'Matchen spelas in på kanalen', 409); // no preview from the recording's start
   if (rec) return ok(res, { live: true, sources: [{ kind: 'hls', url: rec.url }], rec });
   // one connection: a new stream ends a paused channel; a preview (start page, guide) gives way to it instead
-  if (q.get('pv') && tsbuf.pauseActive() > 0) return bad(res, 'En pausad kanal spelas in', 409);
+  if (q.get('pv') && (tsbuf.pauseActive() > 0 || ff.activeSessions() > 0)) return bad(res, 'Något annat spelas just nu', 409);
   tsbuf.stopPauses('ny ström');
+  ff.stopAll(); // and a film being converted (the newest stream wins, as when a film starts)
   lastStreamAt = Date.now();
   let src = catalog.streamUrl(type, id, q.get('ext'));
   if (type === 'live' && q.get('start')) src = catalog.timeshiftUrl(id, +q.get('start'), +q.get('dur') || 60) || src;
@@ -1185,6 +1205,7 @@ route('POST', '/api/pause/start', async (req, res, q) => {
     return bad(res, 'Matchinspelningen pågår på ' + (r ? r.chName : 'en annan kanal') + '. Avbryt den först.', 409);
   }
   lastStreamAt = Date.now();
+  ff.stopAll(); // one connection: a film being converted ends when a channel is paused
   try {
     const it = catalog.get('live', id) || {};
     const s = tsbuf.start(src.primary, { ua: catalog.ua(), maxMin: +o.pauseMax || 60, ch: it.n || id });
@@ -1286,6 +1307,10 @@ route('GET', '/remux', (req, res, q) => {
   if (!ff.has()) return bad(res, 'ffmpeg saknas', 501);
   const url = proxy.untoken(q.get('t'));
   if (!proxy.isAllowed(url)) return bad(res, 'forbidden', 403);
+  const busy = matchRecBusy('movie', ''); // older players: the same one-connection rules as /rx
+  if (busy) return bad(res, busy, 409);
+  tsbuf.stopPauses('film startad');
+  ff.stopAll();
   const o = store.config.options;
   ff.remux(req, res, url, { ss: Math.max(0, +q.get('ss') || 0), a: +q.get('a') || 0, ua: catalog.ua(), audioMode: o.audioMode, maxRes: o.maxRes, caps: parseCaps(q.get('caps')) });
 });
@@ -1321,12 +1346,63 @@ route('GET', '/rx/:id/:name', (req, res, q, p) => {
   });
 });
 
-route('GET', '/subs', (req, res, q) => {
+/*
+ * Subtitles of a film: written by the conversion itself (the same read of the file), never by a second
+ * connection to the provider. The player converts on the server whenever such a subtitle is on.
+ */
+route('GET', '/subs', async (req, res, q) => {
   if (!ff.has()) return bad(res, 'ffmpeg saknas', 501);
-  const url = proxy.untoken(q.get('t'));
+  const t = q.get('t') || '';
+  const url = proxy.untoken(t);
   if (!proxy.isAllowed(url)) return bad(res, 'forbidden', 403);
-  ff.subs(req, res, url, { s: +q.get('s') || 0, ss: Math.max(0, +q.get('ss') || 0), ua: catalog.ua() });
+  const i = +q.get('s') || 0;
+  let closed = false;
+  req.on('close', () => { closed = true; });
+  // the conversion may still be starting (the player asks for both at once)
+  let ss = null;
+  for (let k = 0; k < 60 && !closed; k++) {
+    ss = ff.subSession(t, i);
+    if (ss && (!ss.has || fs.existsSync(ss.file))) break;
+    await new Promise(r => setTimeout(r, 250));
+  }
+  if (closed) return;
+  if (!ss) return bad(res, 'Undertexterna kommer från serverns konvertering – den är inte igång', 409);
+  if (!ss.has) return bad(res, 'Undertexten är en bild och kan inte visas', 415);
+  res.writeHead(200, { 'Content-Type': 'text/vtt; charset=utf-8', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' });
+  res.write('WEBVTT\n\n');
+  const off = ss.s.ss || 0;
+  let pos = 0, buf = '';
+  const shift = (line) => line.replace(/(?:(\d+):)?(\d{2}):(\d{2})\.(\d{3})/g, (m, hh, mm, s2, ms) => vttTime((+hh || 0) * 3600 + +mm * 60 + +s2 + +ms / 1000 + off));
+  const pump = () => {
+    if (closed) return;
+    let chunk = '';
+    try {
+      const fd = fs.openSync(ss.file, 'r');
+      try {
+        const size = fs.fstatSync(fd).size;
+        if (size > pos) { const b = Buffer.alloc(size - pos); fs.readSync(fd, b, 0, b.length, pos); pos = size; chunk = b.toString('utf8'); }
+      } finally { fs.closeSync(fd); }
+    } catch (_) { /* not written yet / removed */ }
+    buf += chunk.replace(/\r/g, '');
+    let idx;
+    while ((idx = buf.indexOf('\n\n')) >= 0) {
+      const block = buf.slice(0, idx).trim(); buf = buf.slice(idx + 2);
+      const lines = block.split('\n');
+      const ti = lines.findIndex(l => l.includes('-->'));
+      if (ti < 0) continue;
+      lines[ti] = shift(lines[ti]);
+      res.write(lines.slice(ti).join('\n') + '\n\n');
+    }
+    if (ss.s.dead || (ss.s.done && !chunk)) { if (buf.includes('-->')) { const l = buf.trim().split('\n'); const ti = l.findIndex(x => x.includes('-->')); l[ti] = shift(l[ti]); res.write(l.slice(ti).join('\n') + '\n'); } return res.end(); }
+    setTimeout(pump, 700);
+  };
+  pump();
 });
+function vttTime(sec) {
+  const ms = Math.round(Math.max(0, sec) * 1000);
+  const p2 = (n, w = 2) => String(n).padStart(w, '0');
+  return p2(Math.floor(ms / 3600000)) + ':' + p2(Math.floor(ms / 60000) % 60) + ':' + p2(Math.floor(ms / 1000) % 60) + '.' + p2(ms % 1000, 3);
+}
 
 route('POST', '/api/diag', async (req, res) => {
   const b = await readBody(req);

@@ -475,11 +475,20 @@
       if (this.sub && this.sub.kind === 'ff') this.startSubs(this.sub.i, at);
       return;
     }
+    // the film's own subtitles come out of the server's conversion (one read of the file, one provider connection)
+    if (this.sub && this.sub.kind === 'ff' && this.toRemux(at)) return;
     // plain file
     this.pendingSeek = at;
     v.src = src.url;
     this.playPromise();
-    if (this.sub && this.sub.kind === 'ff') this.startSubs(this.sub.i, at);
+  };
+  /** Play through the server's conversion from `at` (for the film's own subtitles). False when there is none. */
+  Player.prototype.toRemux = function (at) {
+    var ri = (this.sources || []).findIndex(function (s) { return s.kind === 'remux'; });
+    if (ri < 0 || ri === this.si) return false;
+    this.si = ri;
+    this.startSource(at);
+    return true;
   };
 
   /** Converted playback: an HLS stream from the server, starting at `at` seconds into the film. */
@@ -1285,7 +1294,10 @@
     if (t.kind === 'off') { this.sub = null; if (!silent) NS.toast('Undertexter av', 'sub'); return; }
     this.sub = { kind: t.kind, i: t.i, label: t.label, forced: !!t.forced };
     if (t.kind === 'hls' && this.hls) { this.hls.subtitleTrack = t.i; this.hls.subtitleDisplay = true; }
-    else if (t.kind === 'ff') this.startSubs(t.i, this.cur());
+    else if (t.kind === 'ff') {
+      if (this.kind === 'remux' || this.waitStart) { if (this.kind === 'remux') this.startSubs(t.i, this.cur()); }
+      else if (!this.toRemux(this.cur())) { this.sub = null; if (!silent) NS.toast('Undertexterna kräver serverns konvertering (ffmpeg)', 'info'); return; }
+    }
     if (!silent) NS.toast('Undertexter: ' + t.label, 'sub');
   };
 

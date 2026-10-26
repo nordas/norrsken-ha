@@ -472,8 +472,9 @@ test('one connection: a paused channel blocks the speed test, a new stream ends 
 
 test('ffmpeg errors never pass on a link (it carries the account)', () => {
   const ff = require('../lib/ffmpeg'), tsbuf = require('../lib/tsbuf');
-  const line = 'Error opening input file http://h:8080/live/anna/PW4/123.m3u8.';
-  for (const f of [ff._hideLinks, tsbuf._hideLinks]) { const o = f(line); assert.ok(!/anna|PW4/.test(o), o); assert.match(o, /<länk>/); }
+  const lines = ['Error opening input file http://h:8080/live/anna/PW4/123.m3u8.', 'http://h/movie/anna/P W4/1.mp4: Server returned 403 Forbidden'];
+  for (const f of [ff._hideLinks, tsbuf._hideLinks]) for (const line of lines) { const o = f(line); assert.ok(!/anna|PW4|W4/.test(o), o); assert.match(o, /<länk>/); }
+  assert.match(ff._hideLinks(lines[1]), /Server returned 403/, 'the reason stays');
 });
 
 test('converting: a low disk frees what was already watched, then ends the conversion instead of filling it', () => {

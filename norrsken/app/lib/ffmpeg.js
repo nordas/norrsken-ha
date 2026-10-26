@@ -228,7 +228,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 /** ffmpeg names its input link in its errors, and the link carries the account: never pass it on (log or answer). */
-const hideLinks = (t) => String(t || '').replace(/[a-z][a-z0-9+.-]*:\/\/[^\s'"]+/gi, '<länk>');
+// to the end of the link even when a password has a space in it: up to ": Reason" or the end of the line
+const hideLinks = (t) => String(t || '').replace(/[a-z][a-z0-9+.-]*:\/\/[^\n]*?(?=: [A-Za-z]|\.?[ \t]*$)/gim, '<länk>');
 const HLS_ROOT = process.env.NSK_HLS_DIR || path.join(os.tmpdir(), 'norrsken-hls');
 const sessions = new Map(); // key -> session
 const starting = new Map(); // key -> promise of the session being set up (two requests at once get one ffmpeg)
@@ -262,7 +263,23 @@ function argsFor(info, p, url, ss, a, ua, dir) {
     '-f', 'hls', '-hls_init_time', '1', '-hls_time', '4', '-hls_list_size', '0', '-hls_playlist_type', 'event', '-hls_segment_type', 'fmp4',
     '-hls_fmp4_init_filename', 'init.mp4', '-hls_flags', 'independent_segments+temp_file',
     '-hls_segment_filename', path.join(dir, 's%05d.m4s'), path.join(dir, 'index.m3u8'));
+  // the film's text subtitles from the same read of the file (no second connection to the provider): sub<i>.vtt
+  for (const sb of textSubs(info)) {
+    args.push('-map', '0:s:' + sb.i, '-c:s', 'webvtt', '-flush_packets', '1', '-max_muxing_queue_size', '2048', '-f', 'webvtt', path.join(dir, 'sub' + sb.i + '.vtt'));
+  }
   return args;
+}
+const BITMAP_SUBS = /^(hdmv_pgs_subtitle|pgssub|dvd_subtitle|dvdsub|dvb_subtitle|dvbsub|xsub)$/;
+function textSubs(info) { return ((info && info.subs) || []).filter(sb => sb.text && !BITMAP_SUBS.test(sb.codec || '')); }
+
+/** The conversion of this film (its token) and the subtitle file it writes, if any. */
+function subSession(group, i) {
+  for (const s of sessions.values()) {
+    if (s.group !== group || s.dead) continue;
+    const f = path.join(s.dir, 'sub' + (i | 0) + '.vtt');
+    return { s, file: f, has: s.subs && s.subs.includes(i | 0) };
+  }
+  return null;
 }
 
 function stopSession(s) {
@@ -337,7 +354,7 @@ async function startSession(url, key, opts) {
   const dir = path.join(HLS_ROOT, id);
   fs.mkdirSync(dir, { recursive: true });
   console.log('[remux]', info ? info.video + ' ' + info.height + 'p ' + (info.audio[a] || {}).codec : 'okänd fil', '→ bild', p.videoCopy ? 'orörd' : 'H.264' + (p.scale ? ' 1080p' : ''), '· ljud', p.audio.copy ? 'orört' : p.audio.codec + ' ' + p.audio.ch + 'ch', '· från', Math.floor(ss) + 's', '(HLS)');
-  s = { key, group, id, dir, proc: null, last: Date.now(), dead: false, err: '', done: false, tries: 0 };
+  s = { key, group, id, dir, proc: null, last: Date.now(), dead: false, err: '', done: false, tries: 0, ss: Math.max(0, +ss || 0), subs: textSubs(info).map(sb => sb.i) };
   const start = () => {
     const proc = s.proc = spawn(FF, argsFor(info, p, url, ss, a, ua, dir));
     proc.stderr.on('data', d => { if (s.err.length < 3000) s.err += d; });
@@ -431,4 +448,4 @@ function sessionStat(group) {
   return best ? { speed: best.speed || 0, out: best.out || 0, done: !!best.done } : null;
 }
 
-module.exports = { _hideLinks: hideLinks, _guardDisk: guardDisk, _sessions: sessions, cleanStart, stopGroup, stopAll, activeSessions, has, probe, remux, subs, langName, plan, playsAsIs, hlsSession, hlsPlaylist, hlsFile, sessionStat, aspectArgs };
+module.exports = { _hideLinks: hideLinks, subSession, textSubs, _guardDisk: guardDisk, _sessions: sessions, cleanStart, stopGroup, stopAll, activeSessions, has, probe, remux, subs, langName, plan, playsAsIs, hlsSession, hlsPlaylist, hlsFile, sessionStat, aspectArgs };

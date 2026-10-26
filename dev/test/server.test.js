@@ -176,7 +176,12 @@ test('vod: range through proxy, probe, remux, subtitles', async () => {
   assert.match(sv, /WEBVTT/);
   assert.match(sv, /svensk undertext/);
   const late = await (await fetch(base + '/subs?t=' + mkv.t + '&s=1&ss=15')).text();
-  assert.match(late, /(00:)?00:20\.000 --> (00:)?00:25\.000/, 'absolute timestamps kept when seeking');
+  assert.match(late, /(00:)?00:20\.0\d\d --> (00:)?00:25\.0\d\d/, 'film time, also when the conversion started further in');
+  // the subtitles come from the conversion itself: without one, no second connection to the provider is opened
+  const ffm = require('../lib/ffmpeg');
+  ffm.stopAll();
+  const none = await fetch(base + '/subs?t=' + mkv.t + '&s=0');
+  assert.equal(none.status, 409);
 });
 
 test('progress, continue watching and next episode', async () => {
@@ -350,4 +355,17 @@ test('pasting an xtream get.php link switches to xtream when asked', async () =>
   assert.equal(r.json.config.source, 'xtream');
   assert.equal(r.json.config.xtream.username, 'demo');
   await until(async () => { const s = (await get('/api/status')).json; return s.ready && !s.loading && s.counts.movie === 67; });
+});
+
+test('an M3U or guide link that fails never shows its account (status, log)', async () => {
+  const logs = [];
+  const orig = console.error;
+  console.error = (...a) => { logs.push(a.join(' ')); };
+  try {
+    const url = 'http://anna:Hemligt%20PW9@127.0.0.1:1/list.m3u?password=Hemligt2';
+    await post('/api/setup', { source: 'm3u', m3u: { url, epgUrl: 'http://127.0.0.1:1/epg.xml?token=Hemligt3' } });
+    const st = await until(async () => { const s = (await get('/api/status')).json; return !s.loading && s.error && s; }, 30000);
+    const all = JSON.stringify(st) + logs.join('\n');
+    assert.doesNotMatch(all, /Hemligt/, all.slice(0, 400));
+  } finally { console.error = orig; }
 });
