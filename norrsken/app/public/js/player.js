@@ -575,7 +575,7 @@
       var vs = (d && d.versions) || [];
       var best = vs[0];
       if (!best || best.id === it.id) { useOwn(); return; }
-      return NS.api.stream('movie', best.id, best.ext).then(function (r) {
+      return NS.api.get('api/stream/movie/' + encodeURIComponent(best.id) + '?caps=' + NS.caps + (best.ext ? '&ext=' + best.ext : '') + '&air=1', 20000).then(function (r) { // air=1: only the address, nothing is stopped
         var rx = (r.sources || []).find(function (x) { return x.kind === 'remux'; });
         if (!rx || self.item !== it) { useOwn(); return; }
         self.airBase = rx.url; self.airBaseSame = false; self.airQ = best.q || ''; self.airTok = r.t || '';

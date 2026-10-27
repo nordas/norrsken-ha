@@ -503,6 +503,12 @@ test('one connection: proxied streams count, a new stream ends them, a preview a
   const st = (await get('/api/stream/movie/1002?profile=p1&ext=mkv&caps=vp9,opus')).json; // a new stream ends the proxied one
   assert.equal(app.proxy.activeCount(), 0);
   assert.deepEqual(ended.sort(), [1, 'res1']);
+  // AirPlay preparation only asks for addresses: it must not end what is playing
+  const [ac0, res0] = fake(0);
+  app.proxy.open.set(ac0, res0);
+  assert.equal((await get('/api/stream/movie/1002?profile=p1&ext=mkv&caps=vp9,opus&air=1')).status, 200);
+  assert.equal(app.proxy.activeCount(), 1, 'the proxied stream goes on');
+  app.proxy.abortAll();
   const [ac2, res2] = fake(2);
   app.proxy.open.set(ac2, res2);
   assert.equal((await get('/api/stream/live/112?profile=p1&pv=1')).status, 409, 'a preview gives way to a proxied stream');
@@ -517,6 +523,7 @@ test('images: the home network is closed (also behind a redirect), the provider\
   assert.equal(ok('http://localhost:8123/x.png'), false);
   assert.equal(ok('http://192.168.1.5/x.png'), false);
   assert.equal(ok('http://[::1]/x.png'), false);
+  assert.equal(ok('http://localhost.:8123/x.png'), false, 'a trailing dot is the same name');
   assert.equal(ok('http://fcdn.example.test/x.png'), true, 'a name that starts with fc is not an IPv6 address');
   assert.equal(ok('http://fdlogo.example.test/x.png'), true);
   assert.equal(ok('https://image.tmdb.org/t/p/w500/a.jpg'), true);

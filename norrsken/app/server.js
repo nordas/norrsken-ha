@@ -295,7 +295,7 @@ const imgCache = new (require('./lib/util').LRU)(500, 24 * 3600e3);
 let imgBytes = 0;
 /** Loopback, private and link-local addresses (and localhost): the home network, not the internet. */
 function privateHost(h) {
-  h = String(h || '').toLowerCase().replace(/^\[|\]$/g, '');
+  h = String(h || '').toLowerCase().replace(/^\[|\]$/g, '').replace(/\.+$/, ''); // "localhost." is localhost too
   if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.local')) return true;
   if (/^\d+\.\d+\.\d+\.\d+$/.test(h)) { const [a, b] = h.split('.').map(Number); return a === 127 || a === 10 || a === 0 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254); }
   if (h.indexOf(':') < 0) return false; // a name (fcdn.example.com is not an IPv6 address)
@@ -1044,9 +1044,10 @@ route('GET', '/api/stream/:type/:id', async (req, res, q, p) => {
   if (rec && q.get('pv')) return bad(res, 'Matchen spelas in på kanalen', 409); // no preview from the recording's start
   if (rec) return ok(res, { live: true, sources: [{ kind: 'hls', url: rec.url }], rec });
   // one connection: a new stream ends a paused channel; a preview (start page, guide) gives way to it instead
+  const air = !!q.get('air'); // AirPlay preparation: just the addresses, it must not end what plays or open a connection
   if (q.get('pv') && (tsbuf.pauseActive() > 0 || ff.activeSessions() > 0 || proxy.activeCount() > 0)) return bad(res, 'Något annat spelas just nu', 409);
-  takeConnection('ny ström'); // and a film being converted (the newest stream wins, as when a film starts)
-  lastStreamAt = Date.now();
+  if (!air) takeConnection('ny ström'); // and a film being converted (the newest stream wins, as when a film starts)
+  if (!air) lastStreamAt = Date.now();
   let src = catalog.streamUrl(type, id, q.get('ext'));
   if (type === 'live' && q.get('start')) src = catalog.timeshiftUrl(id, +q.get('start'), +q.get('dur') || 60) || src;
   if (!src || !src.primary) return bad(res, 'Kunde inte hitta strömmen', 404);
@@ -1093,7 +1094,7 @@ route('GET', '/api/stream/:type/:id', async (req, res, q, p) => {
   // start with the converter instead of letting the screen play silent video or fail.
   let order = sources;
   let info = null;
-  if (ff.has()) {
+  if (ff.has() && !air) {
     const caps = parseCaps(q.get('caps'));
     try { info = await Promise.race([ff.probe(src.primary, catalog.ua()), new Promise((_, no) => setTimeout(() => no(new Error('t')), 7000))]); } catch (_) { /* unknown: keep order */ }
     const o = store.config.options;
