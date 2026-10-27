@@ -493,3 +493,55 @@ test('converting: a low disk frees what was already watched, then ends the conve
     assert.equal(killed, 'SIGINT');
   } finally { ff._sessions.delete('k'); fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('one connection: proxied streams count, a new stream ends them, a preview and the speed test give way', async () => {
+  const ended = [];
+  const fake = (n) => { const ac = new AbortController(); ac.signal.addEventListener('abort', () => ended.push(n)); return [ac, { destroy: () => ended.push('res' + n) }]; };
+  const [ac1, res1] = fake(1);
+  app.proxy.open.set(ac1, res1);
+  assert.equal(app.proxy.activeCount(), 1);
+  const st = (await get('/api/stream/movie/1002?profile=p1&ext=mkv&caps=vp9,opus')).json; // a new stream ends the proxied one
+  assert.equal(app.proxy.activeCount(), 0);
+  assert.deepEqual(ended.sort(), [1, 'res1']);
+  const [ac2, res2] = fake(2);
+  app.proxy.open.set(ac2, res2);
+  assert.equal((await get('/api/stream/live/112?profile=p1&pv=1')).status, 409, 'a preview gives way to a proxied stream');
+  assert.equal(app.proxy.activeCount(), 1, 'and does not end it');
+  assert.equal((await get('/api/speedtest?t=' + encodeURIComponent(st.t) + '&sec=3')).status, 409, 'the speed test waits');
+  app.proxy.abortAll();
+});
+
+test('images: the home network is closed (also behind a redirect), the provider\'s own server and public names are open', async () => {
+  const ok = (u) => app._imageAllowed(u);
+  assert.equal(ok('http://127.0.0.1:1/x.png'), false);
+  assert.equal(ok('http://localhost:8123/x.png'), false);
+  assert.equal(ok('http://192.168.1.5/x.png'), false);
+  assert.equal(ok('http://[::1]/x.png'), false);
+  assert.equal(ok('http://fcdn.example.test/x.png'), true, 'a name that starts with fc is not an IPv6 address');
+  assert.equal(ok('http://fdlogo.example.test/x.png'), true);
+  assert.equal(ok('https://image.tmdb.org/t/p/w500/a.jpg'), true);
+  assert.equal(ok(prov + '/img/logo/10.svg'), true, 'the provider itself');
+  const u = new URL(prov);
+  assert.equal(ok('http://' + u.hostname + ':' + (+u.port + 1) + '/x.png'), false, 'another port on the provider\'s machine');
+  // a redirect from an allowed server to the home network is stopped
+  const secret = http.createServer((q, r) => { r.writeHead(200, { 'Content-Type': 'image/png' }); r.end('LANSECRET'); });
+  await new Promise(r => secret.listen(0, '127.0.0.1', r));
+  const hop = http.createServer((q, r) => { r.writeHead(302, { Location: 'http://127.0.0.1:' + secret.address().port + '/s.png' }); r.end(); });
+  await new Promise(r => hop.listen(0, '127.0.0.1', r));
+  const old = app.store.config.options.epgUrl;
+  app.store.config.options.epgUrl = 'http://127.0.0.1:' + hop.address().port + '/epg.xml'; // makes this one "the provider"
+  try {
+    const r = await get('/img?u=' + encodeURIComponent('http://127.0.0.1:' + hop.address().port + '/logo.png'));
+    assert.equal(r.status, 403);
+    assert.doesNotMatch(r.text || '', /LANSECRET/);
+  } finally { app.store.config.options.epgUrl = old; hop.close(); secret.close(); }
+});
+
+test('links in ffmpeg errors: gone also when the password has a space or ": " in it', () => {
+  const hide = require('../lib/ffmpeg')._hideLinks;
+  for (const s of ['http://anna:pa: ss@h/x.m3u8: Invalid data', 'http://h/live/anna/P W4/1.mp4: Server returned 403', 'Error opening input file http://h/live/anna/PW4/1.m3u8.']) {
+    const o = hide(s);
+    assert.doesNotMatch(o, /anna|ss@|W4|PW4/, o);
+  }
+  assert.match(hide('http://anna:pa: ss@h/x.m3u8: Invalid data'), /Invalid data/);
+});

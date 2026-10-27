@@ -11,7 +11,8 @@ const { DEFAULT_UA } = require('./util');
  * Only hosts we have handed out ourselves (or reached via redirect from them) are allowed.
  */
 class Proxy {
-  constructor() { this.allowed = new Set(); }
+  constructor() {
+    this.open = new Map(); this.allowed = new Set(); }
 
   allow(u) {
     try { this.allowed.add(new URL(u).host.toLowerCase()); } catch (_) { /* ignore */ }
@@ -73,6 +74,11 @@ class Proxy {
     }).join('\n');
   }
 
+  /** Provider connections open through this proxy right now. */
+  activeCount() { return this.open.size; }
+  /** A newer stream takes the provider's one connection: end the proxied ones. */
+  abortAll() { const n = this.open.size; for (const [ac, res] of [...this.open]) { try { ac.abort(); } catch (_) { /* gone */ } try { res.destroy(); } catch (_) { /* gone */ } } this.open.clear(); return n; }
+
   async handle(req, res, token, ua, prefix = '') {
     const target = this.untoken(token);
     if (!this.isAllowed(target)) {
@@ -80,7 +86,8 @@ class Proxy {
       return res.end('forbidden');
     }
     const ac = new AbortController();
-    res.on('close', () => { if (!res.writableFinished) ac.abort(); });
+    this.open.set(ac, res); // every open provider connection through here is counted, and can be ended by a newer stream
+    res.on('close', () => { this.open.delete(ac); if (!res.writableFinished) ac.abort(); });
     const headers = { 'User-Agent': ua || DEFAULT_UA, Accept: '*/*', Connection: 'keep-alive' };
     if (req.headers.range) headers.Range = req.headers.range;
     let r;

@@ -124,12 +124,6 @@ function probeOnce(url, ua) {
   });
 }
 
-function killOnClose(res, p) {
-  const kill = () => { try { p.kill('SIGKILL'); } catch (_) { /* gone */ } };
-  res.on('close', kill);
-  p.on('error', () => { if (!res.headersSent) res.writeHead(500); res.end(); });
-}
-
 /**
  * Decide what has to be converted for this screen.
  * caps: what the viewing device decodes, e.g. { ac3: true, eac3: true, hevc: true, hevc10: true }.
@@ -174,52 +168,6 @@ function playsAsIs(info, caps, opts) {
   return p.videoCopy && p.audio.copy;
 }
 
-/** Remux to fragmented MP4 starting at `ss` seconds, picking audio track `a`; converts only what the screen can't play. */
-async function remux(req, res, url, { ss = 0, a = 0, ua, audioMode = 'auto', maxRes = 'orig', caps = {} } = {}) {
-  let info = null;
-  try { info = await probe(url, ua); } catch (_) { /* go blind */ }
-  const p = plan(info, caps, { a, audioMode, maxRes });
-  console.log('[remux]', info ? info.video + ' ' + info.height + 'p ' + (info.audio[a] || {}).codec : 'okänd fil', '→ bild', p.videoCopy ? 'orörd' : 'H.264', '· ljud', p.audio.copy ? 'orört' : p.audio.codec + ' ' + p.audio.ch + 'ch', '· från', Math.floor(ss) + 's');
-  const args = ['-hide_banner', '-loglevel', 'error', '-user_agent', ua || DEFAULT_UA,
-    '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5'];
-  args.push('-probesize', '8M', '-analyzeduration', '3M', '-fflags', '+genpts+discardcorrupt');
-  if (ss > 0) args.push('-ss', String(ss));
-  args.push('-i', url, '-map', '0:v:0', '-map', '0:a:' + (a | 0) + '?');
-  if (p.videoCopy) {
-    args.push('-c:v', 'copy');
-    if (/hevc|h265/.test(p.vcodec)) args.push('-tag:v', 'hvc1');
-    args.push(...aspectArgs(info, p));
-  } else {
-    // picture in a format the screen can't decode: H.264, in 4K unless "max 1080p" is chosen
-    const vf = p.scale ? "scale='min(1920,iw)':-2" : "scale='min(3840,iw)':-2";
-    args.push('-c:v', 'libx264', '-preset', p.big ? 'superfast' : 'veryfast', '-crf', p.big ? '22' : '20',
-      '-maxrate', p.big && !p.scale ? '40M' : '12M', '-bufsize', p.big && !p.scale ? '80M' : '24M',
-      '-pix_fmt', 'yuv420p', '-threads', '0', '-vf', vf);
-  }
-  if (p.audio.copy) args.push('-c:a', 'copy');
-  else if (p.audio.codec === 'flac') args.push('-c:a', 'flac', '-compression_level', '2', '-ac', String(p.audio.ch), '-strict', '-2');
-  else args.push('-c:a', p.audio.codec, '-b:a', p.audio.br, '-ac', String(p.audio.ch));
-  args.push('-sn', '-dn', '-f', 'mp4', '-movflags', 'frag_keyframe+empty_moov+delay_moov+default_base_moof', '-frag_duration', '3000000', 'pipe:1');
-  const proc = spawn(FF, args);
-  killOnClose(res, proc);
-  let err = '';
-  proc.stderr.on('data', d => { if (err.length < 2000) err += d; });
-  proc.on('close', (code) => { if (code && code !== 255) console.error('[remux] ffmpeg fel', code, hideLinks(err.split('\n').slice(-4).join(' '))); });
-  res.writeHead(200, { 'Content-Type': 'video/mp4', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' });
-  proc.stdout.pipe(res);
-}
-
-/** Extract embedded text subtitle `s` as WebVTT, with absolute timestamps, starting near `ss`. */
-function subs(req, res, url, { s = 0, ss = 0, ua } = {}) {
-  const args = ['-hide_banner', '-loglevel', 'error', '-user_agent', ua || DEFAULT_UA, '-reconnect', '1', '-reconnect_streamed', '1'];
-  if (ss > 0) args.push('-ss', String(Math.max(0, ss - 5)), '-copyts');
-  args.push('-i', url, '-map', '0:s:' + (s | 0), '-vn', '-an', '-c:s', 'webvtt', '-f', 'webvtt', 'pipe:1');
-  const p = spawn(FF, args);
-  killOnClose(res, p);
-  p.stderr.on('data', () => {});
-  res.writeHead(200, { 'Content-Type': 'text/vtt; charset=utf-8', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' });
-  p.stdout.pipe(res);
-}
 
 /* ------------------------------------------------------------------ HLS conversion
    Works everywhere, including Safari and iPhone (which can't play a streamed MP4 without byte ranges).
@@ -228,8 +176,18 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 /** ffmpeg names its input link in its errors, and the link carries the account: never pass it on (log or answer). */
-// to the end of the link even when a password has a space in it: up to ": Reason" or the end of the line
-const hideLinks = (t) => String(t || '').replace(/[a-z][a-z0-9+.-]*:\/\/[^\n]*?(?=: [A-Za-z]|\.?[ \t]*$)/gim, '<länk>');
+// to the end of the link, also when the password has a space or ": " in it: through the last "@" of the line, then
+// up to ": Reason" or the end of the line
+const hideLinks = (t) => String(t || '').split('\n').map((line) => {
+  const m = /[a-z][a-z0-9+.-]*:\/\//i.exec(line);
+  if (!m) return line;
+  const at = line.lastIndexOf('@');
+  const from = at > m.index ? at : m.index + m[0].length;
+  const rest = line.slice(from);
+  const cut = /: [A-Za-z]/.exec(rest);
+  const tail = cut ? rest.slice(cut.index) : (/\.$/.test(rest.trimEnd()) ? '.' : '');
+  return line.slice(0, m.index) + '<länk>' + tail;
+}).join('\n');
 const HLS_ROOT = process.env.NSK_HLS_DIR || path.join(os.tmpdir(), 'norrsken-hls');
 const sessions = new Map(); // key -> session
 const starting = new Map(); // key -> promise of the session being set up (two requests at once get one ffmpeg)
@@ -448,4 +406,4 @@ function sessionStat(group) {
   return best ? { speed: best.speed || 0, out: best.out || 0, done: !!best.done } : null;
 }
 
-module.exports = { _hideLinks: hideLinks, subSession, textSubs, _guardDisk: guardDisk, _sessions: sessions, cleanStart, stopGroup, stopAll, activeSessions, has, probe, remux, subs, langName, plan, playsAsIs, hlsSession, hlsPlaylist, hlsFile, sessionStat, aspectArgs };
+module.exports = { _hideLinks: hideLinks, subSession, textSubs, _guardDisk: guardDisk, _sessions: sessions, cleanStart, stopGroup, stopAll, activeSessions, has, probe, langName, plan, playsAsIs, hlsSession, hlsPlaylist, hlsFile, sessionStat, aspectArgs };

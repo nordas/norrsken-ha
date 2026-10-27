@@ -37,8 +37,18 @@ function dirBytes(dir) {
 }
 
 /** ffmpeg names its input link in its errors, and the link carries the account: never pass it on (log or answer). */
-// to the end of the link even when a password has a space in it: up to ": Reason" or the end of the line
-const hideLinks = (t) => String(t || '').replace(/[a-z][a-z0-9+.-]*:\/\/[^\n]*?(?=: [A-Za-z]|\.?[ \t]*$)/gim, '<länk>');
+// to the end of the link, also when the password has a space or ": " in it: through the last "@" of the line, then
+// up to ": Reason" or the end of the line
+const hideLinks = (t) => String(t || '').split('\n').map((line) => {
+  const m = /[a-z][a-z0-9+.-]*:\/\//i.exec(line);
+  if (!m) return line;
+  const at = line.lastIndexOf('@');
+  const from = at > m.index ? at : m.index + m[0].length;
+  const rest = line.slice(from);
+  const cut = /: [A-Za-z]/.exec(rest);
+  const tail = cut ? rest.slice(cut.index) : (/\.$/.test(rest.trimEnd()) ? '.' : '');
+  return line.slice(0, m.index) + '<länk>' + tail;
+}).join('\n');
 function stop(s, why) {
   if (!s || s.dead) return;
   s.dead = true;

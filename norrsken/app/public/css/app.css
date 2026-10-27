@@ -308,7 +308,7 @@ svg.i.fill { fill: currentColor; stroke: none; }
 .osd { position: absolute; inset: 0; z-index: 5; opacity: 0; transition: opacity 300ms var(--ease); pointer-events: none; }
 .osd.on { opacity: 1; }
 .osd .top { position: absolute; left: 0; right: 0; top: 0; height: 26rem; background: linear-gradient(180deg, rgba(0,0,0,.75), rgba(0,0,0,0)); }
-.osd .bottom { position: absolute; left: 0; right: 0; bottom: 0; height: 46rem; background: linear-gradient(0deg, rgba(0,0,0,.92) 0%, rgba(0,0,0,.6) 45%, rgba(0,0,0,0) 100%); }
+.osd .bottom { position: absolute; left: 0; right: 0; bottom: 0; height: 40rem; background: linear-gradient(0deg, rgba(0,0,0,.92) 0%, rgba(0,0,0,.55) 42%, rgba(0,0,0,0) 100%); } /* low enough that the subtitles above it keep their colour */
 .osd .ttl { position: absolute; left: 12rem; top: 7rem; right: 40rem; }
 .osd .ttl b { display: block; font-size: 4.6rem; font-weight: 900; letter-spacing: -0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .osd .ttl span { display: block; font-size: 2.6rem; color: var(--text-2); margin-top: .6rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -692,5 +692,5 @@ html.m .player .tap-play { width: 84px; height: 84px; margin: -42px 0 0 -42px; f
 .tracks .ti.two small { font-size: 1.8rem; font-weight: 500; opacity: .7; }
 
 /* side panels scroll when the list is longer than the screen, with a fade that shows there is more */
-.panel-side .tracks { bottom: 0; overflow-y: auto; padding-bottom: 6rem; scroll-padding: 4rem 0 9rem; scrollbar-width: none; -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 8rem), transparent); mask-image: linear-gradient(180deg, #000 calc(100% - 8rem), transparent); }
+.panel-side .tracks { bottom: 0; overflow-y: auto; padding-bottom: 11rem; scroll-padding: 4rem 0 11rem; scrollbar-width: none; -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 6rem), transparent); mask-image: linear-gradient(180deg, #000 calc(100% - 6rem), transparent); } /* the last row stops above the fade */
 .panel-side .tracks::-webkit-scrollbar { display: none; }

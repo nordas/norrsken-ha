@@ -406,6 +406,8 @@ html.m .player.touch .osd .obtns .btn.focus, html.m .player.touch .osd .obtns .b
 .player.touch .tracks .ti.two { height: auto; min-height: 46px; padding: 8px 12px; }
 .player.touch .tracks .ti.two small { font-size: 12px; }
 .countdown .cd-btns .btn { height: 48px; font-size: 16px; padding: 0 22px; }
+.countdown .cd-btns .btn { background: rgba(255,255,255,.16); }
+.countdown .cd-btns .btn:first-child { background: #fff; color: #111; }
 /* the taller button row (icon + word): time and seek bar sit above it */
 html.m .player.touch .osd .times:not(.tsbar) { bottom: calc(68px + env(safe-area-inset-bottom)); }
 html.m .player.touch .osd .bar:not(.tsbar) { bottom: calc(90px + env(safe-area-inset-bottom)); }

@@ -58,7 +58,7 @@ class HttpError extends Error {
   constructor(status, msg) { super(msg || 'HTTP ' + status); this.status = status; }
 }
 
-async function fetchRaw(url, { ua, timeout = 30000, headers = {}, signal } = {}) {
+async function fetchRaw(url, { ua, timeout = 30000, headers = {}, signal, redirect = 'follow' } = {}) {
   const ac = new AbortController();
   const t = setTimeout(() => ac.abort(new Error('timeout')), timeout);
   if (signal) signal.addEventListener('abort', () => ac.abort(), { once: true });
@@ -66,7 +66,7 @@ async function fetchRaw(url, { ua, timeout = 30000, headers = {}, signal } = {})
     const r = await fetch(url, {
       headers: { 'User-Agent': ua || DEFAULT_UA, Accept: '*/*', ...headers },
       signal: ac.signal,
-      redirect: 'follow',
+      redirect,
     });
     return { r, done: () => clearTimeout(t) };
   } catch (e) {

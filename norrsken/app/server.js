@@ -298,26 +298,47 @@ function privateHost(h) {
   h = String(h || '').toLowerCase().replace(/^\[|\]$/g, '');
   if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.local')) return true;
   if (/^\d+\.\d+\.\d+\.\d+$/.test(h)) { const [a, b] = h.split('.').map(Number); return a === 127 || a === 10 || a === 0 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254); }
-  return h === '::1' || /^f[cd]/.test(h) || /^fe80/.test(h) || h.startsWith('::ffff:');
+  if (h.indexOf(':') < 0) return false; // a name (fcdn.example.com is not an IPv6 address)
+  return h === '::1' || h === '::' || /^f[cd][0-9a-f]{0,2}:/.test(h) || /^fe[89ab][0-9a-f]?:/.test(h) || h.startsWith('::ffff:');
 }
-/** The provider's own hosts (its logos may live there even when it is on the local network). */
+/** The provider's own servers (host and port): its logos may live there even when it is on the home network. */
 function providerHosts() {
   const c = store.config, out = [];
   for (const u of [c.xtream && c.xtream.server, c.m3u && c.m3u.url, c.m3u && c.m3u.epgUrl, c.options && c.options.epgUrl]) {
-    try { if (u && !vault.isSealed(u)) out.push(new URL(/^https?:/i.test(u) ? u : 'http://' + u).hostname.toLowerCase()); } catch (_) { /* skip */ }
+    try { if (u && !vault.isSealed(u)) out.push(new URL(/^https?:/i.test(u) ? u : 'http://' + u).host.toLowerCase()); } catch (_) { /* skip */ }
   }
   return out;
+}
+/** May /img fetch this address? Not the home network, except the provider's own server (host and port). */
+function imageAllowed(url) {
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+  return !privateHost(url.hostname) || providerHosts().includes(url.host.toLowerCase());
 }
 async function serveImage(req, res, u) {
   let url;
   try { url = new URL(u); } catch (_) { return bad(res, 'url'); }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return bad(res, 'url');
-  if (privateHost(url.hostname) && !providerHosts().includes(url.hostname.toLowerCase())) return bad(res, 'url', 403); // not a door into the home network
+  if (!imageAllowed(url)) return bad(res, 'url', 403); // not a door into the home network
   const hit = imgCache.get(u);
   const head = { 'Cache-Control': 'public, max-age=86400', 'Access-Control-Allow-Origin': '*' };
   if (hit) { res.writeHead(200, { ...head, 'Content-Type': hit.type, 'Content-Length': hit.buf.length }); return res.end(hit.buf); }
   try {
-    const { r, done } = await require('./lib/util').fetchRaw(u, { ua: catalog.ua(), timeout: 15000 });
+    // redirects are followed by hand: every step has to pass the same check (a public name may point inside)
+    let cur = url, got = null;
+    for (let hop = 0; hop < 5; hop++) {
+      const x = await require('./lib/util').fetchRaw(cur.href, { ua: catalog.ua(), timeout: 15000, redirect: 'manual' });
+      if (x.r.status >= 300 && x.r.status < 400 && x.r.headers.get('location')) {
+        x.done(); try { await x.r.body?.cancel(); } catch (_) { /* ignore */ }
+        let next;
+        try { next = new URL(x.r.headers.get('location'), cur); } catch (_) { return bad(res, 'url'); }
+        if (!imageAllowed(next)) return bad(res, 'url', 403);
+        cur = next;
+        continue;
+      }
+      got = x; break;
+    }
+    if (!got) { res.writeHead(502, head); return res.end(); }
+    const { r, done } = got;
     try {
       const type = r.headers.get('content-type') || '';
       if (!r.ok || !/^image\//i.test(type)) { res.writeHead(404, head); return res.end(); }
@@ -997,7 +1018,7 @@ route('POST', '/api/prepare/:type/:id', (req, res, q, p) => {
   // Read the file's format in the background so pressing Play starts faster – but never at the cost of a
   // provider connection someone needs: one at a time, not while anything plays, not on 1–2 connection accounts.
   const maxConn = (catalog.data && catalog.data.maxConn) || 0;
-  const busy = preparing || Date.now() - lastStreamAt < 20000 || ff.activeSessions() > 0 || tsbuf.matchSession() || (maxConn && maxConn <= 2);
+  const busy = preparing || Date.now() - lastStreamAt < 20000 || ff.activeSessions() > 0 || tsbuf.pauseActive() > 0 || proxy.activeCount() > 0 || tsbuf.matchSession() || (maxConn && maxConn <= 2);
   if (!busy && catalog.ready() && ff.has() && (p.type === 'movie' || p.type === 'episode')) {
     const src = catalog.streamUrl(p.type, decodeURIComponent(p.id), q.get('ext'));
     if (src && src.primary) {
@@ -1023,9 +1044,8 @@ route('GET', '/api/stream/:type/:id', async (req, res, q, p) => {
   if (rec && q.get('pv')) return bad(res, 'Matchen spelas in på kanalen', 409); // no preview from the recording's start
   if (rec) return ok(res, { live: true, sources: [{ kind: 'hls', url: rec.url }], rec });
   // one connection: a new stream ends a paused channel; a preview (start page, guide) gives way to it instead
-  if (q.get('pv') && (tsbuf.pauseActive() > 0 || ff.activeSessions() > 0)) return bad(res, 'Något annat spelas just nu', 409);
-  tsbuf.stopPauses('ny ström');
-  ff.stopAll(); // and a film being converted (the newest stream wins, as when a film starts)
+  if (q.get('pv') && (tsbuf.pauseActive() > 0 || ff.activeSessions() > 0 || proxy.activeCount() > 0)) return bad(res, 'Något annat spelas just nu', 409);
+  takeConnection('ny ström'); // and a film being converted (the newest stream wins, as when a film starts)
   lastStreamAt = Date.now();
   let src = catalog.streamUrl(type, id, q.get('ext'));
   if (type === 'live' && q.get('start')) src = catalog.timeshiftUrl(id, +q.get('start'), +q.get('dur') || 60) || src;
@@ -1095,6 +1115,13 @@ let matchWaitLog = 0;
 const matchWait = new Map(); // team|start → when the recording last had to wait for another stream (shown on the start page)
 
 /** A match is being recorded on another channel: the reason to refuse a new stream (the provider gives one). */
+/** A new stream takes the provider's one connection: a paused channel, a conversion and proxied streams end. */
+function takeConnection(why) {
+  tsbuf.stopPauses(why);
+  ff.stopAll();
+  proxy.abortAll();
+}
+
 function matchRecBusy(type, id, archive) {
   const ms = tsbuf.matchSession();
   if (!ms) return '';
@@ -1146,7 +1173,7 @@ function matchRecTick() {
     if (tsbuf.matchSession()) break; // the provider gives one connection: the recording that runs goes on
     // someone is watching (a conversion, or a stream started in the last few minutes): their picture isn't cut off;
     // the recording starts as soon as the connection is free
-    if (ff.activeSessions() > 0 || tsbuf.pauseActive() > 0 || Date.now() - lastStreamAt < 3 * 60e3) {
+    if (ff.activeSessions() > 0 || tsbuf.pauseActive() > 0 || proxy.activeCount() > 0 || Date.now() - lastStreamAt < 3 * 60e3) {
       if (now - (matchWaitLog || 0) > 5 * 60e3) { matchWaitLog = now; console.log('[match]', m.title, 'börjar snart – väntar med inspelningen tills ingen annan ström används'); }
       matchWait.set(key, now);
       break;
@@ -1205,7 +1232,7 @@ route('POST', '/api/pause/start', async (req, res, q) => {
     return bad(res, 'Matchinspelningen pågår på ' + (r ? r.chName : 'en annan kanal') + '. Avbryt den först.', 409);
   }
   lastStreamAt = Date.now();
-  ff.stopAll(); // one connection: a film being converted ends when a channel is paused
+  ff.stopAll(); proxy.abortAll(); // one connection: a film being converted or proxied ends when a channel is paused
   try {
     const it = catalog.get('live', id) || {};
     const s = tsbuf.start(src.primary, { ua: catalog.ua(), maxMin: +o.pauseMax || 60, ch: it.n || id });
@@ -1250,6 +1277,7 @@ route('GET', '/api/speedtest', async (req, res, q) => {
   if (tsbuf.matchSession()) return bad(res, 'En match spelas in just nu – testa efter matchen', 409);
   if (ff.activeSessions() > 0) return bad(res, 'Något annat spelas via servern just nu – testa när det är stängt', 409);
   if (tsbuf.pauseActive() > 0) return bad(res, 'En pausad kanal spelas in just nu – testa när den är stängd', 409);
+  if (proxy.activeCount() > 0) return bad(res, 'Något spelas via servern just nu – testa när det är stängt', 409);
   if (speedBusy) return bad(res, 'Ett test pågår redan', 409);
   speedBusy = true;
   try { await speedTest(req, res, q, url); } finally { speedBusy = false; }
@@ -1303,18 +1331,6 @@ route('GET', '/api/probe', async (req, res, q) => {
   try { ok(res, await ff.probe(url, catalog.ua())); } catch (e) { bad(res, e.message, 502); }
 });
 
-route('GET', '/remux', (req, res, q) => {
-  if (!ff.has()) return bad(res, 'ffmpeg saknas', 501);
-  const url = proxy.untoken(q.get('t'));
-  if (!proxy.isAllowed(url)) return bad(res, 'forbidden', 403);
-  const busy = matchRecBusy('movie', ''); // older players: the same one-connection rules as /rx
-  if (busy) return bad(res, busy, 409);
-  tsbuf.stopPauses('film startad');
-  ff.stopAll();
-  const o = store.config.options;
-  ff.remux(req, res, url, { ss: Math.max(0, +q.get('ss') || 0), a: +q.get('a') || 0, ua: catalog.ua(), audioMode: o.audioMode, maxRes: o.maxRes, caps: parseCaps(q.get('caps')) });
-});
-
 // Converted playback as HLS: works in every browser, including Safari and iPhone
 route('GET', '/rx/play.m3u8', async (req, res, q) => {
   if (!ff.has()) return bad(res, 'ffmpeg saknas', 501);
@@ -1323,7 +1339,7 @@ route('GET', '/rx/play.m3u8', async (req, res, q) => {
   if (!proxy.isAllowed(url)) return bad(res, 'forbidden', 403);
   const busy = matchRecBusy('movie', '');
   if (busy) return bad(res, busy, 409);
-  tsbuf.stopPauses('film startad'); // one connection
+  tsbuf.stopPauses('film startad'); proxy.abortAll(); // one connection (other conversions are replaced by hlsSession; the same one is kept)
   const o = store.config.options;
   try {
     const s = await ff.hlsSession(url, { group: t, ss: Math.max(0, +q.get('ss') || 0), a: +q.get('a') || 0, ua: catalog.ua(),
@@ -1603,4 +1619,4 @@ for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { store.flush(); 
 
 if (require.main === module) start();
 
-module.exports = { server, store, catalog, proxy, start, _pool: pool, _maskUrl: (u) => maskUrl(u), _unmaskUrl: (a, b) => unmaskUrl(a, b), _linkSecrets: (u) => linkSecrets(u), _matchRecTick: matchRecTick, _streamIdle: () => { lastStreamAt = 0; ff.stopAll(); } };
+module.exports = { server, store, catalog, proxy, start, _pool: pool, _maskUrl: (u) => maskUrl(u), _unmaskUrl: (a, b) => unmaskUrl(a, b), _linkSecrets: (u) => linkSecrets(u), _matchRecTick: matchRecTick, _imageAllowed: (u) => imageAllowed(new URL(u)), _privateHost: privateHost, _streamIdle: () => { lastStreamAt = 0; ff.stopAll(); } };

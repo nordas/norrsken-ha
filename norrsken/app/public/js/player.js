@@ -990,7 +990,7 @@
 
   /** Subtitles move up while the controls are showing, so the buttons never cover them. */
   Player.prototype.liftCues = function () {
-    var tr = this.track, line = this.osdOn && !this.live ? -7 : -3;
+    var tr = this.track, line = this.osdOn && !this.live ? -8 : -3;
     if (!tr || !tr.cues) return;
     for (var i = 0; i < tr.cues.length; i++) if (tr.cues[i].line !== line) { try { tr.cues[i].line = line; } catch (e) { /* ignore */ } }
   };
@@ -1135,8 +1135,8 @@
     b.push({ id: 'rw', icon: 'rw', label: '10 s' });
     b.push({ id: 'ff', icon: 'ff', label: '10 s' });
     var L = this.trackLabels();
-    b.push({ id: 'subs', icon: 'sub', label: L.sub });
-    if (L.audioCount > 1) b.push({ id: 'audio', icon: 'audio', label: L.audio });
+    b.push({ id: 'subs', icon: 'sub', label: L.subOn ? 'Text: ' + L.sub : L.sub }); // "Text: Svenska" / "Ljud: Svenska": the two aren't told apart by the icon alone
+    if (L.audioCount > 1) b.push({ id: 'audio', icon: 'audio', label: 'Ljud: ' + L.audio });
     if (this.nextEp()) b.push({ id: 'next', icon: 'next', label: 'Nästa avsnitt' });
     b.push({ id: 'restart', icon: 'restart', label: 'Från början' });
     if (this.item.t === 'catchup') b.push({ id: 'live', icon: 'live', label: 'Gå till live' });
@@ -1316,7 +1316,7 @@
     try {
       var Cue = window.VTTCue || window.TextTrackCue;
       var cue = new Cue(Math.max(0, s), e, c.text);
-      cue.line = this.osdOn && !this.live ? -7 : -3;
+      cue.line = this.osdOn && !this.live ? -8 : -3;
       this.track.addCue(cue);
     } catch (err) { /* ignore bad cue */ }
   };
@@ -1590,7 +1590,8 @@
     return {
       audio: a ? a.label.split(' – ')[0] : '',
       audioCount: o.audio.length,
-      sub: s && s.kind !== 'off' ? s.label.split(' ')[0] : 'Inga undertexter'
+      sub: s && s.kind !== 'off' ? s.label.split(' ')[0] : 'Inga undertexter',
+      subOn: !!(s && s.kind !== 'off')
     };
   };
   /** The sound and subtitle icons show what is on now: the label sits next to the icon, as on TV4 Play. */
@@ -1598,9 +1599,9 @@
     if (!this.lSubB) return;
     var L = this.trackLabels();
     var short = this.lctl && this.lctl.classList.contains('tl'); // phone: a short word under the icon
-    this.lSubB.lastChild.textContent = short ? 'Text' : L.sub;
+    this.lSubB.lastChild.textContent = short ? 'Text' : L.subOn ? 'Text: ' + L.sub : L.sub;
     this.lAudB.style.display = L.audioCount > 1 ? '' : 'none';
-    this.lAudB.lastChild.textContent = short ? 'Ljud' : L.audio;
+    this.lAudB.lastChild.textContent = short ? 'Ljud' : 'Ljud: ' + L.audio;
   };
   /** Where we are in the recording, and how much has been recorded (seconds). */
   Player.prototype.recPos = function () {
