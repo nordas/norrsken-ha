@@ -130,6 +130,44 @@ const FOLLOW = {
   },
 };
 
+/* What kind of match it is, read from title, description and channel name: sport, women/men, age class, competition. */
+const OTHER_SPORTS = [
+  [/handboll/i, 'Handboll'], [/bandy/i, 'Bandy'], [/innebandy/i, 'Innebandy'], [/basket/i, 'Basket'], [/volley/i, 'Volleyboll'],
+  [/curling/i, 'Curling'], [/tennis/i, 'Tennis'], [/padel/i, 'Padel'], [/rugby/i, 'Rugby'],
+  [/skidskytte|biathlon/i, 'Skidskytte'], [/l[äa]ngdskid|l[äa]ngd(åkning|akning)|cross[- ]?country|tour de ski/i, 'Längdskidor'],
+];
+const GENDER_DAM = /\b(dam|damer|damerna|damlandslag(et)?|damkronorna|damallsvenskan|elitettan|women'?s?|female|kvinnor|flickor)\b/i;
+const GENDER_HERR = /\b(herr|herrar|herrarna|herrlandslag(et)?|men'?s|m[äa]n)\b/i;
+const AGE_RE = /\b(?:j-?(?:18|20)|u-?(?:15|16|17|18|19|20|21|23))\b|\bjunior(?:er|landslag(?:et)?)?\b|\bpojklandslag(?:et)?\b|\bflicklandslag(?:et)?\b/i;
+const COMPS = [
+  [/\bshl\b/i, 'SHL'], [/hockeyallsvenskan/i, 'Hockeyallsvenskan'], [/\bchl\b|champions hockey/i, 'CHL'],
+  [/nations league/i, 'Nations League'], [/vm-kval/i, 'VM-kval'], [/em-kval/i, 'EM-kval'], [/landskamp/i, 'Landskamp'],
+  [/vänskapsmatch|v[äa]nskaps/i, 'Vänskapsmatch'], [/damallsvenskan/i, 'Damallsvenskan'], [/allsvenskan/i, 'Allsvenskan'],
+  [/superettan/i, 'Superettan'], [/champions league/i, 'Champions League'], [/europa league/i, 'Europa League'],
+  [/euro hockey tour|\beht\b|karjala|beijer|channel one|german cup/i, 'Euro Hockey Tour'],
+  [/world cup|v[äa]rldscup/i, 'Världscup'], [/\bvm\b/i, 'VM'], [/\bem\b/i, 'EM'],
+];
+/** { sport, gender: 'Dam'|'Herr'|'', age: 'U21'|'Junior'|'', comp, label: 'Fotboll · Dam · Landskamp' } — only what the text says. */
+function classify(title, desc, chName, fallbackSport) {
+  const all = [title, desc, chName].join(' ');
+  let sport = '';
+  const other = OTHER_SPORTS.find(x => x[0].test(all));
+  if (HOCKEY.test(all) || /\bjvm\b|junior-?vm|hockey/i.test(all)) sport = 'Ishockey';
+  else if (other) sport = other[1]; // before football: "handbollslandskamp" must not read as football
+  else if (FOOTBALL.test(all)) sport = 'Fotboll';
+  else sport = fallbackSport || '';
+  // the title is the strongest hint; description and channel only when the title says nothing
+  const pick = (re) => re.test(title) ? true : re.test(desc || '') || re.test(chName || '');
+  const gender = pick(GENDER_DAM) ? 'Dam' : pick(GENDER_HERR) ? 'Herr' : '';
+  const am = AGE_RE.exec(title) || AGE_RE.exec(desc || '') || AGE_RE.exec(chName || '');
+  let age = '';
+  if (am) { const s = am[0].toUpperCase().replace('-', ''); age = /^(J|U)\d/.test(s) ? s : 'Junior'; }
+  const cm = COMPS.find(x => x[0].test(title + ' ' + (desc || '')));
+  const comp = cm ? cm[1] : '';
+  const label = [sport, [age && age, gender].filter(Boolean).join(' '), comp].filter(Boolean).join(' · ');
+  return { sport, gender, age, comp, label };
+}
+
 /** The favourite team as something to follow: its name in the title, and hockey. */
 function teamFollow(fav) {
   return {
@@ -184,8 +222,10 @@ function collect(follows, channels, epg, now) {
   return [...hits.values()].sort((a, b) => (rank(a) - rank(b)) || a.s - b.s || b.chans.length - a.chans.length).map((best) => {
     const chans = best.chans.slice().sort((a, b) => channelScore(b.n) - channelScore(a.n));
     const f = best.f;
+    const kind = classify(best.t, best.d, chans[0].n || '', f.id === 'langd' ? 'Längdskidor' : f.id === 'skidskytte' ? 'Skidskytte' : (f.vs && f.id !== 'sverige') ? 'Ishockey' : '');
     return {
       team: { id: f.id, name: f.name, short: f.short, col: f.col },
+      kind, label: kind.label || f.name,
       state: best.s > now ? 'soon' : now < best.e ? 'live' : 'ended',
       title: best.mu ? best.mu.home + ' – ' + best.mu.away : best.t,
       raw: best.t,
@@ -219,4 +259,4 @@ function findMatch(teamIdValue, channels, epg, opts = {}) {
   return todayAll(teamIdValue, channels, epg, opts)[0] || null;
 }
 
-module.exports = { TEAMS, teamId, team, list, matchup, findMatch, matchesToday, todayAll, channelScore, stockholmDay, stockholmTime, eventOf };
+module.exports = { classify, TEAMS, teamId, team, list, matchup, findMatch, matchesToday, todayAll, channelScore, stockholmDay, stockholmTime, eventOf };

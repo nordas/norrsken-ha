@@ -231,7 +231,7 @@
     var t = this.txt;
     t.innerHTML = '';
     var live = m.state === 'live';
-    t.appendChild(h('div', { class: 'kind' }, [live ? h('span', { class: 'live-pill', text: 'Live nu' }) : h('span', { class: 'soon-pill', text: m.state === 'ended' ? 'Slut' : 'Börjar ' + NS.fmtClock(m.s) }), m.team.name]));
+    t.appendChild(h('div', { class: 'kind' }, [live ? h('span', { class: 'live-pill', text: 'Live nu' }) : h('span', { class: 'soon-pill', text: m.state === 'ended' ? 'Slut' : 'Börjar ' + NS.fmtClock(m.s) }), m.label || m.team.name]));
     t.appendChild(h('h1', { class: m.title.length > 22 ? 'long' : null, text: m.title }));
     var meta = h('div', { class: 'meta' });
     var logo = h('span', { class: 'chlogo' });
