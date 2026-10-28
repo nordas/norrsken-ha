@@ -575,7 +575,44 @@
     this.el.appendChild(this.rows.el);
     this.render();
     this.fetch();
+    // the download button follows the server (queued, % done, saved)
+    this._dlSig = '';
+    this._unDl = NS.dl ? NS.dl.onChange(function () {
+      if (NS.router.top() !== self) return;
+      var sig = self.dlSig();
+      if (sig !== self._dlSig) { self._dlSig = sig; self.render(); }
+    }) : null;
   }
+
+  /** What the download button shows: the movie, or the chosen season of a series. */
+  Detail.prototype.dlList = function () {
+    var d = this.data();
+    if (d.t === 'movie') return [d];
+    var se = d.seasons && d.seasons[this.season || 0];
+    return se ? se.eps : [];
+  };
+  Detail.prototype.dlSig = function () {
+    var self = this;
+    return this.dlList().map(function (e) { var x = NS.dl.get(self.data().t === 'movie' ? 'movie' : 'episode', e.id); return x ? x.status + ':' + Math.round(x.pct || 0) : '-'; }).join(',');
+  };
+  Detail.prototype.dlBtn = function () {
+    var self = this, d = this.data();
+    var list = this.dlList();
+    if (!NS.dl || !NS.dl.on || !list.length) return null;
+    var type = d.t === 'movie' ? 'movie' : 'episode';
+    var st = list.map(function (e) { return NS.dl.get(type, e.id); });
+    var done = st.filter(function (x) { return x && x.status === 'done'; }).length;
+    var run = st.filter(function (x) { return x && (x.status === 'downloading' || x.status === 'queued'); });
+    var err = st.filter(function (x) { return x && x.status === 'error'; }).length;
+    var one = type === 'movie';
+    if (done === list.length) return { id: 'dl', icon: 'check', label: one ? 'Nedladdad' : 'Säsongen nedladdad' };
+    if (run.length) {
+      var act = run.filter(function (x) { return x.status === 'downloading'; })[0];
+      return { id: 'dl', icon: 'download', label: act ? 'Laddar ner ' + Math.round(act.pct) + '%' : 'Köad för nedladdning', sub: one ? '' : done + ' av ' + list.length };
+    }
+    if (err && one) return { id: 'dl', icon: 'download', label: 'Försök ladda ner igen' };
+    return { id: 'dl', icon: 'download', label: one ? 'Ladda ner' : 'Ladda ner säsongen', sub: !one && done ? done + ' av ' + list.length : '' };
+  };
 
   Detail.prototype.fetch = function () {
     var self = this;
@@ -688,6 +725,8 @@
     var inl = NS.inList(d.k);
     btns.push({ id: 'list', icon: inl ? 'check' : 'plus', label: 'Min lista' });
     var lk = NS.likeOf(d.k);
+    var dlb = this.dlBtn();
+    if (dlb) btns.push(dlb);
     if (d.t === 'movie' || d.t === 'series') btns.push({ id: 'rate', icon: lk === -1 ? 'thumbdown' : 'thumb', label: lk === 1 ? 'Gillar' : lk === -1 ? 'Inte för mig' : 'Betygsätt' });
     var prog = d.t === 'movie' ? NS.state.progress[d.k] : (this.target() ? NS.state.progress[this.target().k] : null);
     if (prog) btns.push({ id: 'more', icon: 'episodes', label: 'Fler val' });
@@ -791,6 +830,15 @@
       return;
     }
     if (b.id === 'wait') return;
+    if (b.id === 'dl') {
+      var one = d.t === 'movie';
+      var type = one ? 'movie' : 'episode';
+      var todo = this.dlList().filter(function (e) { var x = NS.dl.get(type, e.id); return !x || x.status === 'error'; });
+      if (!todo.length) { NS.toast(one ? 'Finns redan på servern – spelas därifrån' : 'Hela säsongen är redan nedladdad eller köad', 'info'); return; }
+      var ver = this.ver;
+      NS.dl.add(todo.map(function (e) { return NS.dl.req(one ? Object.assign({}, e, ver ? { ext: ver.ext || e.ext } : {}) : Object.assign({}, e, { sn: d.n }), one && ver ? { id: ver.id, ext: ver.ext || e.ext } : {}); }));
+      return;
+    }
     if (b.id === 'ver') {
       NS.menu('Välj version', d.versions.map(function (v) { return { label: NS.versionLabel(v), icon: self.ver && self.ver.id === v.id ? 'check' : null, value: v }; }),
         'Samma titel finns i flera kvaliteter hos leverantören.').then(function (v) { if (v) { self.ver = v; self.render(); } });
@@ -822,7 +870,7 @@
     });
   };
   Detail.prototype.deactivate = function () { NS.preview.stop(); this.pvItem = null; };
-  Detail.prototype.destroy = function () { NS.preview.stop(); this.rows.destroy(); };
+  Detail.prototype.destroy = function () { NS.preview.stop(); this.rows.destroy(); if (this._unDl) this._unDl(); };
 
   Detail.prototype.onKey = function (a) {
     if (a === 'back') { NS.router.pop(); return; }
