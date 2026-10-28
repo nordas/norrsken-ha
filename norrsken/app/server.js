@@ -15,6 +15,8 @@ const ff = require('./lib/ffmpeg');
 const qr = require('./lib/qr');
 const sport = require('./lib/sport');
 const tsbuf = require('./lib/tsbuf');
+const storage = require('./lib/storage');
+const downloads = require('./lib/downloads');
 const { Services, serviceInfo } = require('./lib/services');
 const { redact, fetchText, pool } = require('./lib/util');
 const pkg = require('./package.json');
@@ -389,6 +391,8 @@ function status() {
     ffmpeg: ff.has(),
     previews: store.config.options.previews || 'sound',
     pause: { mode: store.config.options.pauseMode || 'auto', max: +store.config.options.pauseMax || 60, rec: ff.has() },
+    storage: storage.info(),
+    downloads: ff.has(),
     parentPin: (store.config.profiles || []).some(p => !p.kids && p.pin),
     profiles: publicProfiles(),
     pinRequired: !!setupPin(),
@@ -914,6 +918,7 @@ route('GET', '/api/similar/:type/:id', async (req, res, q, p) => {
 
 let preparing = false;
 let lastStreamAt = 0;
+let lastPlayAt = 0; // the last time something real (not a preview) played; devices report every minute while they play
 const services = new Services(() => store.config.options);
 
 /** The title in the library ("Finns i Norrsken"), if it is there. */
@@ -971,6 +976,15 @@ route('GET', '/api/services/where/:mt/:id', async (req, res, q, p) => {
   try { ok(res, { svc: await services.where(p.mt, p.id) }); } catch (e) { ok(res, { svc: [], error: e.message }); }
 });
 
+route('GET', '/api/extras/:mt/:id', async (req, res, q, p) => {
+  if (!services.enabled() || !['movie', 'tv'].includes(p.mt) || !/^\d+$/.test(p.id)) return ok(res, { cast: [], videos: [] });
+  try {
+    const x = await services.extras(p.mt, p.id);
+    if (profileOf(q).kids) x.videos = []; // no YouTube links from a kids profile
+    ok(res, x);
+  } catch (e) { ok(res, { cast: [], videos: [], error: e.message }); }
+});
+
 route('GET', '/api/services', (req, res) => ok(res, { enabled: services.enabled(), chosen: services.chosen(), info: serviceInfo(), error: services.lastError }));
 
 route('GET', '/api/services/search', async (req, res, q) => {
@@ -1009,16 +1023,16 @@ route('GET', '/api/services/title/:mt/:id', async (req, res, q, p) => {
   } catch (e) { bad(res, e.message, 502); }
 });
 
-catalog.isBusy = () => Date.now() - lastStreamAt < 15 * 60e3 || ff.activeSessions() > 0 || tsbuf.active() > 0;
+catalog.isBusy = () => Date.now() - lastStreamAt < 15 * 60e3 || ff.activeSessions() > 0 || tsbuf.active() > 0 || downloads.active() > 0;
 /* A device that plays (also straight from the provider, which the server never sees) says so every minute:
    the match recording then waits instead of taking the one connection. */
-route('POST', '/api/watching', (req, res) => { lastStreamAt = Date.now(); ok(res, { ok: true }); });
+route('POST', '/api/watching', (req, res) => { lastStreamAt = lastPlayAt = Date.now(); ok(res, { ok: true }); });
 
 route('POST', '/api/prepare/:type/:id', (req, res, q, p) => {
   // Read the file's format in the background so pressing Play starts faster – but never at the cost of a
   // provider connection someone needs: one at a time, not while anything plays, not on 1–2 connection accounts.
   const maxConn = (catalog.data && catalog.data.maxConn) || 0;
-  const busy = preparing || Date.now() - lastStreamAt < 20000 || ff.activeSessions() > 0 || tsbuf.pauseActive() > 0 || proxy.activeCount() > 0 || tsbuf.matchSession() || (maxConn && maxConn <= 2);
+  const busy = preparing || Date.now() - lastStreamAt < 20000 || downloads.active() > 0 || ff.activeSessions() > 0 || tsbuf.pauseActive() > 0 || proxy.activeCount() > 0 || tsbuf.matchSession() || (maxConn && maxConn <= 2);
   if (!busy && catalog.ready() && ff.has() && (p.type === 'movie' || p.type === 'episode')) {
     const src = catalog.streamUrl(p.type, decodeURIComponent(p.id), q.get('ext'));
     if (src && src.primary) {
@@ -1043,11 +1057,14 @@ route('GET', '/api/stream/:type/:id', async (req, res, q, p) => {
   const rec = type === 'live' && !q.get('start') ? sameChannelRec(id, ingressBase(req)) : null;
   if (rec && q.get('pv')) return bad(res, 'Matchen spelas in på kanalen', 409); // no preview from the recording's start
   if (rec) return ok(res, { live: true, sources: [{ kind: 'hls', url: rec.url }], rec });
+  // downloaded to the storage disk: played from there, no provider connection (and nothing else is cut off)
+  const dl = type === 'live' ? null : downloads.doneFor(type, id);
+  if (dl) return ok(res, { live: false, sources: [{ kind: 'file', url: ingressBase(req) + '/dl/' + dl.file }], ext: 'mp4', t: '', downloaded: true });
   // one connection: a new stream ends a paused channel; a preview (start page, guide) gives way to it instead
   const air = !!q.get('air'); // AirPlay preparation: just the addresses, it must not end what plays or open a connection
-  if (q.get('pv') && (tsbuf.pauseActive() > 0 || ff.activeSessions() > 0 || proxy.activeCount() > 0)) return bad(res, 'Något annat spelas just nu', 409);
+  if (q.get('pv') && (tsbuf.pauseActive() > 0 || ff.activeSessions() > 0 || proxy.activeCount() > 0 || downloads.active() > 0)) return bad(res, 'Något annat spelas just nu', 409);
   if (!air) takeConnection('ny ström'); // and a film being converted (the newest stream wins, as when a film starts)
-  if (!air) lastStreamAt = Date.now();
+  if (!air) { lastStreamAt = Date.now(); if (!q.get('pv')) lastPlayAt = lastStreamAt; }
   let src = catalog.streamUrl(type, id, q.get('ext'));
   if (type === 'live' && q.get('start')) src = catalog.timeshiftUrl(id, +q.get('start'), +q.get('dur') || 60) || src;
   if (!src || !src.primary) return bad(res, 'Kunde inte hitta strömmen', 404);
@@ -1116,8 +1133,11 @@ let matchWaitLog = 0;
 const matchWait = new Map(); // team|start → when the recording last had to wait for another stream (shown on the start page)
 
 /** A match is being recorded on another channel: the reason to refuse a new stream (the provider gives one). */
+/** A download holds a provider connection: on accounts with one or two, whatever else wants one goes first. */
+function dlYield(why) { if (((catalog.data && catalog.data.maxConn) || 1) <= 2) downloads.yieldTo(why); }
 /** A new stream takes the provider's one connection: a paused channel, a conversion and proxied streams end. */
 function takeConnection(why) {
+  dlYield(why); // a download uses a connection too
   tsbuf.stopPauses(why);
   ff.stopAll();
   proxy.abortAll();
@@ -1182,6 +1202,7 @@ function matchRecTick() {
     const src = catalog.streamUrl('live', m.ch.id);
     if (!src || !src.primary) continue;
     try {
+      downloads.yieldTo('matchinspelning');
       const sess = tsbuf.start(src.primary, { ua: catalog.ua(), maxMin: Math.ceil((m.e + MATCH_TAIL_MS - now) / 60e3), ch: m.title + ' på ' + (m.chName || m.ch.n), match: true });
       if (had) {
         console.log('[match] inspelningen av', m.title, 'avbröts – startar om');
@@ -1233,7 +1254,7 @@ route('POST', '/api/pause/start', async (req, res, q) => {
     return bad(res, 'Matchinspelningen pågår på ' + (r ? r.chName : 'en annan kanal') + '. Avbryt den först.', 409);
   }
   lastStreamAt = Date.now();
-  ff.stopAll(); proxy.abortAll(); // one connection: a film being converted or proxied ends when a channel is paused
+  dlYield('paus'); ff.stopAll(); proxy.abortAll(); // one connection: a film being converted or proxied ends when a channel is paused
   try {
     const it = catalog.get('live', id) || {};
     const s = tsbuf.start(src.primary, { ua: catalog.ua(), maxMin: +o.pauseMax || 60, ch: it.n || id });
@@ -1266,6 +1287,70 @@ route('GET', '/pause/:id/:name', (req, res, q, p) => {
   });
 });
 
+
+/* ------------------------------------------------------------------ downloads (to the storage disk) */
+downloads.configure({
+  busy: () => Date.now() - lastPlayAt < 3 * 60e3 || Date.now() - lastStreamAt < 20000 || ff.activeSessions() > 0 || tsbuf.active() > 0 || proxy.activeCount() > 0 || !catalog.ready(),
+  maxConn: () => (catalog.data && catalog.data.maxConn) || 1,
+  probe: (u, ua) => ff.probe(u, ua),
+  url: (type, id, ext) => catalog.streamUrl(type, id, ext),
+  ua: () => catalog.ua(),
+});
+
+route('GET', '/api/downloads', (req, res) => ok(res, { items: downloads.list(), storage: storage.info(), on: ff.has() }));
+
+route('POST', '/api/downloads', async (req, res, q) => {
+  if (!ff.has()) return bad(res, 'Nedladdning kräver ffmpeg', 503);
+  if (!catalog.ready()) return bad(res, 'inte redo', 503);
+  const prof = profileOf(q);
+  if (!pinOk(q, prof)) return bad(res, 'Profilen är låst – välj den igen och ange PIN-koden', 401);
+  const b = await readBody(req);
+  const list = (Array.isArray(b.items) ? b.items : [b]).slice(0, 60);
+  const out = [];
+  const at = Date.now(); // one batch (a season) stays together and in order
+  for (const x of list) {
+    const type = x && x.type;
+    const id = x && String(x.id == null ? '' : x.id);
+    if (!id || (type !== 'movie' && type !== 'episode')) continue;
+    if (prof.kids && !catalog.allowed(type, id, prof)) continue; // kids profiles: only what their library shows
+    try { out.push(downloads.add({ type, id, ext: x.ext, title: x.title, sub: x.sub, img: x.img, at })); } catch (e) { return bad(res, e.message, 400); }
+  }
+  if (!out.length) return bad(res, 'Inget att ladda ner', 400);
+  ok(res, { items: out });
+});
+
+route('POST', '/api/downloads/:id/delete', (req, res, q, p) => ok(res, { ok: downloads.remove(decodeURIComponent(p.id)) }));
+route('POST', '/api/downloads/:id/retry', (req, res, q, p) => {
+  const it = downloads.get(decodeURIComponent(p.id));
+  if (!it) return bad(res, 'finns inte', 404);
+  if (it.status === 'error') { it.status = 'queued'; it.err = ''; downloads.pump(); }
+  ok(res, { ok: true });
+});
+
+/** A finished download: played from the server (Range, so seeking works) or saved to the device (?dl=1). */
+route('GET', '/dl/:id/:name', (req, res, q, p) => {
+  const it = downloads.get(decodeURIComponent(p.id));
+  if (!it || it.status !== 'done') return bad(res, 'Filen finns inte', 404);
+  const f = downloads.fileOf(it);
+  fs.stat(f, (err, st) => {
+    if (err || !st.isFile()) return bad(res, 'Filen saknas på lagringsdisken', 404);
+    const h = { 'Content-Type': 'video/mp4', 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*', 'Access-Control-Expose-Headers': 'Content-Length, Content-Range' };
+    if (q.get('dl')) h['Content-Disposition'] = "attachment; filename*=UTF-8''" + encodeURIComponent((it.title || 'film').replace(/[\\/:*?"<>|]+/g, ' ').trim() + '.mp4');
+    const m = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
+    let a = 0;
+    let z = st.size - 1;
+    if (m && (m[1] || m[2])) {
+      if (m[1]) { a = +m[1]; if (m[2]) z = Math.min(+m[2], z); } else { a = Math.max(0, st.size - +m[2]); }
+      if (a > z || a >= st.size) { res.writeHead(416, { ...h, 'Content-Range': 'bytes */' + st.size }); return res.end(); }
+      res.writeHead(206, { ...h, 'Content-Range': 'bytes ' + a + '-' + z + '/' + st.size, 'Content-Length': z - a + 1 });
+    } else res.writeHead(200, { ...h, 'Content-Length': st.size });
+    if (req.method === 'HEAD') return res.end();
+    const rs = fs.createReadStream(f, { start: a, end: z });
+    res.on('close', () => rs.destroy());
+    rs.pipe(res);
+  });
+});
+
 /*
  * Speed test: how fast the provider sends this title to the server (the leg other players skip: they fetch
  * straight from the provider), and how fast the server sends to the device. Run with the player stopped:
@@ -1276,6 +1361,7 @@ route('GET', '/api/speedtest', async (req, res, q) => {
   const url = proxy.untoken(q.get('t'));
   if (!proxy.isAllowed(url)) return bad(res, 'forbidden', 403);
   if (tsbuf.matchSession()) return bad(res, 'En match spelas in just nu – testa efter matchen', 409);
+  if (downloads.active() > 0) return bad(res, 'En nedladdning pågår – testa när den är klar', 409);
   if (ff.activeSessions() > 0) return bad(res, 'Något annat spelas via servern just nu – testa när det är stängt', 409);
   if (tsbuf.pauseActive() > 0) return bad(res, 'En pausad kanal spelas in just nu – testa när den är stängd', 409);
   if (proxy.activeCount() > 0) return bad(res, 'Något spelas via servern just nu – testa när det är stängt', 409);
@@ -1329,6 +1415,7 @@ route('GET', '/api/probe', async (req, res, q) => {
   if (!ff.has()) return bad(res, 'ffmpeg saknas', 501);
   const url = proxy.untoken(q.get('t'));
   if (!proxy.isAllowed(url)) return bad(res, 'forbidden', 403);
+  if (downloads.active() > 0 && (((catalog.data && catalog.data.maxConn) || 1) <= 2)) return bad(res, 'En nedladdning pågår', 409);
   try { ok(res, await ff.probe(url, catalog.ua())); } catch (e) { bad(res, e.message, 502); }
 });
 
@@ -1340,7 +1427,7 @@ route('GET', '/rx/play.m3u8', async (req, res, q) => {
   if (!proxy.isAllowed(url)) return bad(res, 'forbidden', 403);
   const busy = matchRecBusy('movie', '');
   if (busy) return bad(res, busy, 409);
-  tsbuf.stopPauses('film startad'); proxy.abortAll(); // one connection (other conversions are replaced by hlsSession; the same one is kept)
+  dlYield('film startad'); tsbuf.stopPauses('film startad'); proxy.abortAll(); // one connection (other conversions are replaced by hlsSession; the same one is kept)
   const o = store.config.options;
   try {
     const s = await ff.hlsSession(url, { group: t, ss: Math.max(0, +q.get('ss') || 0), a: +q.get('a') || 0, ua: catalog.ua(),
@@ -1581,7 +1668,7 @@ const server = http.createServer(async (req, res) => {
       return res.end();
     }
     const px = /^\/px\/([A-Za-z0-9_-]+)(?:\/.*)?$/.exec(pathname);
-    if (px && (req.method === 'GET' || req.method === 'HEAD')) { if (proxy.isAllowed(proxy.untoken(px[1]))) lastStreamAt = Date.now(); return await proxy.handle(req, res, px[1], catalog.ua(), ingressBase(req)); }
+    if (px && (req.method === 'GET' || req.method === 'HEAD')) { if (proxy.isAllowed(proxy.untoken(px[1]))) { lastStreamAt = lastPlayAt = Date.now(); dlYield('ström'); } return await proxy.handle(req, res, px[1], catalog.ua(), ingressBase(req)); }
     for (const r of routes) {
       if (r.method !== req.method && !(r.method === 'GET' && req.method === 'HEAD')) continue;
       const m = r.re.exec(pathname);

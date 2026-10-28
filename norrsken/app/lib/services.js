@@ -164,6 +164,19 @@ class Services {
     return items;
   }
 
+  /** Cast with photos and trailers/extras for one title (TMDB), for the detail page. */
+  async extras(mt, id) {
+    const r = await this.get('/' + mt + '/' + id, { language: 'sv-SE', append_to_response: 'credits,videos', include_video_language: 'sv,en,null' }, 24 * 3600e3);
+    const cast = ((r.credits && r.credits.cast) || []).slice(0, 16).map(c => ({ id: c.id, n: c.name, as: c.character || '', img: c.profile_path ? IMG + 'w185' + c.profile_path : '' }));
+    const crew = (r.credits && r.credits.crew) || [];
+    const dir = crew.find(c => c.job === 'Director' || c.job === 'Creator');
+    const rank = (v) => ({ Trailer: 0, Teaser: 1, Featurette: 2, 'Behind the Scenes': 3, Clip: 4 }[v.type] ?? 5) * 2 + (v.iso_639_1 === 'sv' ? 0 : 1);
+    const label = { Trailer: 'Trailer', Teaser: 'Teaser', Featurette: 'Featurette', 'Behind the Scenes': 'Bakom kulisserna', Clip: 'Klipp' };
+    const videos = ((r.videos && r.videos.results) || []).filter(v => v.site === 'YouTube' && /^[\w-]{6,20}$/.test(v.key || ''))
+      .sort((a, b) => rank(a) - rank(b)).slice(0, 8).map(v => ({ key: v.key, n: v.name || '', kind: label[v.type] || v.type || '' }));
+    return { cast, director: dir ? dir.name : '', videos };
+  }
+
   /** Details for one title, with the services and a link per service. */
   async detail(mt, id) {
     const r = await this.get('/' + mt + '/' + id, { language: 'sv-SE', append_to_response: 'credits' }, 24 * 3600e3);

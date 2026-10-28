@@ -308,7 +308,8 @@
   function paintChan(row) {
     var it = row._it, e = NS.epgFor(it.id);
     row._info.innerHTML = '';
-    row._info.appendChild(h('b', { text: (it.num ? it.num + '  ' : '') + it.n }));
+    var qb = /\b(4K|UHD)\b/i.test(it.n) ? '4K' : /\b(FHD|HD|1080)\b/i.test(it.n) ? 'HD' : /\bSD\b/i.test(it.n) ? 'SD' : '';
+    row._info.appendChild(h('b', {}, [(it.num ? it.num + '  ' : '') + it.n, qb ? h('span', { class: 'm-qb ' + qb.toLowerCase(), text: qb }) : null]));
     if (e && e.now) {
       row._info.appendChild(h('span', { class: 'm-ch-now', text: NS.fmtClock(e.now.s) + '  ' + e.now.t }));
       row._info.appendChild(NS.progEl(NS.livePct(e.now)));
@@ -445,11 +446,36 @@
   MBrowse.prototype.deactivate = function () { saveY(this); };
   MBrowse.prototype.destroy = function () { window.removeEventListener('scroll', this._onScroll); };
 
+  /* ---------------------------------------------------------------- downloads */
+  /** A download button for a film/episode that follows its state. mode 'act' = labelled action, else a round icon. */
+  function dlControl(scr, it, extraFn, mode) {
+    var kind = it.t === 'episode' ? 'episode' : 'movie';
+    var el = h('button', { class: mode === 'act' ? 'm-act' : 'm-ep-dl', 'aria-label': 'Ladda ner' });
+    var paint = function () {
+      var x = NS.dl.get(kind, extraFn().id);
+      el.innerHTML = '';
+      el.classList.toggle('on', !!x && x.status === 'done');
+      el.appendChild(NS.dl.badge(x));
+      if (mode === 'act') el.appendChild(h('span', { text: !x ? 'Ladda ner' : x.status === 'done' ? 'Nedladdad' : x.status === 'downloading' ? Math.round(x.pct) + '%' : x.status === 'queued' ? 'I kö' : 'Försök igen' }));
+    };
+    el.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var x = NS.dl.get(kind, extraFn().id);
+      if (NS.preview && NS.preview.stop) NS.preview.stop(); // the trailer holds the provider's connection
+      if (x && x.status === 'error') NS.dl.retry(x); else NS.dl.tap(it, extraFn());
+    });
+    paint();
+    scr.dlPaint.push(paint);
+    return el;
+  }
+
   /* ---------------------------------------------------------------- detail */
   function MDetail(item, opts) {
     var self = this;
     this.item = item;
     this.opts = opts || {};
+    this.dlPaint = [];
+    this._unDl = NS.dl.onChange(function () { self.dlPaint.forEach(function (f) { f(); }); });
     this.el = h('div', { class: 'screen m-screen m-detail' });
     this.art = h('div', { class: 'm-d-art' });
     this.el.appendChild(this.art);
@@ -468,6 +494,9 @@
       if (info.tmdb && NS.svc.enabled && !(NS.profile && NS.profile.kids)) {
         NS.api.get('api/services/where/' + (item.t === 'series' ? 'tv' : 'movie') + '/' + info.tmdb).then(function (r) {
           if (r.svc && r.svc.length) { self.svcWhere = r.svc; self.render(); }
+        }).catch(function () {});
+        NS.api.get('api/extras/' + (item.t === 'series' ? 'tv' : 'movie') + '/' + info.tmdb).then(function (x) {
+          if (x && ((x.cast && x.cast.length) || (x.videos && x.videos.length))) { self.extras = x; self.render(); }
         }).catch(function () {});
       }
       if (self.opts.autoplay) { self.opts.autoplay = false; self.play(false); return; }
@@ -514,6 +543,7 @@
     }
     var box = this.box;
     box.innerHTML = '';
+    this.dlPaint = [];
     var b = h('div', { class: 'm-d-body' });
     b.appendChild(h('div', { class: 'm-kind' }, [NS.icon('aurora'), NS.kindLabel(d)]));
     b.appendChild(h('h1', { text: d.n }));
@@ -539,6 +569,7 @@
     b.appendChild(h('div', { class: 'm-d-actions' }, [
       h('button', { class: 'm-act', onclick: function () { NS.toggleList(self.item).then(function () { self.render(); }); } }, [NS.icon(inl ? 'check' : 'plus'), h('span', { text: 'Min lista' })]),
       h('button', { class: 'm-act', onclick: function () { NS.rate(d).then(function (ch) { if (ch) self.render(); }); } }, [NS.icon(NS.likeOf(d.k) === -1 ? 'thumbdown' : 'thumb'), h('span', { text: NS.likeOf(d.k) === 1 ? 'Gillar' : NS.likeOf(d.k) === -1 ? 'Inte för mig' : 'Betygsätt' })]),
+      d.t === 'movie' && NS.dl.on ? dlControl(this, d, function () { var v = self.ver; return { id: v ? v.id : d.id, ext: v ? v.ext : d.ext }; }, 'act') : null,
       canRestart ? h('button', { class: 'm-act', onclick: function () { self.play(true); } }, [NS.icon('restart'), h('span', { text: 'Från början' })]) : null,
       canRestart ? h('button', { class: 'm-act', onclick: function () {
         var tt = d.t === 'series' ? Object.assign({}, self.target(), { t: 'episode', sid: d.id, sn: d.n }) : d;
@@ -552,17 +583,42 @@
       b.appendChild(vsel);
     }
     if (d.p) b.appendChild(h('p', { class: 'm-d-desc', text: d.p }));
-    if (d.cast) b.appendChild(h('p', { class: 'm-d-cast' }, [h('b', { text: 'Medverkande: ' }), d.cast]));
-    if (d.dir) b.appendChild(h('p', { class: 'm-d-cast' }, [h('b', { text: 'Regi: ' }), d.dir]));
+    var ex = this.extras;
+    if (d.cast && !(ex && ex.cast && ex.cast.length)) b.appendChild(h('p', { class: 'm-d-cast' }, [h('b', { text: 'Medverkande: ' }), d.cast]));
+    if (d.dir || (ex && ex.director)) b.appendChild(h('p', { class: 'm-d-cast' }, [h('b', { text: 'Regi: ' }), d.dir || ex.director]));
     if (d.g) b.appendChild(h('p', { class: 'm-d-cast' }, [h('b', { text: 'Genrer: ' }), d.g]));
     box.appendChild(b);
+    // the cast with photos (tap a face to find everything else with that person) and trailers/extras
+    if (ex && ex.cast && ex.cast.length) {
+      var people = h('div', { class: 'm-people' });
+      ex.cast.forEach(function (c) {
+        var ph = h('div', { class: 'm-person-img', style: 'background:' + NS.fallbackBg(c.n) }, h('span', { text: c.n.charAt(0) }));
+        if (c.img) ph.appendChild(NS.pic(c.img, 'm-img'));
+        people.appendChild(h('button', { class: 'm-person', onclick: function () { var sc = new MSearch(); sc.input.value = c.n; sc.run(); NS.router.push(sc); } }, [ph, h('b', { text: c.n }), c.as ? h('span', { text: c.as }) : null]));
+      });
+      box.appendChild(h('section', { class: 'm-row m-cast' }, [h('div', { class: 'm-tabs' }, h('span', { class: 'on', text: 'Rollista' })), people]));
+    }
+    if (ex && ex.videos && ex.videos.length) {
+      var vids = h('div', { class: 'm-vids' });
+      ex.videos.forEach(function (v) {
+        vids.appendChild(h('a', { class: 'm-vid', href: 'https://www.youtube.com/watch?v=' + v.key, target: '_blank', rel: 'noopener' }, [
+          h('div', { class: 'm-vid-img' }, [NS.pic('https://img.youtube.com/vi/' + v.key + '/hqdefault.jpg', 'm-img'), h('span', { class: 'm-ep-play' }, NS.icon('play')), v.kind ? h('span', { class: 'm-vid-kind', text: v.kind }) : null]),
+          h('b', { text: v.n })]));
+      });
+      box.appendChild(h('section', { class: 'm-row' }, [h('div', { class: 'm-tabs' }, h('span', { class: 'on', text: 'Trailers och extramaterial' })), vids]));
+    }
 
     if (d.seasons && d.seasons.length) {
       var t2 = this.target();
       if (this.season === undefined) this.season = Math.max(0, d.seasons.findIndex(function (x) { return x.eps.indexOf(t2) >= 0; }));
       var sel = h('select', { class: 'm-season', onchange: function () { self.season = +sel.value; self.render(); } });
       d.seasons.forEach(function (x, i) { var o = h('option', { value: String(i), text: x.name }); if (i === self.season) o.selected = true; sel.appendChild(o); });
-      var eps = h('div', { class: 'm-eps' }, [h('div', { class: 'm-tabs' }, h('span', { class: 'on', text: 'Avsnitt' })), d.seasons.length > 1 ? sel : null]);
+      var seasonDl = NS.dl.on ? h('button', { class: 'm-link m-season-dl', onclick: function () {
+        var list = d.seasons[self.season].eps.filter(function (e) { var x = NS.dl.get('episode', e.id); return !x || x.status === 'error'; }).map(function (e) { return NS.dl.req(Object.assign({}, e, { sn: d.n }), {}); });
+        if (!list.length) { NS.toast('Hela säsongen är redan nedladdad eller köad', 'info'); return; }
+        NS.dl.add(list);
+      } }, [NS.icon('download'), 'Ladda ner säsongen']) : null;
+      var eps = h('div', { class: 'm-eps' }, [h('div', { class: 'm-tabs' }, h('span', { class: 'on', text: 'Avsnitt' })), d.seasons.length > 1 ? sel : null, seasonDl]);
       d.seasons[this.season].eps.forEach(function (e) {
         var th = h('div', { class: 'm-ep-img', style: 'background:' + NS.fallbackBg(e.n) }, [e.img ? NS.pic(e.img, 'm-img') : null, h('span', { class: 'm-ep-play' }, NS.icon('play'))]);
         var p = NS.state.progress[e.k];
@@ -571,7 +627,7 @@
         var epEl;
         eps.appendChild(epEl = h('div', { class: 'm-ep', onclick: function () {
           NS.playItem(Object.assign({}, e, { sn: d.n, bd: d.bd }), { start: NS.resumePos(e), series: d });
-        } }, [h('div', { class: 'm-ep-top' }, [th, h('div', {}, [h('b', { text: e.ep + '. ' + e.n }), e.dur ? h('span', { text: NS.fmtDur(e.dur) }) : null])]),
+        } }, [h('div', { class: 'm-ep-top' }, [th, h('div', { class: 'm-ep-txt' }, [h('b', { text: e.ep + '. ' + e.n }), e.dur ? h('span', { text: NS.fmtDur(e.dur) }) : null]), NS.dl.on ? dlControl(self, Object.assign({}, e, { sn: d.n }), function () { return { id: e.id, ext: e.ext }; }, 'ep') : null]),
           e.p ? h('p', { text: e.p }) : null]));
         var seasonEps = d.seasons[self.season].eps;
         longPress(epEl, function () { NS.cardMenu(Object.assign({}, e, { sn: d.n, sid: d.id }), 'eps', seasonEps).then(function (ch) { if (ch) self.render(); }); });
@@ -602,7 +658,7 @@
     NS.loadState().then(function () { self.render(); self.preview(); });
   };
   MDetail.prototype.deactivate = function () { saveY(this); NS.preview.stop(); };
-  MDetail.prototype.destroy = function () { NS.preview.stop(); window.removeEventListener('scroll', this._onScroll); };
+  MDetail.prototype.destroy = function () { NS.preview.stop(); if (this._unDl) this._unDl(); window.removeEventListener('scroll', this._onScroll); };
 
   /* ---------------------------------------------------------------- search */
   function MSearch() {
@@ -751,11 +807,15 @@
     });
     if (list.childNodes.length) body.appendChild(list);
     // the profile's own choices (kept on the server, so the TV gets them too)
-    var teamV = h('span', { class: 'm-set-v' }), subV = h('span', { class: 'm-set-v' });
+    var teamV = h('span', { class: 'm-set-v' }), subV = h('span', { class: 'm-set-v' }), dlV = h('span', { class: 'm-set-v' });
+    var paintDlV = function () { var n = NS.dl.items.filter(function (x) { return x.status === 'done'; }).length; dlV.textContent = n ? String(n) : ''; };
+    this._unDl = NS.dl.onChange(paintDlV);
+    NS.dl.refresh().then(paintDlV);
     var paintSet = function () { teamV.textContent = NS.teamName(NS.pref('team')); subV.textContent = NS.pref('sub') ? NS.langName(NS.pref('sub')) : 'Av'; };
     body.appendChild(h('div', { class: 'm-sets' }, [
       h('button', { class: 'm-set', onclick: function () { NS.pickTeam().then(function (ch) { if (ch) { NS.state.dirty = true; paintSet(); } }); } }, [NS.icon('live'), h('span', { text: 'Favoritlag' }), teamV, NS.icon('right')]),
-      h('button', { class: 'm-set', onclick: function () { NS.pickSubLang().then(function (ch) { if (ch) paintSet(); }); } }, [NS.icon('sub'), h('span', { text: 'Undertexter' }), subV, NS.icon('right')])
+      h('button', { class: 'm-set', onclick: function () { NS.pickSubLang().then(function (ch) { if (ch) paintSet(); }); } }, [NS.icon('sub'), h('span', { text: 'Undertexter' }), subV, NS.icon('right')]),
+      h('button', { class: 'm-set', onclick: function () { NS.router.push(new MDownloads()); } }, [NS.icon('download'), h('span', { text: 'Nedladdningar' }), dlV, NS.icon('right')])
     ]));
     paintSet();
     NS.loadTeams().then(paintSet);
@@ -778,6 +838,62 @@
   }
   MMe.prototype.activate = function (first) { if (first) top0(); else { restoreY(this); if (NS.state.dirty) this.fill(); } };
   MMe.prototype.deactivate = function () { saveY(this); };
+  MMe.prototype.destroy = function () { if (this._unDl) this._unDl(); };
+
+  /* ---------------------------------------------------------------- downloads */
+  function dlPlayItem(x) {
+    var ep = x.type === 'episode';
+    return { t: x.type, id: x.mid, vid: ep ? undefined : x.mid, k: (ep ? 'e:' : 'm:') + x.mid, n: x.title, sn: ep ? '' : undefined, img: x.img, ext: 'mp4', dur: x.dur || 0 };
+  }
+  function MDownloads() {
+    var self = this;
+    this.el = h('div', { class: 'screen m-screen' });
+    this.el.appendChild(h('header', { class: 'm-head solid' }, h('div', { class: 'm-bar' }, [
+      h('button', { class: 'm-icon', 'aria-label': 'Tillbaka', onclick: NS.mBack }, NS.icon('back')),
+      h('h1', { class: 'm-title small', text: 'Nedladdningar' })])));
+    this.info = h('div', { class: 'm-dl-info' });
+    this.list = h('div', { class: 'm-dls' });
+    this.el.appendChild(h('div', { class: 'm-body' }, [this.info, this.list]));
+    this.el.appendChild(tabbar('me'));
+    this._un = NS.dl.onChange(function () { if (NS.router.top() === self) self.paint(); });
+    NS.dl.refresh();
+    this.paint();
+  }
+  MDownloads.prototype.paint = function () {
+    var self = this;
+    var s = NS.dl.storage;
+    this.info.innerHTML = '';
+    if (s) {
+      if (s.configured && !s.ok) this.info.appendChild(h('p', { class: 'm-dl-warn', text: 'Lagringsdisken hittas inte (' + (s.err || 'okänt fel') + '). Tills den fungerar sparas filerna på tilläggets egen disk.' }));
+      else this.info.appendChild(h('p', { text: (s.onNetwork ? 'Sparas på nätverksdisken' : 'Sparas på tilläggets egen disk') + (s.freeGb ? '  ·  ' + s.freeGb + ' GB ledigt' : '') }));
+    }
+    this.list.innerHTML = '';
+    if (!NS.dl.items.length) {
+      this.list.appendChild(h('div', { class: 'm-empty' }, [h('h2', { text: 'Inget nedladdat än' }), h('p', { text: NS.dl.on ? 'Tryck på Ladda ner på en film eller ett avsnitt. Filerna sparas på servern och spelas därifrån, utan att använda leverantörens anslutning.' : 'Nedladdning kräver ffmpeg på servern.' })]));
+      return;
+    }
+    NS.dl.items.forEach(function (x) {
+      var th = h('div', { class: 'm-dl-img', style: 'background:' + NS.fallbackBg(x.title) });
+      if (x.img) th.appendChild(NS.pic(x.img, 'm-img'));
+      if (x.status === 'downloading') th.appendChild(NS.progEl(x.pct));
+      var acts = [];
+      if (x.status === 'done') {
+        acts.push(h('a', { class: 'm-icon', 'aria-label': 'Spara på enheten', href: 'dl/' + x.file + '?dl=1', download: '', onclick: function (e) { e.stopPropagation(); } }, NS.icon('save')));
+      }
+      if (x.status === 'error') acts.push(h('button', { class: 'm-icon', 'aria-label': 'Försök igen', onclick: function (e) { e.stopPropagation(); NS.dl.retry(x); } }, NS.icon('refresh')));
+      acts.push(h('button', { class: 'm-icon', 'aria-label': x.status === 'done' ? 'Ta bort' : 'Avbryt', onclick: function (e) {
+        e.stopPropagation();
+        NS.confirm({ title: x.status === 'done' ? 'Ta bort nedladdningen?' : 'Avbryta?', text: x.title, buttons: [{ label: x.status === 'done' ? 'Ta bort' : 'Avbryt', icon: 'trash', value: true }, { label: 'Behåll', value: false }], cancel: false }).then(function (yes) { if (yes) NS.dl.remove(x); });
+      } }, NS.icon('trash')));
+      self.list.appendChild(h('div', { class: 'm-dl' + (x.status === 'done' ? ' done' : ''), onclick: function () {
+        if (x.status === 'done') NS.playItem(dlPlayItem(x), { start: 0 });
+      } }, [th, h('div', { class: 'm-dl-txt' }, [h('b', { text: x.title }), h('span', { class: x.status === 'error' ? 'bad' : '', text: NS.dl.label(x) }), x.sub ? h('span', { text: x.sub }) : null]), h('div', { class: 'm-dl-acts' }, acts)]));
+    });
+  };
+  MDownloads.prototype.activate = function (first) { if (first) top0(); else restoreY(this); };
+  MDownloads.prototype.deactivate = function () { saveY(this); };
+  MDownloads.prototype.destroy = function () { if (this._un) this._un(); };
+  NS.openDownloads = function () { NS.router.push(new MDownloads()); };
 
   /* ---------------------------------------------------------------- a whole category as a grid, with sorting */
   var SORTS = [{ id: '', label: 'Standard' }, { id: 'new', label: 'Nyast' }, { id: 'rating', label: 'Högst betyg' }, { id: 'az', label: 'A–Ö' }];

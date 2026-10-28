@@ -1,5 +1,5 @@
 name: Norrsken IPTV
-version: "1.11.10"
+version: "1.12.0"
 slug: norrsken
 description: Egen IPTV-app med streamingkänsla för Philips-tv:n. Tv-appen finns på http://192.168.85.51:8787/ och inställningarna på http://192.168.85.51:8787/setup
 arch:
@@ -17,7 +17,12 @@ panel_title: Norrsken
 # read-only: the key for the provider's account lives in Home Assistant's secrets.yaml
 map:
   - homeassistant_config:ro
+  # network disks mounted in Home Assistant (Settings → System → Storage → Add network storage) show up here
+  - media:rw
+  - share:rw
 options:
   setup_pin: ""
+  storage_dir: ""
 schema:
   setup_pin: str?
+  storage_dir: str?

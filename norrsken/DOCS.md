@@ -23,6 +23,22 @@ Adresserna gäller så länge Home Assistant har IP-adressen 192.168.85.51. Ge d
 
 Inställningar, listor och historik sparas i tilläggets data och följer med i Home Assistants säkerhetskopior.
 
+## Lagring på nätverksdisk (t.ex. AirPort Extreme)
+
+Pausbufferten för live-tv, matchinspelningar och nedladdade filmer kan ligga på en nätverksdisk i stället för Home Assistants egen disk.
+
+1. Anslut disken i Home Assistant: **Inställningar → System → Lagring → Lägg till nätverkslagring**. Välj protokoll **SMB**, ange diskens adress (AirPort: routerns IP) och delningens namn, och välj användning **Media**. Ge den ett kort namn, t.ex. `airport`. Den dyker då upp som `/media/airport`.
+2. Skriv samma namn under tilläggets **Konfiguration → storage_dir** (`airport`, eller hela sökvägen `/media/airport`) och starta om tillägget.
+3. Under **Min sida → Nedladdningar** i Norrsken står det var filerna sparas och hur mycket som är ledigt. Går disken inte att skriva till (avstängd, inte monterad) sparar Norrsken i stället på tilläggets egen disk och säger det där.
+
+Obs: en gammal AirPort Extreme pratar äldre SMB-versioner. Om Home Assistant inte kan montera disken beror det oftast på det, inte på Norrsken.
+
+## Nedladdningar
+
+Tryck på **Ladda ner** på en film eller ett avsnitt (eller **Ladda ner säsongen**). Servern sparar filen som MP4 på lagringsdisken: bilden kopieras orörd, ljud som iPhone/tv:n inte kan spela (DTS, TrueHD) görs om till E-AC-3. Nedladdade titlar spelas från servern och använder inte leverantörens anslutning. Under **Min sida → Nedladdningar** kan du spela, spara filen på telefonen eller datorn, eller ta bort den.
+
+Leverantören ger bara en eller ett par anslutningar. Därför väntar en nedladdning tills ingen tittar, och den pausas (och börjar om från början) när du startar något annat eller en matchinspelning ska börja.
+
 ## PIN-kod för inställningarna
 
 Sidan `/setup` innehåller ditt konto hos leverantören och kräver därför alltid en PIN-kod.

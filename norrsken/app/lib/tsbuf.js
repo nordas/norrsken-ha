@@ -14,13 +14,15 @@ const path = require('path');
 const { DEFAULT_UA } = require('./util');
 
 const FF = process.env.FFMPEG_PATH || 'ffmpeg';
-const ROOT = process.env.NSK_PAUSE_DIR || path.join(os.tmpdir(), 'norrsken-pause');
+const storage = require('./storage');
+// the storage disk (the AirPort's, when set up) or the add-on's own; looked up each time since the share may come and go
+const rootDir = () => process.env.NSK_PAUSE_DIR || storage.pauseDir();
 const IDLE_MS = 3 * 60e3; // the player checks in every 30 s, also while paused
 const MIN_FREE = 1.5e9; // leave room on the disk: Home Assistant needs it more than we do
 const sessions = new Map();
 
 /** Whatever an earlier run left behind (called when the server starts, not when the module is loaded). */
-function cleanStart() { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch (_) { /* nothing */ } }
+function cleanStart() { try { fs.rmSync(rootDir(), { recursive: true, force: true }); } catch (_) { /* nothing */ } }
 cleanStart.done = false;
 
 function freeBytes(dir) {
@@ -80,6 +82,7 @@ function start(url, { ua, maxMin = 60, ch = '', match = false } = {}) {
     if (matchSession()) throw new Error('Matchinspelningen pågår på en annan kanal');
     stopPauses('ny paus'); // one connection: a new pause ends the previous one (a finished match recording stays)
   }
+  const ROOT = rootDir();
   fs.mkdirSync(ROOT, { recursive: true });
   const free = freeBytes(ROOT);
   if (free < MIN_FREE) throw new Error('För lite ledigt diskutrymme för att spela in pausen');
@@ -108,7 +111,7 @@ function start(url, { ua, maxMin = 60, ch = '', match = false } = {}) {
   // keep an eye on the disk while recording
   s.diskT = setInterval(() => {
     if (s.dead) return clearInterval(s.diskT);
-    if (freeBytes(ROOT) < MIN_FREE * 0.6) { console.log('[paus] disken börjar bli full: inspelningen stannar här'); try { s.proc.kill('SIGINT'); } catch (_) { /* gone */ } s.full = true; clearInterval(s.diskT); }
+    if (freeBytes(path.dirname(s.dir)) < MIN_FREE * 0.6) { console.log('[paus] disken börjar bli full: inspelningen stannar här'); try { s.proc.kill('SIGINT'); } catch (_) { /* gone */ } s.full = true; clearInterval(s.diskT); }
   }, 15000);
   if (s.diskT.unref) s.diskT.unref();
   sessions.set(id, s);
@@ -174,4 +177,4 @@ function active() { return sessions.size; }
 /** Pause recordings someone is using (a paused channel), not match recordings. */
 function pauseActive() { let n = 0; for (const s of sessions.values()) if (!s.match && !s.dead) n++; return n; }
 
-module.exports = { _hideLinks: hideLinks, start, get, stop, stopAll, stopPauses, matchSession, playlist, file, length, active, pauseActive, cleanStart, ROOT };
+module.exports = { _hideLinks: hideLinks, start, get, stop, stopAll, stopPauses, matchSession, playlist, file, length, active, pauseActive, cleanStart, rootDir };
