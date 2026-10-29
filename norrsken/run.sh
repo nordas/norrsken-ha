@@ -9,6 +9,9 @@ if [ -n "$STORAGE" ]; then
   case "$STORAGE" in /*) ;; *) STORAGE="/media/$STORAGE" ;; esac
   export NSK_STORAGE_DIR="$STORAGE"
 fi
+# TV-guide times that are an hour (or more) off at the provider: shift them by this many minutes
+EPGOFF="$(jq -r '.epg_offset // empty' /data/options.json 2>/dev/null)"
+[ -n "$EPGOFF" ] && export NSK_EPG_OFFSET_MIN="$EPGOFF"
 # Ask the Supervisor for the host's real LAN address so the app shows a URL the TV and phone can reach.
 if [ -n "$SUPERVISOR_TOKEN" ]; then
   IP="$(curl -fsS -m 5 -H "Authorization: Bearer $SUPERVISOR_TOKEN" http://supervisor/network/info 2>/dev/null \

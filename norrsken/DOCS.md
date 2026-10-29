@@ -50,3 +50,7 @@ Sidan `/setup` innehåller ditt konto hos leverantören och kräver därför all
 ## Kryptering av leverantörens uppgifter
 
 Lägg raden som visas under Leverantör på `/setup` (`norrsken_nyckel: …`) i Home Assistants `secrets.yaml` och starta om tillägget. Då sparas användarnamn och lösenord krypterade.
+
+## Tv-guiden går fel i tid
+
+Visar en match eller ett program fel klockslag (t.ex. en timme sent) är det oftast leverantörens guide som anger tiden fel, inte Norrsken. Sätt tilläggets `epg_offset` i minuter: `-60` flyttar alla guidetider en timme tidigare, `60` en timme senare. Efter omstart skriver loggen en rad `[tvguide] exempel: starttid "…" blir hh:mm svensk tid` som visar vad guiden faktiskt skickar. Gäller både XMLTV-guide och leverantörens egen guide. Ändras tiden vid nästa sommar-/vintertid, justera värdet då.

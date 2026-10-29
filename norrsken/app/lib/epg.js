@@ -17,6 +17,9 @@ function parseXmltvTime(s) {
   return t;
 }
 
+/** Minutes the add-on setting "epg_offset" moves every guide time (a provider whose guide is an hour off). */
+const OFFSET_MS = (Math.max(-180, Math.min(180, Math.round(+process.env.NSK_EPG_OFFSET_MIN || 0)))) * 60000;
+
 function attr(tag, name) {
   const m = new RegExp('\\s' + name + '\\s*=\\s*"([^"]*)"').exec(tag) || new RegExp('\\s' + name + "\\s*=\\s*'([^']*)'").exec(tag);
   return m ? decodeEntities(m[1]) : '';
@@ -70,6 +73,7 @@ class Epg {
     const to = now + 36 * 3600e3;
     const map = new Map();
     let count = 0;
+    let sampled = false;
     const { r, done } = await fetchRaw(url, { ua, timeout });
     try {
       if (!r.ok) throw new HttpError(r.status, 'EPG: servern svarade ' + r.status);
@@ -92,9 +96,15 @@ class Epg {
         const open = block.slice(0, end + 1);
         const ch = attr(open, 'channel');
         if (!ch || (wanted && wanted.size && !wanted.has(ch))) return;
-        const s = parseXmltvTime(attr(open, 'start'));
-        const e = parseXmltvTime(attr(open, 'stop')) || s + 3600e3;
+        const rawStart = attr(open, 'start');
+        let s = parseXmltvTime(rawStart);
+        let e = parseXmltvTime(attr(open, 'stop')) || s + 3600e3;
+        if (s) { s += OFFSET_MS; e += OFFSET_MS; }
         if (!s || e < from || s > to) return;
+        if (!sampled) {
+          sampled = true;
+          console.log('[tvguide] exempel: starttid "' + rawStart + '" blir ' + new Date(s).toLocaleTimeString('sv-SE', { timeZone: 'Europe/Stockholm', hour: '2-digit', minute: '2-digit' }) + ' svensk tid' + (OFFSET_MS ? ' (korrigerad ' + OFFSET_MS / 60000 + ' min)' : ''));
+        }
         const t = pickText(block, 'title');
         let d = pickText(block, 'desc');
         if (d.length > 280) d = d.slice(0, 277).replace(/\s+\S*$/, '') + '…';
@@ -152,4 +162,4 @@ class Epg {
   }
 }
 
-module.exports = { Epg, parseXmltvTime };
+module.exports = { Epg, parseXmltvTime, OFFSET_MS };

@@ -3,7 +3,7 @@ const {
   DEFAULT_UA, fold, hashId, cleanName, tameCaps, splitYear, yearOf, fetchJson, fetchText, redact, b64decode, pool, LRU,
 } = require('./util');
 const { parseM3U, classify, EP_RE } = require('./m3u');
-const { Epg } = require('./epg');
+const { Epg, OFFSET_MS: EPG_OFF } = require('./epg');
 
 const TYPES = ['live', 'movie', 'series'];
 const PREFIX = { live: 'l', movie: 'm', series: 's', episode: 'e' };
@@ -640,8 +640,8 @@ class Catalog {
           const r = await x.api('get_short_epg', { stream_id: id, limit: 4 }, 8000);
           list = arr(r && r.epg_listings).map(p => ({
             t: b64decode(p.title), d: b64decode(p.description),
-            s: (+p.start_timestamp || Date.parse(p.start)) * (p.start_timestamp ? 1000 : 1),
-            e: (+p.stop_timestamp || Date.parse(p.end || p.stop)) * (p.stop_timestamp ? 1000 : 1),
+            s: (+p.start_timestamp || Date.parse(p.start)) * (p.start_timestamp ? 1000 : 1) + EPG_OFF,
+            e: (+p.stop_timestamp || Date.parse(p.end || p.stop)) * (p.stop_timestamp ? 1000 : 1) + EPG_OFF,
           })).filter(p => p.s && p.e).sort((a, b) => a.s - b.s);
         } catch (_) { /* no epg */ }
         this.shortEpg.set(id, list);
@@ -665,8 +665,8 @@ class Catalog {
         const r = await this.xtream().api('get_simple_data_table', { stream_id: id }, 15000);
         const list = arr(r && r.epg_listings).map(p => ({
           t: b64decode(p.title), d: b64decode(p.description),
-          s: (+p.start_timestamp || Date.parse(p.start)) * (p.start_timestamp ? 1000 : 1),
-          e: (+p.stop_timestamp || Date.parse(p.end || p.stop)) * (p.stop_timestamp ? 1000 : 1),
+          s: (+p.start_timestamp || Date.parse(p.start)) * (p.start_timestamp ? 1000 : 1) + EPG_OFF,
+          e: (+p.stop_timestamp || Date.parse(p.end || p.stop)) * (p.stop_timestamp ? 1000 : 1) + EPG_OFF,
           a: +p.has_archive ? 1 : 0,
         })).filter(p => p.s && p.e && p.e > now - 72 * 3600e3 && p.s < now + 36 * 3600e3).sort((a, b) => a.s - b.s);
         if (this.fullEpg.size > 600) this.fullEpg.delete(this.fullEpg.keys().next().value);
