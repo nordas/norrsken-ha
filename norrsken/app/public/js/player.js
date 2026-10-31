@@ -445,7 +445,7 @@
     at = at || 0;
     if (src.kind === 'hls') {
       // "Tv:ns egen spelare" chosen in the player settings: the screen's own HLS instead of hls.js
-      var ownHls = NS.store.get('engine', '') === 'native' && v.canPlayType('application/vnd.apple.mpegurl');
+      var ownHls = (NS.store.get('engine', '') === 'native' || NS.iosNative(v)) && v.canPlayType('application/vnd.apple.mpegurl');
       if (window.Hls && window.Hls.isSupported() && !ownHls) {
         var hls = this.hls = new window.Hls({
           enableWorker: true, lowLatencyMode: false, backBufferLength: 30, maxBufferLength: 40, maxMaxBufferLength: 120,
@@ -508,7 +508,7 @@
     this.offset = at || 0;
     var url = NS.remuxUrl(src.url, this.offset, this.audioIdx, this.safeMode);
     // during AirPlay Safari's own player keeps going (a new sound track or position too): hls.js would send only sound
-    if (window.Hls && window.Hls.isSupported() && !this.airNative) {
+    if (window.Hls && window.Hls.isSupported() && !this.airNative && !NS.iosNative(v)) {
       // 4K is uneven: action scenes need two to three times the average. hls.js stops filling at 60 MB by default,
       // only 10–20 s of 4K, so a slow stretch from the provider empties it. Phones and computers keep far more ahead
       // (the TV has less memory: it keeps the default).
@@ -1588,7 +1588,7 @@
     this.buffering(true);
     var url = ts.url;
     this.airUrl = url; // AirPlay of a recording: the recording itself (fMP4 HLS from the add-on)
-    if (window.Hls && window.Hls.isSupported()) {
+    if (window.Hls && window.Hls.isSupported() && !NS.iosNative(v)) {
       // an EVENT playlist: start where the recording starts and never jump ahead to its end
       var hls = this.hls = new window.Hls({ enableWorker: true, startPosition: at || 0, liveSyncDurationCount: 99999, liveMaxLatencyDurationCount: Infinity,
         maxBufferLength: 40, backBufferLength: 60, manifestLoadingTimeOut: 40000, manifestLoadingMaxRetry: 2, levelLoadingMaxRetry: 6, fragLoadingMaxRetry: 6 });
@@ -1925,9 +1925,11 @@
     });
     var cur = this.sources && this.sources[this.si];
     if (cur && cur.kind === 'hls' && window.Hls && window.Hls.isSupported() && this.video.canPlayType('application/vnd.apple.mpegurl')) {
-      var own = NS.store.get('engine', '') === 'native';
-      srcs.push({ label: own ? 'Använd Norrskens spelare' : 'Använd skärmens egen spelare', note: own ? 'skärmens egen används nu' : 'om inget annat hjälper', act: function () {
-        NS.store.set('engine', own ? '' : 'native');
+      // iPhone/iPad use the screen's own by default (AirPlay needs it); elsewhere it is the fallback
+      var iosDef = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      var own = NS.store.get('engine', '') === 'native' || NS.iosNative(this.video);
+      srcs.push({ label: own ? 'Använd Norrskens spelare' : 'Använd skärmens egen spelare', note: own ? 'skärmens egen används nu' + (iosDef ? ' (behövs för AirPlay)' : '') : 'om inget annat hjälper', act: function () {
+        NS.store.set('engine', own ? (iosDef ? 'hlsjs' : '') : (iosDef ? '' : 'native'));
         self.closePanel();
         self.switchSource(self.si);
       } });

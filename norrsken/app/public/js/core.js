@@ -213,6 +213,16 @@
     } catch (e) { /* assume basics */ }
     return out.join(',');
   })();
+  /**
+   * iPhone/iPad: Safari's own HLS player instead of hls.js. AirPlay to a TV (other than an Apple TV) only works when
+   * the video already plays a plain address the TV can fetch: switching away from hls.js once AirPlay is on ends the
+   * AirPlay session on those TVs. "hls.js" can still be chosen in the player settings.
+   */
+  NS.iosNative = function (v) {
+    var ios = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    if (!ios || NS.store.get('engine', '') === 'hlsjs') return false;
+    try { return !!(v || document.createElement('video')).canPlayType('application/vnd.apple.mpegurl'); } catch (e) { return false; }
+  };
   NS.remuxUrl = function (base, at, a, safe) { return base + '&ss=' + Math.floor(at || 0) + '&a=' + (a || 0) + '&caps=' + (safe ? '' : NS.caps) + (safe ? '&safe=1' : ''); };
 
   /* ---------------------------------------------------------------- direct playback */
