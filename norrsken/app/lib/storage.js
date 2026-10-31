@@ -56,7 +56,11 @@ function info() {
   return {
     configured: !!WANT, ok: WANT ? s.ok : true, onNetwork: !!WANT && s.ok, dir: WANT ? WANT : '', err: WANT ? s.err : '',
     freeGb: Math.round(sz.free / 1e8) / 10, totalGb: Math.round(sz.total / 1e8) / 10,
+    smb: require('./smb').info(),
   };
 }
 
-module.exports = { pauseDir, downloadDir, freeBytes, info, check };
+/** Is the network folder mounted and writable right now? (A Time Capsule through smbclient is only used when it is not.) */
+function mounted() { return !!WANT && check().ok; }
+
+module.exports = { pauseDir, downloadDir, freeBytes, info, check, mounted };

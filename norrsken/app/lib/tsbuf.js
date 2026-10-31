@@ -15,14 +15,22 @@ const { DEFAULT_UA } = require('./util');
 
 const FF = process.env.FFMPEG_PATH || 'ffmpeg';
 const storage = require('./storage');
+const smb = require('./smb');
 // the storage disk (the AirPort's, when set up) or the add-on's own; looked up each time since the share may come and go
 const rootDir = () => process.env.NSK_PAUSE_DIR || storage.pauseDir();
+// A Time Capsule Home Assistant cannot mount (SMB1): pieces are copied there as they are finished, see mirrorTick
+const mirrorOn = () => smb.enabled() && !process.env.NSK_PAUSE_DIR && !storage.mounted();
+const KEEP_LOCAL = 8; // the newest pieces always stay on the local disk
+const LOCAL_FOR_MS = +process.env.NSK_PAUSE_LOCAL_MS || 60e3; // and a piece that was copied stays this long (it is being played right now)
 const IDLE_MS = 3 * 60e3; // the player checks in every 30 s, also while paused
 const MIN_FREE = 1.5e9; // leave room on the disk: Home Assistant needs it more than we do
 const sessions = new Map();
 
 /** Whatever an earlier run left behind (called when the server starts, not when the module is loaded). */
-function cleanStart() { try { fs.rmSync(rootDir(), { recursive: true, force: true }); } catch (_) { /* nothing */ } }
+function cleanStart() {
+  try { fs.rmSync(rootDir(), { recursive: true, force: true }); } catch (_) { /* nothing */ }
+  if (mirrorOn()) smb.check(true).then((r) => { if (r.ok) return smb.cleanSubdirs(smb.dir + '/pause'); }).catch(() => {});
+}
 cleanStart.done = false;
 
 function freeBytes(dir) {
@@ -56,6 +64,8 @@ function stop(s, why) {
   s.dead = true;
   sessions.delete(s.id);
   try { if (s.proc) s.proc.kill('SIGKILL'); } catch (_) { /* gone */ }
+  if (s.mirrorT) clearInterval(s.mirrorT);
+  if (s.mirror) smb.rmdirAll(s.mirror.dir).catch(() => {});
   const mb = Math.round(dirBytes(s.dir) / 1e6);
   console.log('[paus] inspelningen slutar (' + (why || 'stopp') + '),', Math.round((Date.now() - s.started) / 60e3) + ' min,', mb + ' MB');
   setTimeout(() => fs.rm(s.dir, { recursive: true, force: true }, () => {}), 1500);
@@ -84,39 +94,103 @@ function start(url, { ua, maxMin = 60, ch = '', match = false } = {}) {
   }
   const ROOT = rootDir();
   fs.mkdirSync(ROOT, { recursive: true });
+  const useMirror = mirrorOn() && smb.info().ok;
+  if (mirrorOn() && !useMirror) { smb.check(true).catch(() => {}); console.log('[paus] Time Capsule svarar inte – spelar in på tilläggets egen disk'); }
   const free = freeBytes(ROOT);
-  if (free < MIN_FREE) throw new Error('För lite ledigt diskutrymme för att spela in pausen');
+  if (free < (useMirror ? MIN_FREE * 0.4 : MIN_FREE)) throw new Error('För lite ledigt diskutrymme för att spela in pausen');
+  if (useMirror && smb.free() && smb.free() < MIN_FREE) throw new Error('För lite ledigt utrymme på Time Capsule');
   const id = Math.random().toString(36).slice(2, 10);
   const dir = path.join(ROOT, id);
   fs.mkdirSync(dir, { recursive: true });
   const s = { id, url, dir, ch, proc: null, started: Date.now(), last: Date.now(), dead: false, done: false, err: '', maxMin, full: false, match: !!match };
+  if (useMirror) s.mirror = { dir: smb.dir + '/pause/' + id, ready: false, up: new Set(), busy: false, err: '', fetching: new Map(), bytes: 0 };
   const hls = /\.m3u8?(\?|$)/i.test(url);
-  const args = ['-hide_banner', '-loglevel', 'error', '-nostats', '-user_agent', ua || DEFAULT_UA, '-rw_timeout', '20000000'];
-  if (!hls) args.push('-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5');
-  args.push('-fflags', '+genpts+discardcorrupt', '-i', url,
-    '-map', '0:v:0?', '-map', '0:a:0?', '-c', 'copy', '-t', String(Math.max(1, maxMin) * 60),
-    '-f', 'hls', '-hls_time', '4', '-hls_list_size', '0', '-hls_playlist_type', 'event',
-    // fragmented MP4 like the converter: every codec a provider sends (H.264, HEVC, AAC, AC-3…) fits as it is
-    '-hls_flags', 'independent_segments+temp_file', '-hls_segment_type', 'fmp4', '-hls_fmp4_init_filename', 'init.mp4',
-    '-hls_segment_filename', path.join(dir, 'p%05d.m4s'), path.join(dir, 'index.m3u8'));
-  const proc = s.proc = spawn(FF, args);
-  proc.stderr.on('data', d => { if (s.err.length < 3000) s.err += d; });
-  proc.on('error', (e) => { s.err += e.message; s.done = true; });
-  proc.on('close', (code) => {
-    s.done = true;
-    if (s.dead) return;
-    if (Date.now() - s.started >= maxMin * 60e3 - 5000) { s.full = true; console.log('[paus] inspelningen nådde maxlängden', maxMin, 'min'); }
-    else if (code) console.error('[paus] ffmpeg fel', code, hideLinks(s.err.split('\n').filter(Boolean).slice(-2).join(' ')));
-  });
+  /*
+   * AAC in a transport stream is ADTS, and ffmpeg's HLS muxer stops at the first piece ("Malformed AAC bitstream")
+   * unless it is told to convert it. That filter refuses other audio (AC-3…), so: try it first, and when ffmpeg says
+   * it cannot use the filter, start again without it (it fails at once, before anything is recorded).
+   */
+  const launch = (bsf) => {
+    const args = ['-hide_banner', '-loglevel', 'error', '-nostats', '-user_agent', ua || DEFAULT_UA, '-rw_timeout', '20000000'];
+    if (!hls) args.push('-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5');
+    args.push('-fflags', '+genpts+discardcorrupt', '-i', url,
+      '-map', '0:v:0?', '-map', '0:a:0?', '-c', 'copy');
+    if (bsf) args.push('-bsf:a', 'aac_adtstoasc');
+    args.push('-t', String(Math.max(1, maxMin) * 60),
+      '-f', 'hls', '-hls_time', '4', '-hls_list_size', '0', '-hls_playlist_type', 'event',
+      // fragmented MP4 like the converter: every codec a provider sends (H.264, HEVC, AAC, AC-3…) fits as it is
+      '-hls_flags', 'independent_segments+temp_file', '-hls_segment_type', 'fmp4', '-hls_fmp4_init_filename', 'init.mp4',
+      '-hls_segment_filename', path.join(dir, 'p%05d.m4s'), path.join(dir, 'index.m3u8'));
+    const proc = s.proc = spawn(FF, args);
+    proc.stderr.on('data', d => { if (s.err.length < 3000) s.err += d; });
+    proc.on('error', (e) => { s.err += e.message; s.done = true; });
+    proc.on('close', (code) => {
+      if (s.dead) { s.done = true; return; }
+      if (bsf && code && /bitstream filter/i.test(s.err) && Date.now() - s.started < 20000) { s.err = ''; launch(false); return; }
+      s.done = true;
+      if (Date.now() - s.started >= maxMin * 60e3 - 5000) { s.full = true; console.log('[paus] inspelningen nådde maxlängden', maxMin, 'min'); }
+      else if (code) console.error('[paus] ffmpeg fel', code, hideLinks(s.err.split('\n').filter(Boolean).slice(-2).join(' ')));
+    });
+  };
+  launch(true);
+  if (s.mirror) { s.mirrorT = setInterval(() => mirrorTick(s), 2500); if (s.mirrorT.unref) s.mirrorT.unref(); }
   // keep an eye on the disk while recording
   s.diskT = setInterval(() => {
     if (s.dead) return clearInterval(s.diskT);
-    if (freeBytes(path.dirname(s.dir)) < MIN_FREE * 0.6) { console.log('[paus] disken börjar bli full: inspelningen stannar här'); try { s.proc.kill('SIGINT'); } catch (_) { /* gone */ } s.full = true; clearInterval(s.diskT); }
+    if (s.mirror) smb.check().catch(() => {});
+    if (freeBytes(path.dirname(s.dir)) < (s.mirror ? MIN_FREE * 0.25 : MIN_FREE * 0.6) || (s.mirror && smb.free() && smb.free() < MIN_FREE * 0.6)) { console.log('[paus] disken börjar bli full: inspelningen stannar här'); try { s.proc.kill('SIGINT'); } catch (_) { /* gone */ } s.full = true; clearInterval(s.diskT); }
   }, 15000);
   if (s.diskT.unref) s.diskT.unref();
   sessions.set(id, s);
   console.log(match ? '[match] spelar in' : '[paus] spelar in', ch || 'kanalen', 'från nu (högst', maxMin, 'min)');
   return s;
+}
+
+/** Copy finished pieces to the Time Capsule, and free the local disk of the old ones. */
+async function mirrorTick(s) {
+  const m = s.mirror;
+  if (!m || m.busy || s.dead) return;
+  m.busy = true;
+  try {
+    if (!m.ready) { const r = await smb.ensure(m.dir); if (!r.ok) throw new Error(r.err); m.ready = true; }
+    // ffmpeg writes a piece under a temporary name and renames it when it is whole, so every p*.m4s is complete
+    const segs = fs.readdirSync(s.dir).filter(n => /^p\d{5}\.m4s$/.test(n)).sort();
+    const todo = segs.filter(n => !m.up.has(n)).slice(0, 6);
+    if (todo.length) {
+      const r = await smb.put(s.dir, todo, m.dir);
+      if (!r.ok) throw new Error(r.err);
+      for (const n of todo) { m.up.add(n); try { m.bytes += fs.statSync(path.join(s.dir, n)).size; } catch (_) { /* gone */ } }
+    }
+    const now = Date.now();
+    segs.slice(0, Math.max(0, segs.length - KEEP_LOCAL)).forEach((n) => {
+      const f = path.join(s.dir, n);
+      try { if (m.up.has(n) && now - fs.statSync(f).mtimeMs > LOCAL_FOR_MS) fs.rmSync(f, { force: true }); } catch (_) { /* gone */ }
+    });
+    if (m.err) console.log('[paus] Time Capsule är tillbaka');
+    m.err = '';
+  } catch (e) {
+    if (e.message !== m.err) console.error('[paus] kunde inte kopiera till Time Capsule:', e.message, '(sparar lokalt tills vidare)');
+    m.err = e.message;
+  } finally { m.busy = false; }
+}
+
+/** A piece to play: on the local disk, or fetched back from the Time Capsule (the next two ahead of time). */
+async function fileReady(id, name) {
+  const f = file(id, name);
+  if (!f) return null;
+  if (fs.existsSync(f)) return f;
+  const s = get(id);
+  const m = s && s.mirror;
+  if (!m || !m.up.has(name)) return null;
+  const fetch = (n) => {
+    let p = m.fetching.get(n);
+    if (!p) { p = smb.get(s.dir, m.dir, n).finally(() => m.fetching.delete(n)); m.fetching.set(n, p); }
+    return p;
+  };
+  const r = await fetch(name);
+  const num = /^p(\d{5})\.m4s$/.exec(name);
+  if (num) for (let k = 1; k <= 2; k++) { const nx = 'p' + String(+num[1] + k).padStart(5, '0') + '.m4s'; if (m.up.has(nx) && !fs.existsSync(path.join(s.dir, nx))) fetch(nx).catch(() => {}); }
+  return r.ok && fs.existsSync(f) ? f : null;
 }
 
 function get(id) {
@@ -177,4 +251,4 @@ function active() { return sessions.size; }
 /** Pause recordings someone is using (a paused channel), not match recordings. */
 function pauseActive() { let n = 0; for (const s of sessions.values()) if (!s.match && !s.dead) n++; return n; }
 
-module.exports = { _hideLinks: hideLinks, start, get, stop, stopAll, stopPauses, matchSession, playlist, file, length, active, pauseActive, cleanStart, rootDir };
+module.exports = { _hideLinks: hideLinks, start, get, stop, stopAll, stopPauses, matchSession, playlist, file, fileReady, length, active, pauseActive, cleanStart, rootDir };

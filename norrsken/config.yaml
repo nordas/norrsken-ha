@@ -1,5 +1,5 @@
 name: Norrsken IPTV
-version: "1.12.2"
+version: "1.13.0"
 slug: norrsken
 description: Egen IPTV-app med streamingkänsla för Philips-tv:n. Tv-appen finns på http://192.168.85.51:8787/ och inställningarna på http://192.168.85.51:8787/setup
 arch:
@@ -24,7 +24,15 @@ options:
   setup_pin: ""
   storage_dir: ""
   epg_offset: 0
+  smb_share: ""
+  smb_user: ""
+  smb_password: ""
+  smb_dir: Norrsken
 schema:
   setup_pin: str?
   storage_dir: str?
   epg_offset: int(-180,180)?
+  smb_share: str?
+  smb_user: str?
+  smb_password: password?
+  smb_dir: str?

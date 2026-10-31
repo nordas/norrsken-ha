@@ -1277,8 +1277,8 @@ route('GET', '/pause/:id/index.m3u8', async (req, res, q, p) => {
   if (!s) return bad(res, 'Inspelningen finns inte längre', 404);
   try { send(res, 200, await tsbuf.playlist(s, ingressBase(req) + '/pause'), 'application/vnd.apple.mpegurl', { 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' }); } catch (e) { bad(res, e.message, 502); }
 });
-route('GET', '/pause/:id/:name', (req, res, q, p) => {
-  const f = tsbuf.file(p.id, p.name);
+route('GET', '/pause/:id/:name', async (req, res, q, p) => {
+  const f = await tsbuf.fileReady(p.id, p.name);
   if (!f) return bad(res, 'slut', 404);
   fs.stat(f, (err, st) => {
     if (err) return bad(res, 'saknas', 404);

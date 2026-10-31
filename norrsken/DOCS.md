@@ -54,3 +54,14 @@ Lägg raden som visas under Leverantör på `/setup` (`norrsken_nyckel: …`) i 
 ## Tv-guiden går fel i tid
 
 Visar en match eller ett program fel klockslag (t.ex. en timme sent) är det oftast leverantörens guide som anger tiden fel, inte Norrsken. Sätt tilläggets `epg_offset` i minuter: `-60` flyttar alla guidetider en timme tidigare, `60` en timme senare. Efter omstart skriver loggen en rad `[tvguide] exempel: starttid "…" blir hh:mm svensk tid` som visar vad guiden faktiskt skickar. Gäller både XMLTV-guide och leverantörens egen guide. Ändras tiden vid nästa sommar-/vintertid, justera värdet då.
+
+## Time Capsule / AirPort Extreme som lagring (pausbuffert och matchinspelningar)
+
+En Time Capsule pratar bara det gamla SMB1-protokollet. Home Assistants "Lägg till nätverkslagring" kan inte montera den, så använd i stället tilläggets egen anslutning:
+
+1. Sätt `smb_share` till disken, t.ex. `//192.168.1.5/Data` (IP eller namn på Time Capsule, och diskens delningsnamn). Sätt `smb_user` och `smb_password` (lämna tomma om disken saknar lösenord). `smb_dir` är mappen på disken, standard `Norrsken`; Norrsken skapar den själv.
+2. Starta om tillägget. Loggen skriver `[time capsule] ansluten`, eller varför det inte gick (fel lösenord, fel delningsnamn, disken svarar inte).
+
+Så fungerar det: pausen och matchinspelningen skrivs först i en liten lokal mapp, färdiga delar (4 sekunder) kopieras direkt till Time Capsule och de gamla lokala delarna tas bort. Spolar du tillbaka hämtas delarna tillbaka därifrån. Tappar disken förbindelsen sparas allt lokalt tills den är tillbaka. Är `storage_dir` (monterad disk) också satt och fungerar, används den i stället.
+
+Nedladdningar ligger kvar på tilläggets egen disk (eller på `storage_dir`).

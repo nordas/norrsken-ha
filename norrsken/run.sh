@@ -9,6 +9,14 @@ if [ -n "$STORAGE" ]; then
   case "$STORAGE" in /*) ;; *) STORAGE="/media/$STORAGE" ;; esac
   export NSK_STORAGE_DIR="$STORAGE"
 fi
+# A disk Home Assistant cannot mount (Time Capsule / AirPort Extreme: SMB1): Norrsken talks to it itself with smbclient
+SMB_SHARE="$(jq -r '.smb_share // empty' /data/options.json 2>/dev/null)"
+if [ -n "$SMB_SHARE" ]; then
+  export NSK_SMB_SHARE="$SMB_SHARE"
+  export NSK_SMB_USER="$(jq -r '.smb_user // empty' /data/options.json 2>/dev/null)"
+  export NSK_SMB_PASS="$(jq -r '.smb_password // empty' /data/options.json 2>/dev/null)"
+  export NSK_SMB_DIR="$(jq -r '.smb_dir // empty' /data/options.json 2>/dev/null)"
+fi
 # TV-guide times that are an hour (or more) off at the provider: shift them by this many minutes
 EPGOFF="$(jq -r '.epg_offset // empty' /data/options.json 2>/dev/null)"
 [ -n "$EPGOFF" ] && export NSK_EPG_OFFSET_MIN="$EPGOFF"
