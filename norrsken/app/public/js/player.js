@@ -303,6 +303,7 @@
   Player.prototype.play = function (item, start) {
     var self = this;
     if (this.tshift && (!this.tshift.match || item.id !== this.tshift.chId)) this.endTshift();
+    this.iosLiveOff = false;
     this.item = item;
     this.start = start || 0;
     this.offset = 0;
@@ -408,6 +409,12 @@
   Player.prototype.startSource = function (at) {
     var self = this;
     if (this.suspended) return;
+    // iPhone/iPad and a live channel sent as MPEG-TS: play the server's HLS of it in Safari's own player from the
+    // start, so AirPlay to a TV gets the picture without switching source (which ends AirPlay on those TVs)
+    if (this.live && !this.tshift && this.item.t !== 'catchup' && !this.iosLiveOff && NS.iosNative(this.video)) {
+      var c0 = this.sources && this.sources[this.si];
+      if (c0 && c0.kind !== 'hls') { this.iosLive(); return; }
+    }
     if (this.live && this.tshift && this.tshift.url) {
       var ts = this.tshift;
       if (ts.match) {
@@ -665,8 +672,9 @@
    */
   Player.prototype.airLiveHls = function () {
     var self = this, v = this.video, item = this.item;
-    if (this._airLiveBusy) return;
+    if (this._airLiveBusy || Date.now() - (this._airLiveAt || 0) < 60000) return; // once a minute: never a loop
     this._airLiveBusy = true;
+    this._airLiveAt = Date.now();
     NS.api.post('api/pause/start' + NS.pq(), { id: item.id }).then(function (r) {
       self._airLiveBusy = false;
       if (self.item !== item || self.airNative) { if (!r.match) NS.api.post('api/pause/' + r.id + '/stop', {}).catch(function () {}); return; }
@@ -1577,6 +1585,27 @@
     } catch (err) { /* a picture from another site can't always be drawn: black then */ }
   };
   /** Play the server's recording of the paused channel (it keeps growing while we watch). */
+  /** Live TV on iPhone/iPad through the server: its pause recording, played at the live end (one provider connection). */
+  Player.prototype.iosLive = function () {
+    var self = this, item = this.item;
+    this.teardown();
+    this.buffering(true);
+    var ts = this.tshift = { mode: 'rec', ios: true, at: Date.now(), playing: true, pos: 0 };
+    NS.api.post('api/pause/start' + NS.pq(), { id: item.id }).then(function (r) {
+      if (self.tshift !== ts || self.item !== item) { NS.api.post('api/pause/' + r.id + '/stop', {}).catch(function () {}); return; }
+      ts.id = r.id; ts.url = r.url; ts.max = r.max; ts.edge = true;
+      ts.aliveT = setInterval(function () {
+        NS.api.post('api/pause/' + ts.id + '/alive', {}).then(function (a) { ts.sec = a.sec; ts.full = a.full; self.paintTshift(); }).catch(function () { ts.lost = true; });
+      }, 30000);
+      self.startRec(0);
+    }).catch(function (e) {
+      if (self.tshift !== ts) return;
+      self.tshift = null;
+      NS.diag('iPhone: live via servern gick inte (' + ((e && e.message) || '') + '), spelar kanalen direkt');
+      self.iosLiveOff = true; // this channel the usual way (AirPlay then may only get the sound)
+      self.startSource(0);
+    });
+  };
   Player.prototype.startRec = function (at) {
     var self = this, v = this.video, ts = this.tshift;
     if (ts.lost) { this.goLive(); return; }
@@ -1600,6 +1629,11 @@
     } else {
       this.kind = 'native';
       if (at) this.pendingSeek = at;
+      if (ts.ios && ts.edge) {
+        ts.edge = false;
+        var ed = function () { v.removeEventListener('loadedmetadata', ed); try { if (v.seekable.length && v.seekable.end(0) > 12) v.currentTime = v.seekable.end(0) - 6; } catch (e) { /* ignore */ } };
+        v.addEventListener('loadedmetadata', ed);
+      }
       v.src = url;
       this.playPromise();
     }
@@ -1636,6 +1670,7 @@
   Player.prototype.goLive = function () {
     if (!this.live) { if (this.item.t === 'catchup') this.toLive(); return; }
     if (this.tshift && this.tshift.match) { this.tshift.edge = true; this.startSource(0); this.showOsd(); NS.toast('Live', 'live'); return; }
+    if (this.tshift && this.tshift.ios && this.tshift.url) { this.tshift.edge = true; this.tshift.playing = true; this.startRec(0); this.showOsd(); NS.toast('Live', 'live'); return; }
     this.endTshift();
     this.startSource(0);
     this.showOsd();
