@@ -592,3 +592,27 @@ test('links in ffmpeg errors: gone also when the password has a space or ": " in
   }
   assert.match(hide('http://anna:pa: ss@h/x.m3u8: Invalid data'), /Invalid data/);
 });
+
+test('AirPlay test page: four forms of a test clip, each playable from the server (Range for the MP4)', async () => {
+  const pg = await until(async () => { const x = await get('/airtest'); return x.status === 200 && x.text; }, 120000);
+  const srcs = [...pg.matchAll(/<video[^>]+src="([^"]+)"/g)].map(m => m[1]);
+  assert.equal(srcs.length, 4, pg);
+  for (const u of srcs) {
+    const path = u.replace(/^https?:\/\/[^/]+/, '');
+    const r = await fetch(base + path);
+    assert.equal(r.status, 200, path);
+    const body = Buffer.from(await r.arrayBuffer());
+    if (path.endsWith('.m3u8')) {
+      const seg = body.toString().split('\n').find(l => l && l[0] !== '#');
+      assert.ok(seg, 'a playlist with pieces: ' + path);
+      const sr = await fetch(base + path.replace(/index\.m3u8$/, seg));
+      assert.equal(sr.status, 200, seg);
+      assert.ok((await sr.arrayBuffer()).byteLength > 10000);
+    } else assert.ok(body.length > 100000, 'the MP4 is there');
+  }
+  const mp4 = srcs.find(u => u.endsWith('.mp4')).replace(/^https?:\/\/[^/]+/, '');
+  const part = await fetch(base + mp4, { headers: { Range: 'bytes=0-99' } });
+  assert.equal(part.status, 206);
+  assert.equal((await part.arrayBuffer()).byteLength, 100);
+  assert.equal((await get('/airtest/a/..%2Fsecret')).status, 404, 'only the clips');
+});

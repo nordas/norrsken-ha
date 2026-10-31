@@ -17,6 +17,7 @@ const sport = require('./lib/sport');
 const tsbuf = require('./lib/tsbuf');
 const storage = require('./lib/storage');
 const downloads = require('./lib/downloads');
+const airtest = require('./lib/airtest');
 const { Services, serviceInfo } = require('./lib/services');
 const { redact, fetchText, pool } = require('./lib/util');
 const pkg = require('./package.json');
@@ -1414,6 +1415,30 @@ route('GET', '/dl/:id/:name', (req, res, q, p) => {
     res.on('close', () => rs.destroy());
     rs.pipe(res);
   });
+});
+
+/* AirPlay test page: four forms of one test clip, to see which the TV's AirPlay plays (no provider involved). */
+route('GET', '/airtest', async (req, res) => {
+  if (!ff.has()) return bad(res, 'ffmpeg saknas på servern', 501);
+  await airtest.ensure();
+  const lan = process.env.PUBLIC_URL ? process.env.PUBLIC_URL.replace(/\/$/, '') : (lanUrls()[0] || '');
+  send(res, 200, airtest.page(lan), 'text/html; charset=utf-8', { 'Cache-Control': 'no-store' });
+});
+route('GET', '/airtest/:v/:name', (req, res, q, p) => {
+  const f = airtest.file(p.v, p.name);
+  if (!f) return bad(res, 'finns inte', 404);
+  const type = p.name.endsWith('.m3u8') ? 'application/vnd.apple.mpegurl' : p.name.endsWith('.ts') ? 'video/mp2t' : p.name.endsWith('.m4s') ? 'video/iso.segment' : 'video/mp4';
+  const size = fs.statSync(f).size;
+  const h = { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' };
+  const m = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
+  let a = 0, z = size - 1;
+  if (m && (m[1] || m[2])) {
+    if (m[1]) { a = +m[1]; if (m[2]) z = Math.min(+m[2], z); } else a = Math.max(0, size - +m[2]);
+    if (a > z) { res.writeHead(416, { ...h, 'Content-Range': 'bytes */' + size }); return res.end(); }
+    res.writeHead(206, { ...h, 'Content-Range': 'bytes ' + a + '-' + z + '/' + size, 'Content-Length': z - a + 1 });
+  } else res.writeHead(200, { ...h, 'Content-Length': size });
+  if (req.method === 'HEAD') return res.end();
+  fs.createReadStream(f, { start: a, end: z }).pipe(res);
 });
 
 /*
