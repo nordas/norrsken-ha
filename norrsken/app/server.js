@@ -1421,10 +1421,18 @@ route('GET', '/dl/:id/:name', (req, res, q, p) => {
 route('GET', '/airtest', async (req, res) => {
   if (!ff.has()) return bad(res, 'ffmpeg saknas på servern', 501);
   await airtest.ensure();
+  airtest.startLive();
   const lan = process.env.PUBLIC_URL ? process.env.PUBLIC_URL.replace(/\/$/, '') : (lanUrls()[0] || '');
-  send(res, 200, airtest.page(lan), 'text/html; charset=utf-8', { 'Cache-Control': 'no-store' });
+  // the match being recorded (or the last one): the real thing, next to the test clips
+  const extra = [...matchRecs.values()].map(r => recInfo(r, '')).filter(Boolean).slice(0, 1).map(r => ({ name: 'Pågående matchinspelning: ' + r.title, url: r.url }));
+  send(res, 200, airtest.page(lan, extra), 'text/html; charset=utf-8', { 'Cache-Control': 'no-store' });
 });
 route('GET', '/airtest/:v/:name', (req, res, q, p) => {
+  if (p.name === 'index.m3u8' && airtest.LIVE[p.v]) {
+    const t = airtest.livePlaylist(p.v);
+    if (!t) return bad(res, 'inte igång än', 404);
+    return send(res, 200, t, 'application/vnd.apple.mpegurl', { 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' });
+  }
   const f = airtest.file(p.v, p.name);
   if (!f) return bad(res, 'finns inte', 404);
   const type = p.name.endsWith('.m3u8') ? 'application/vnd.apple.mpegurl' : p.name.endsWith('.ts') ? 'video/mp2t' : p.name.endsWith('.m4s') ? 'video/iso.segment' : 'video/mp4';

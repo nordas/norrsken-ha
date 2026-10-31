@@ -596,14 +596,17 @@ test('links in ffmpeg errors: gone also when the password has a space or ": " in
 test('AirPlay test page: four forms of a test clip, each playable from the server (Range for the MP4)', async () => {
   const pg = await until(async () => { const x = await get('/airtest'); return x.status === 200 && x.text; }, 120000);
   const srcs = [...pg.matchAll(/<video[^>]+src="([^"]+)"/g)].map(m => m[1]);
-  assert.equal(srcs.length, 4, pg);
-  for (const u of srcs) {
+  assert.ok(srcs.length >= 7, pg); // four finished clips, three growing (live) playlists, maybe the match recording
+  assert.ok(srcs.filter(u => /\/airtest\/[efg]\/index\.m3u8$/.test(u)).length === 3, 'three live forms');
+  for (const u of srcs.filter(x => /\/airtest\//.test(x))) {
     const path = u.replace(/^https?:\/\/[^/]+/, '');
-    const r = await fetch(base + path);
+    const r = /\/[efg]\/index/.test(path) ? await until(async () => { const x = await fetch(base + path); return x.status === 200 && x; }, 30000) : await fetch(base + path);
     assert.equal(r.status, 200, path);
     const body = Buffer.from(await r.arrayBuffer());
     if (path.endsWith('.m3u8')) {
-      const seg = body.toString().split('\n').find(l => l && l[0] !== '#');
+      const seg = await until(async () => { const t = path.includes('/airtest/') && /\/[efg]\//.test(path) ? await (await fetch(base + path)).text() : body.toString(); return t.split('\n').find(l => l && l[0] !== '#'); }, 30000);
+      if (/\/e\//.test(path)) assert.match(body.toString(), /#EXT-X-START:TIME-OFFSET=0/, 'like the recordings');
+      if (/\/[efg]\//.test(path)) assert.doesNotMatch(body.toString(), /#EXT-X-ENDLIST/, 'still growing');
       assert.ok(seg, 'a playlist with pieces: ' + path);
       const sr = await fetch(base + path.replace(/index\.m3u8$/, seg));
       assert.equal(sr.status, 200, seg);

@@ -20,6 +20,39 @@ const VARIANTS = {
   d: { name: 'HLS med fMP4-bitar (H.264 + Dolby AC-3)', file: 'd/index.m3u8', args: (o) => [...SRC, ...H264, '-c:a', 'ac3', '-b:a', '192k', '-ac', '2', '-f', 'hls', '-hls_time', '4', '-hls_playlist_type', 'vod', '-hls_segment_type', 'fmp4', '-hls_fmp4_init_filename', 'init.mp4', '-hls_segment_filename', path.join(path.dirname(o), 's%03d.m4s'), o] },
 };
 
+// live (growing) playlists like Norrsken's recordings: the TV may treat these differently from a finished one
+const LIVE_SRC = ['-re', '-f', 'lavfi', '-i', 'testsrc2=size=640x360:rate=25', '-f', 'lavfi', '-i', 'sine=frequency=660:sample_rate=48000', '-t', '900'];
+const LIVE_V = ['-c:v', 'libx264', '-preset', 'ultrafast', '-profile:v', 'main', '-pix_fmt', 'yuv420p', '-g', '50', '-keyint_min', '50', '-sc_threshold', '0', '-b:v', '800k', '-c:a', 'aac', '-b:a', '96k', '-ac', '2'];
+const LIVE = {
+  e: { name: 'LIVE: växande HLS med fMP4 och startpunkt – exakt som Norrskens inspelningar', fmp4: true },
+  f: { name: 'LIVE: växande HLS med fMP4 utan startpunkt', fmp4: true },
+  g: { name: 'LIVE: växande HLS med TS-bitar', fmp4: false },
+};
+const liveProcs = {};
+function startLive() {
+  for (const [k, v] of Object.entries(LIVE)) {
+    const p = liveProcs[k];
+    if (p && !p.done) continue;
+    const dir = path.join(DIR, k);
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.mkdirSync(dir, { recursive: true });
+    const seg = v.fmp4 ? ['-hls_segment_type', 'fmp4', '-hls_fmp4_init_filename', 'init.mp4', '-hls_segment_filename', path.join(dir, 's%03d.m4s')] : ['-hls_segment_filename', path.join(dir, 's%03d.ts')];
+    const proc = spawn(FF, ['-hide_banner', '-loglevel', 'error', '-y', ...LIVE_SRC, ...LIVE_V, '-f', 'hls', '-hls_time', '4', '-hls_list_size', '0', '-hls_playlist_type', 'event', '-hls_flags', 'independent_segments+temp_file', ...seg, path.join(dir, 'index.m3u8')], { stdio: 'ignore' });
+    proc.unref(); // a test page must never keep the add-on from stopping
+    const rec = liveProcs[k] = { proc, done: false };
+    proc.on('error', () => { rec.done = true; });
+    proc.on('close', () => { rec.done = true; });
+  }
+}
+/** A live test playlist; "e" gets the start line Norrsken's recordings have. */
+function livePlaylist(k) {
+  if (!LIVE[k]) return null;
+  let t = '';
+  try { t = fs.readFileSync(path.join(DIR, k, 'index.m3u8'), 'utf8'); } catch (_) { return null; }
+  if (k === 'e' && t.indexOf('#EXT-X-START') < 0) t = t.replace('#EXTM3U', '#EXTM3U\n#EXT-X-START:TIME-OFFSET=0,PRECISE=YES');
+  return t;
+}
+
 let making = null;
 /** Make the clips that are missing. */
 function ensure() {
@@ -44,16 +77,19 @@ function ensure() {
 
 /** A file of the test clips (only names ffmpeg made, nothing else on the disk). */
 function file(variant, name) {
-  if (!VARIANTS[variant] || !/^(test\.mp4|index\.m3u8|init\.mp4|s\d{3}\.(ts|m4s))$/.test(name)) return null;
+  if (!(VARIANTS[variant] || LIVE[variant]) || !/^(test\.mp4|index\.m3u8|init\.mp4|s\d{3}\.(ts|m4s))$/.test(name)) return null;
   const f = path.join(DIR, variant, name);
   return fs.existsSync(f) ? f : null;
 }
 
-function page(lan) {
+function page(lan, extra = []) {
   const base = (lan || '').replace(/\/$/, '');
-  const items = Object.entries(VARIANTS).map(([k, v]) => `
-  <section><h2>${k.toUpperCase()}. ${v.name}</h2>
-    <video controls playsinline x-webkit-airplay="allow" preload="metadata" src="${base}/airtest/${k}/${path.basename(v.file)}"></video></section>`).join('');
+  const sec = (k, name, src) => `
+  <section><h2>${k.toUpperCase()}. ${name}</h2>
+    <video controls playsinline x-webkit-airplay="allow" preload="metadata" src="${src}"></video></section>`;
+  const items = Object.entries(VARIANTS).map(([k, v]) => sec(k, v.name, base + '/airtest/' + k + '/' + path.basename(v.file))).join('') +
+    Object.entries(LIVE).map(([k, v]) => sec(k, v.name, base + '/airtest/' + k + '/index.m3u8')).join('') +
+    extra.map((x, i) => sec(String.fromCharCode(104 + i), x.name, base + x.url)).join('');
   return `<!doctype html><html lang="sv"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>AirPlay-test</title><style>
 body{margin:0;padding:16px;background:#0b0b0d;color:#fff;font:16px/1.4 -apple-system,system-ui,sans-serif}
@@ -66,4 +102,4 @@ ${items}
 </body></html>`;
 }
 
-module.exports = { ensure, file, page, VARIANTS };
+module.exports = { ensure, file, page, startLive, livePlaylist, VARIANTS, LIVE };

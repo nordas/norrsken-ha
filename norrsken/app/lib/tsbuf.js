@@ -146,6 +146,26 @@ function start(url, { ua, maxMin = 60, ch = '', match = false } = {}) {
   return s;
 }
 
+/** What the channel sends (read from the first local piece, no provider connection): for AirPlay and other questions. */
+function logFormat(s) {
+  const FP = process.env.FFPROBE_PATH || 'ffprobe';
+  const f = path.join(s.dir, 'index.m3u8');
+  const p = spawn(FP, ['-v', 'error', '-show_entries', 'stream=codec_type,codec_name,profile,level,width,height,avg_frame_rate,channels,pix_fmt', '-of', 'json', f]);
+  let out = '';
+  p.stdout.on('data', d => { out += d; });
+  p.on('error', () => {});
+  p.on('close', () => {
+    try {
+      const st = JSON.parse(out).streams || [];
+      const v = st.find(x => x.codec_type === 'video');
+      const a = st.find(x => x.codec_type === 'audio');
+      const fr = v && /^(\d+)\/(\d+)$/.exec(v.avg_frame_rate || '');
+      const fps = fr && +fr[2] ? Math.round(+fr[1] / +fr[2]) : 0; // "50/1"
+      console.log('[paus] format:', v ? v.codec_name + ' ' + (v.profile || '') + ' ' + (v.level ? 'L' + v.level : '') + ' ' + v.width + 'x' + v.height + ' ' + fps + 'fps ' + (v.pix_fmt || '') : 'ingen bild', '·', a ? a.codec_name + ' ' + (a.profile || '') + ' ' + (a.channels || '') + 'ch' : 'inget ljud');
+    } catch (_) { /* not readable */ }
+  });
+}
+
 /** Copy finished pieces to the Time Capsule, and free the local disk of the old ones. */
 async function mirrorTick(s) {
   const m = s.mirror;
@@ -207,6 +227,7 @@ async function playlist(s, prefix, { wait = 30000 } = {}) {
     let text = '';
     try { text = fs.readFileSync(f, 'utf8'); } catch (_) { /* not yet */ }
     if (/#EXTINF/.test(text)) {
+      if (!s.fmtLogged) { s.fmtLogged = true; logFormat(s); }
       // play from the start of the recording (where you paused), not from its end
       if (text.indexOf('#EXT-X-START') < 0) text = text.replace('#EXTM3U', '#EXTM3U\n#EXT-X-START:TIME-OFFSET=0,PRECISE=YES');
       // finished (time limit or disk): mark the end so the player doesn't wait for more
