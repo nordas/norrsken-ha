@@ -1609,7 +1609,7 @@ function vttTime(sec) {
 
 route('POST', '/api/diag', async (req, res) => {
   const b = await readBody(req);
-  console.log('[spelare ' + String(b.d || '?').slice(0, 20) + ']', String(b.m || '').replace(/[\r\n]/g, ' ').slice(0, 300));
+  console.log('[spelare ' + String(b.d || '?').slice(0, 30) + ']', String(b.m || '').replace(/[\r\n]/g, ' ').slice(0, 300));
   ok(res, { ok: true });
 });
 

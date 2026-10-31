@@ -311,7 +311,7 @@ async function startSession(url, key, opts) {
   const id = Math.random().toString(36).slice(2, 10);
   const dir = path.join(HLS_ROOT, id);
   fs.mkdirSync(dir, { recursive: true });
-  console.log('[remux]', info ? info.video + ' ' + info.height + 'p ' + (info.audio[a] || {}).codec : 'okänd fil', '→ bild', p.videoCopy ? 'orörd' : 'H.264' + (p.scale ? ' 1080p' : ''), '· ljud', p.audio.copy ? 'orört' : p.audio.codec + ' ' + p.audio.ch + 'ch', '· från', Math.floor(ss) + 's', '(HLS)');
+  console.log('[remux]', info ? info.video + ' ' + (info.width ? info.width + 'x' : '') + info.height + 'p ' + (info.pix || '') + (info.sar && info.sar !== '1:1' ? ' sar ' + info.sar : '') + (info.hdr ? ' ' + info.hdr : '') + ' ' + (info.audio[a] || {}).codec : 'okänd fil', '→ bild', p.videoCopy ? 'orörd' : 'H.264' + (p.scale ? ' 1080p' : ''), '· ljud', p.audio.copy ? 'orört' : p.audio.codec + ' ' + p.audio.ch + 'ch', '· från', Math.floor(ss) + 's', '(HLS)');
   s = { key, group, id, dir, proc: null, last: Date.now(), dead: false, err: '', done: false, tries: 0, ss: Math.max(0, +ss || 0), subs: textSubs(info).map(sb => sb.i) };
   const start = () => {
     const proc = s.proc = spawn(FF, argsFor(info, p, url, ss, a, ua, dir));

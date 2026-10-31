@@ -579,6 +579,7 @@
     if (now - diagT > 60000) { diagN = 0; diagT = now; }
     if (++diagN > 30) return;
     var dev = /iPhone|iPad/.test(navigator.userAgent) ? 'iPhone/iPad' : /Android/.test(navigator.userAgent) ? 'Android' : /Macintosh/.test(navigator.userAgent) ? (/Chrome/.test(navigator.userAgent) ? 'Mac Chrome' : 'Mac Safari') : /Titan|SmartTV|Web0S|Tizen|TV/i.test(navigator.userAgent) ? 'TV' : 'webbläsare';
+    if (NS.bootVersion) dev += ' ' + NS.bootVersion; // which app version the device runs (it may be an old page)
     try { NS.api.post('api/diag', { d: dev, m: String(msg).slice(0, 300) }).catch(function () {}); } catch (e) { /* ignore */ }
   };
   /* ---------------------------------------------------------------- thumbs up/down (feeds "Föreslaget för dig") */

@@ -28,11 +28,24 @@
     if (/[?&]noanim/.test(location.search)) document.body.classList.add('no-anim');
     NS.api.status().then(function (st) {
       NS.status = st;
+      NS.bootVersion = st.version || '';
       if (st.ready) NS.start(st);
       else NS.router.reset(new NS.Welcome());
     }).catch(function () {
       NS.router.reset(new NS.Welcome('Når inte servern. Kontrollera att datorn med appen är igång och ladda om.'));
     });
+    // a new version on the server: load it (a page left open for hours on a phone keeps running the old code), but
+    // never in the middle of something playing
+    var checkVersion = function () {
+      if (!NS.bootVersion || document.hidden) return;
+      NS.api.status().then(function (st) {
+        var top = NS.router.top();
+        var playing = top && top.video && !top.video.paused;
+        if (st && st.version && st.version !== NS.bootVersion && !playing) location.reload();
+      }).catch(function () {});
+    };
+    setInterval(checkVersion, 5 * 60000);
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) checkVersion(); });
     // keep "Live" progress bars honest without user input
     setInterval(function () {
       var top = NS.router.top();
