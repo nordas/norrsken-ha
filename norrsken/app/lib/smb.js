@@ -56,7 +56,8 @@ let legacyTried = legacy;
 const LEGACY = ['--option=client ntlmv2 auth=no', '--option=client use spnego=no', '--option=client lanman auth=no'];
 function baseArgs(old) {
   const a = [SHARE];
-  if (USER) a.push('-U', USER); else a.push('-N');
+  // a disk password (no accounts): the Time Capsule takes any user name, but a password has to be sent
+  if (USER) a.push('-U', USER); else if (PASS) a.push('-U', 'Apple'); else a.push('-N');
   if (PORT) a.push('-p', PORT);
   a.push('--option=client min protocol=NT1', '--option=client max protocol=SMB3');
   if (old) a.push(...LEGACY);
