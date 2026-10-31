@@ -621,29 +621,38 @@
       // live TV played through mpegts.js (Media Source) on the phone: AirPlay would get only the sound. Pick the TV
       // now (Safari wants the tap), and hand it the server's own HLS of the channel as soon as it is there.
       if (this.airNeedsHls()) { NS.diag('AirPlay: live via mpegts – byter till serverns HLS'); this.airLiveHls(); v.webkitShowPlaybackTargetPicker(); return; }
-      var ss = Math.floor(this.cur()); // airSrc() starts the film's own address here
-      var src = this.airSrc();
-      if (!src) { NS.toast('AirPlay: öppna Norrsken på tv-adressen (http://…:8787), inte från Home Assistant-menyn', 'info'); return; }
-      if ((this.hls || (this.airBase && !this.live)) && !this.airNative) {
-        var rel = this.airBase ? 0 : v.currentTime || 0; // the film's own address already starts at the spot
-        if (this.airBase && this.tok) { try { var su = 'rx/stop?t=' + encodeURIComponent(this.tok); if (navigator.sendBeacon) navigator.sendBeacon(su); } catch (e) { /* ignore */ } }
-        if (this.airBase && !this.airBaseSame && this.airQ) NS.toast('AirPlay i ' + this.airQ, 'info');
-        if (this.hls) { try { this.hls.destroy(); } catch (e) { /* ignore */ } }
-        this.hls = null;
-        this.airNative = true;
-        [].slice.call(v.querySelectorAll('source')).forEach(function (s) { s.remove(); });
-        v.disableRemotePlayback = false;
-        v.setAttribute('x-webkit-airplay', 'allow');
-        v.src = src;
-        if (this.airBase && !this.live) { this.kind = 'remux'; this.offset = ss; this.airWatch(ss); } // the time shown stays the film's
-        var seek = function () { v.removeEventListener('loadedmetadata', seek); if (rel > 1 && (!self.live || self.tshift)) { try { v.currentTime = rel; } catch (e) { /* ignore */ } } };
-        v.addEventListener('loadedmetadata', seek);
-        this.playPromise();
-        clearTimeout(this.airT);
-        this.airT = setTimeout(function () { if (self.airNative && !v.webkitCurrentPlaybackTargetIsWireless) self.airBack(); }, 30000);
-      }
+      if (!this.airToNative()) return;
       v.webkitShowPlaybackTargetPicker();
     } catch (e) { NS.toast('AirPlay gick inte att starta', 'info'); }
+  };
+  /**
+   * Hand AirPlay a plain address the TV fetches itself: through hls.js (Media Source) Safari sends only the sound.
+   * Used by the AirPlay button and when AirPlay is switched on elsewhere (the phone's control centre). False: no address.
+   */
+  Player.prototype.airToNative = function () {
+    var self = this, v = this.video;
+    var ss = Math.floor(this.cur()); // airSrc() starts the film's own address here
+    var src = this.airSrc();
+    if (!src) { NS.toast('AirPlay: öppna Norrsken på tv-adressen (http://…:8787), inte från Home Assistant-menyn', 'info'); return false; }
+    if ((this.hls || (this.airBase && !this.live)) && !this.airNative) {
+      var rel = this.airBase ? 0 : v.currentTime || 0; // the film's own address already starts at the spot
+      if (this.airBase && this.tok) { try { var su = 'rx/stop?t=' + encodeURIComponent(this.tok); if (navigator.sendBeacon) navigator.sendBeacon(su); } catch (e) { /* ignore */ } }
+      if (this.airBase && !this.airBaseSame && this.airQ) NS.toast('AirPlay i ' + this.airQ, 'info');
+      if (this.hls) { try { this.hls.destroy(); } catch (e) { /* ignore */ } }
+      this.hls = null;
+      this.airNative = true;
+      [].slice.call(v.querySelectorAll('source')).forEach(function (s) { s.remove(); });
+      v.disableRemotePlayback = false;
+      v.setAttribute('x-webkit-airplay', 'allow');
+      v.src = src;
+      if (this.airBase && !this.live) { this.kind = 'remux'; this.offset = ss; this.airWatch(ss); } // the time shown stays the film's
+      var seek = function () { v.removeEventListener('loadedmetadata', seek); if (rel > 1 && (!self.live || self.tshift)) { try { v.currentTime = rel; } catch (e) { /* ignore */ } } };
+      v.addEventListener('loadedmetadata', seek);
+      this.playPromise();
+      clearTimeout(this.airT);
+      this.airT = setTimeout(function () { if (self.airNative && !v.webkitCurrentPlaybackTargetIsWireless) self.airBack(); }, 30000);
+    }
+    return true;
   };
   /** Live TV the phone plays through Media Source (mpegts.js) or a raw stream the TV can't take over: needs an HLS. */
   Player.prototype.airNeedsHls = function () {
@@ -2307,7 +2316,7 @@
         air.classList.toggle('on', on);
         var vs = self.video.currentSrc || '';
         NS.diag('AirPlay ' + (on ? 'på' : 'av') + ': motor ' + (self.hls ? 'hls.js' : self.mp ? 'mpegts' : self.kind || '?') + (self.airNative ? ', Safaris egen spelare' : '') + ', källa ' + (/^blob:/.test(vs) ? 'Media Source (bara ljud når tv:n)' : vs.replace(/\?.*$/, '').replace(/^https?:\/\/[^/]+/, '')) + (self.live ? ', live' : ', film'));
-        if (on) { clearTimeout(self.airT); if (self.airNeedsHls()) self.airLiveHls(); } // also when AirPlay was started from the phone's control centre
+        if (on) { clearTimeout(self.airT); if (self.airNeedsHls()) self.airLiveHls(); else if (!self.airNative && self.hls) self.airToNative(); } // also when AirPlay was started from the phone's control centre or Safari's own button
         else if (self.airNative) self.airBack();
       });
     }

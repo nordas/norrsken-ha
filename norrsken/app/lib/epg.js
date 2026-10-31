@@ -103,7 +103,7 @@ class Epg {
         if (!s || e < from || s > to) return;
         if (!sampled) {
           sampled = true;
-          console.log('[tvguide] exempel: starttid "' + rawStart + '" blir ' + new Date(s).toLocaleTimeString('sv-SE', { timeZone: 'Europe/Stockholm', hour: '2-digit', minute: '2-digit' }) + ' svensk tid' + (OFFSET_MS ? ' (korrigerad ' + OFFSET_MS / 60000 + ' min)' : ''));
+          console.log('[tvguide] exempel: starttid "' + rawStart + '" blir ' + new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Stockholm', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(s)) + ' svensk tid' + (OFFSET_MS ? ' (korrigerad ' + OFFSET_MS / 60000 + ' min)' : ''));
         }
         const t = pickText(block, 'title');
         let d = pickText(block, 'desc');
