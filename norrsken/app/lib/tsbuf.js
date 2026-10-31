@@ -150,7 +150,7 @@ function start(url, { ua, maxMin = 60, ch = '', match = false } = {}) {
 function logFormat(s) {
   const FP = process.env.FFPROBE_PATH || 'ffprobe';
   const f = path.join(s.dir, 'index.m3u8');
-  const p = spawn(FP, ['-v', 'error', '-show_entries', 'stream=codec_type,codec_name,profile,level,width,height,avg_frame_rate,channels,pix_fmt', '-of', 'json', f]);
+  const p = spawn(FP, ['-v', 'error', '-show_entries', 'stream=codec_type,codec_name,profile,level,width,height,avg_frame_rate,channels,pix_fmt,field_order', '-of', 'json', f]);
   let out = '';
   p.stdout.on('data', d => { out += d; });
   p.on('error', () => {});
@@ -161,7 +161,7 @@ function logFormat(s) {
       const a = st.find(x => x.codec_type === 'audio');
       const fr = v && /^(\d+)\/(\d+)$/.exec(v.avg_frame_rate || '');
       const fps = fr && +fr[2] ? Math.round(+fr[1] / +fr[2]) : 0; // "50/1"
-      console.log('[paus] format:', v ? v.codec_name + ' ' + (v.profile || '') + ' ' + (v.level ? 'L' + v.level : '') + ' ' + v.width + 'x' + v.height + ' ' + fps + 'fps ' + (v.pix_fmt || '') : 'ingen bild', '·', a ? a.codec_name + ' ' + (a.profile || '') + ' ' + (a.channels || '') + 'ch' : 'inget ljud');
+      console.log('[paus] format:', v ? v.codec_name + ' ' + (v.profile || '') + ' ' + (v.level ? 'L' + v.level : '') + ' ' + v.width + 'x' + v.height + ' ' + fps + 'fps ' + (v.pix_fmt || '') + (v.field_order && v.field_order !== 'progressive' && v.field_order !== 'unknown' ? ' SPRÅNGVIS (' + v.field_order + ')' : '') : 'ingen bild', '·', a ? a.codec_name + ' ' + (a.profile || '') + ' ' + (a.channels || '') + 'ch' : 'inget ljud');
     } catch (_) { /* not readable */ }
   });
 }
@@ -272,4 +272,7 @@ function active() { return sessions.size; }
 /** Pause recordings someone is using (a paused channel), not match recordings. */
 function pauseActive() { let n = 0; for (const s of sessions.values()) if (!s.match && !s.dead) n++; return n; }
 
-module.exports = { _hideLinks: hideLinks, start, get, stop, stopAll, stopPauses, matchSession, playlist, file, fileReady, length, active, pauseActive, cleanStart, rootDir };
+/** Every recording that runs (for the AirPlay test page). */
+function list() { return [...sessions.values()].filter(s => !s.dead).map(s => ({ id: s.id, ch: s.ch, match: s.match })); }
+
+module.exports = { list, _hideLinks: hideLinks, start, get, stop, stopAll, stopPauses, matchSession, playlist, file, fileReady, length, active, pauseActive, cleanStart, rootDir };

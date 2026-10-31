@@ -1424,7 +1424,8 @@ route('GET', '/airtest', async (req, res) => {
   airtest.startLive();
   const lan = process.env.PUBLIC_URL ? process.env.PUBLIC_URL.replace(/\/$/, '') : (lanUrls()[0] || '');
   // the match being recorded (or the last one): the real thing, next to the test clips
-  const extra = [...matchRecs.values()].map(r => recInfo(r, '')).filter(Boolean).slice(0, 1).map(r => ({ name: 'Pågående matchinspelning: ' + r.title, url: r.url }));
+  // what Norrsken records right now (a match, a paused channel, live on the iPhone): the real channel, as the TV gets it
+  const extra = tsbuf.list().slice(0, 3).map(x => ({ name: (x.match ? 'Matchinspelning: ' : 'Kanal just nu: ') + x.ch, url: '/pause/' + x.id + '/index.m3u8' }));
   send(res, 200, airtest.page(lan, extra), 'text/html; charset=utf-8', { 'Cache-Control': 'no-store' });
 });
 route('GET', '/airtest/:v/:name', (req, res, q, p) => {
