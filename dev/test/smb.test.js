@@ -117,3 +117,14 @@ test('when the Time Capsule drops out the recording goes on locally and is copie
     assert.equal(s.mirror.err, '');
   } finally { delete process.env.FAKE_SMB_DOWN; srv.close(); if (s) tsbuf.stop(s, 'test'); }
 });
+
+test('a Time Capsule that only takes the old login (NTLMv1) is reached anyway, and a wrong password still says so', () => {
+  const run = (env) => require('child_process').execFileSync(process.execPath, ['-e', `
+    require(${JSON.stringify(path.join(__dirname, '..', 'lib', 'smb.js'))}).check(true).then(r => { process.stdout.write(JSON.stringify(r)); });
+  `], { env: Object.assign({}, process.env, env), encoding: 'utf8' });
+  const ok = JSON.parse(run({ FAKE_SMB_LEGACY_ONLY: '1' }).split('\n').pop());
+  assert.equal(ok.ok, true, 'falls back to NTLMv1 and connects');
+  const bad = JSON.parse(run({ FAKE_SMB_LEGACY_ONLY: '1', NSK_SMB_PASS: 'fel' }).split('\n').pop());
+  assert.equal(bad.ok, false);
+  assert.match(bad.err, /Fel användarnamn eller lösenord/);
+});

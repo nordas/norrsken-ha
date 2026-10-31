@@ -46,11 +46,20 @@ function friendly(out) {
   return m ? 'Time Capsule svarade ' + m[0] : 'Kunde inte prata med Time Capsule';
 }
 
-function baseArgs() {
+/*
+ * A Time Capsule only takes the old NTLM login (v1) without SPNEGO; today's Samba sends NTLMv2 by default and the
+ * disk answers "wrong password" even when it is right. So: try the modern login first, and when the disk says
+ * LOGON_FAILURE, try the old one once; whichever works is kept.
+ */
+let legacy = process.env.NSK_SMB_LEGACY === '1';
+let legacyTried = legacy;
+const LEGACY = ['--option=client ntlmv2 auth=no', '--option=client use spnego=no', '--option=client lanman auth=no'];
+function baseArgs(old) {
   const a = [SHARE];
   if (USER) a.push('-U', USER); else a.push('-N');
   if (PORT) a.push('-p', PORT);
   a.push('--option=client min protocol=NT1', '--option=client max protocol=SMB3');
+  if (old) a.push(...LEGACY);
   return a;
 }
 
@@ -58,12 +67,25 @@ function baseArgs() {
  * Run smbclient commands ("cd x; put a b"). Resolves { ok, out, err }. `ignore` is a regex of statuses that are fine
  * (mkdir of a folder that exists). cwd is the local folder for put/get.
  */
-function exec(cmd, { cwd, timeout = 120000, ignore } = {}) {
+async function exec(cmd, opts = {}) {
+  const r = await run(cmd, opts, legacy);
+  if (!r.ok && !legacyTried && /Fel användarnamn eller lösenord/.test(r.err)) {
+    legacyTried = true;
+    const r2 = await run(cmd, opts, true);
+    if (r2.ok || !/Fel användarnamn eller lösenord/.test(r2.err)) {
+      legacy = true;
+      console.log('[time capsule] disken vill ha den äldre inloggningen (NTLMv1) – använder den');
+      return r2;
+    }
+  }
+  return r;
+}
+function run(cmd, { cwd, timeout = 120000, ignore } = {}, old) {
   return new Promise((resolve) => {
     if (!SHARE) return resolve({ ok: false, out: '', err: 'Ingen Time Capsule inställd' });
     const env = Object.assign({}, process.env);
     if (PASS) env.PASSWD = PASS; else delete env.PASSWD;
-    const child = execFile(BIN, baseArgs().concat(['-c', cmd]), { cwd, env, timeout, maxBuffer: 4e6, encoding: 'utf8' }, (e, stdout, stderr) => {
+    const child = execFile(BIN, baseArgs(old).concat(['-c', cmd]), { cwd, env, timeout, maxBuffer: 4e6, encoding: 'utf8' }, (e, stdout, stderr) => {
       const out = String(stdout || '') + '\n' + String(stderr || '');
       let bad = out.split('\n').filter(l => /NT_STATUS_|^do_connect|failed|ERRSRV|ERRDOS/i.test(l));
       if (ignore) bad = bad.filter(l => !ignore.test(l));

@@ -10,6 +10,7 @@ const args = process.argv.slice(2);
 const cmdArg = args[args.indexOf('-c') + 1] || '';
 const share = args[0];
 if (process.env.FAKE_SMB_DOWN) { console.log('do_connect: Connection to host failed (Error NT_STATUS_CONNECTION_REFUSED)'); process.exit(1); }
+if (process.env.FAKE_SMB_LEGACY_ONLY && !args.includes('--option=client ntlmv2 auth=no')) { console.log('session setup failed: NT_STATUS_LOGON_FAILURE'); process.exit(1); }
 if ((process.env.PASSWD || '') !== (process.env.FAKE_SMB_PASS || '')) { console.log('session setup failed: NT_STATUS_LOGON_FAILURE'); process.exit(1); }
 if (process.env.FAKE_SMB_LOG) fs.appendFileSync(process.env.FAKE_SMB_LOG, JSON.stringify({ args, hasPassOnArgv: args.some(a => a.includes(process.env.PASSWD || '\u0000')) }) + '\n');
 

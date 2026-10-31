@@ -247,6 +247,16 @@
     this.every(15000, function () { self.saveProgress(); if (self.hls && self.airBase && !self.airNative) self.addAirSource(); });
     // tell the server something is playing (direct streams included): a match recording waits for it
     this.every(60000, function () { if (self.played && !self.suspended && !self.video.paused && !(self.tshift && self.tshift.url)) NS.api.post('api/watching', {}).catch(function () {}); });
+    // watching the channel the favourite's match is about to start on: the server records it, and this player
+    // switches to the recording's live edge (same picture, but "from the start" works and only one connection is used)
+    if (this.live) this.every(15000, function () {
+      if (!self.played || self.suspended || self.tshift || self.item.t === 'catchup' || self.airNative) return;
+      NS.api.post('api/watching', { ch: self.item.id }).then(function (r) {
+        if (!r || !r.recNow || self.tshift || self.suspended || self.airNative) return;
+        NS.toast('Matchen spelas in – du kan spola tillbaka till start', 'live');
+        self.play(self.item, 0);
+      }).catch(function () {});
+    });
     if (this.live) this.every(30000, function () { NS.needEpg([self.item.id]); });
     if (this.live) this.every(1000, function () { if (self.tshift || self.livePausedAt) self.paintTshift(); self.paintLBar(); });
   };
@@ -608,6 +618,9 @@
     var self = this, v = this.video;
     if (!v.webkitShowPlaybackTargetPicker) { NS.toast('AirPlay finns i Safari på iPhone, iPad och Mac', 'info'); return; }
     try {
+      // live TV played through mpegts.js (Media Source) on the phone: AirPlay would get only the sound. Pick the TV
+      // now (Safari wants the tap), and hand it the server's own HLS of the channel as soon as it is there.
+      if (this.airNeedsHls()) { NS.diag('AirPlay: live via mpegts – byter till serverns HLS'); this.airLiveHls(); v.webkitShowPlaybackTargetPicker(); return; }
       var ss = Math.floor(this.cur()); // airSrc() starts the film's own address here
       var src = this.airSrc();
       if (!src) { NS.toast('AirPlay: öppna Norrsken på tv-adressen (http://…:8787), inte från Home Assistant-menyn', 'info'); return; }
@@ -632,6 +645,42 @@
       v.webkitShowPlaybackTargetPicker();
     } catch (e) { NS.toast('AirPlay gick inte att starta', 'info'); }
   };
+  /** Live TV the phone plays through Media Source (mpegts.js) or a raw stream the TV can't take over: needs an HLS. */
+  Player.prototype.airNeedsHls = function () {
+    if (!this.live || this.airNative || this.hls || this.item.t === 'catchup' || (this.tshift && this.tshift.url)) return false;
+    return !!this.mp || this.kind !== 'native';
+  };
+  /**
+   * The channel as HLS from the server (its pause recording: fragmented MP4 the TV fetches itself; on the favourite's
+   * match channel that is the match recording), played by Safari itself so AirPlay sends the picture too.
+   */
+  Player.prototype.airLiveHls = function () {
+    var self = this, v = this.video, item = this.item;
+    if (this._airLiveBusy) return;
+    this._airLiveBusy = true;
+    NS.api.post('api/pause/start' + NS.pq(), { id: item.id }).then(function (r) {
+      self._airLiveBusy = false;
+      if (self.item !== item || self.airNative) { if (!r.match) NS.api.post('api/pause/' + r.id + '/stop', {}).catch(function () {}); return; }
+      var src = self.lanify(r.url);
+      if (!src) { NS.toast('AirPlay: öppna Norrsken på tv-adressen (http://…:8787), inte från Home Assistant-menyn', 'info'); return; }
+      if (self.mp) { try { self.mp.pause(); self.mp.unload(); self.mp.detachMediaElement(); self.mp.destroy(); } catch (e) { /* ignore */ } self.mp = null; }
+      self.airNative = true;
+      self.airPause = r.id;
+      self.airUrl = r.url;
+      [].slice.call(v.querySelectorAll('source')).forEach(function (x) { x.remove(); });
+      v.disableRemotePlayback = false;
+      v.setAttribute('x-webkit-airplay', 'allow');
+      v.src = src;
+      // the recording may be older than now (the match from its start): go to its live end
+      var edge = function () { v.removeEventListener('loadedmetadata', edge); try { if (v.seekable.length && v.seekable.end(0) > 20) v.currentTime = v.seekable.end(0) - 8; } catch (e) { /* ignore */ } };
+      v.addEventListener('loadedmetadata', edge);
+      self.playPromise();
+      NS.diag('AirPlay: live som HLS från servern (' + (r.max || '?') + ' min)');
+      clearTimeout(self.airT);
+      self.airT = setTimeout(function () { if (self.airNative && !v.webkitCurrentPlaybackTargetIsWireless) self.airBack(); }, 30000);
+    }).catch(function (e) { self._airLiveBusy = false; NS.diag('AirPlay: kunde inte göra HLS av kanalen: ' + (e && e.message)); NS.toast('AirPlay: ' + ((e && e.message) || 'kanalen gick inte att skicka'), 'info'); });
+  };
+
   /**
    * 4K over AirPlay that can't keep up (the conversion on the server slower than the film, or the TV stopping to
    * load again and again): carry on in the version the phone played, from the same spot.
@@ -687,6 +736,7 @@
   Player.prototype.airBack = function () {
     if (!this.airNative || this.suspended) return;
     this.airNative = false;
+    if (this.airPause) { NS.api.post('api/pause/' + this.airPause + '/stop', {}).catch(function () {}); this.airPause = ''; }
     this.airWatching = false;
     clearInterval(this.airWT);
     clearTimeout(this.airT);
@@ -2255,7 +2305,10 @@
       this.video.addEventListener('webkitcurrentplaybacktargetiswirelesschanged', function () {
         var on = !!self.video.webkitCurrentPlaybackTargetIsWireless;
         air.classList.toggle('on', on);
-        if (on) clearTimeout(self.airT); else if (self.airNative) self.airBack();
+        var vs = self.video.currentSrc || '';
+        NS.diag('AirPlay ' + (on ? 'på' : 'av') + ': motor ' + (self.hls ? 'hls.js' : self.mp ? 'mpegts' : self.kind || '?') + (self.airNative ? ', Safaris egen spelare' : '') + ', källa ' + (/^blob:/.test(vs) ? 'Media Source (bara ljud når tv:n)' : vs.replace(/\?.*$/, '').replace(/^https?:\/\/[^/]+/, '')) + (self.live ? ', live' : ', film'));
+        if (on) { clearTimeout(self.airT); if (self.airNeedsHls()) self.airLiveHls(); } // also when AirPlay was started from the phone's control centre
+        else if (self.airNative) self.airBack();
       });
     }
     if (!(el.requestFullscreen || el.webkitRequestFullscreen)) el.classList.add('nofs');

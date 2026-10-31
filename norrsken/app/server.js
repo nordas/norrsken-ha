@@ -1026,7 +1026,14 @@ route('GET', '/api/services/title/:mt/:id', async (req, res, q, p) => {
 catalog.isBusy = () => Date.now() - lastStreamAt < 15 * 60e3 || ff.activeSessions() > 0 || tsbuf.active() > 0 || downloads.active() > 0;
 /* A device that plays (also straight from the provider, which the server never sees) says so every minute:
    the match recording then waits instead of taking the one connection. */
-route('POST', '/api/watching', (req, res) => { lastStreamAt = lastPlayAt = Date.now(); ok(res, { ok: true }); });
+route('POST', '/api/watching', async (req, res) => {
+  lastStreamAt = lastPlayAt = Date.now();
+  let b = {};
+  try { b = await readBody(req); } catch (_) { /* nothing */ }
+  // watching the channel of a match whose recording is due: the player asks for the channel again and gets the recording
+  const ch = b && b.ch ? String(b.ch) : '';
+  ok(res, { ok: true, recNow: !!(ch && !tsbuf.matchSession() && dueMatch(ch)) });
+});
 
 route('POST', '/api/prepare/:type/:id', (req, res, q, p) => {
   // Read the file's format in the background so pressing Play starts faster – but never at the cost of a
@@ -1054,6 +1061,7 @@ route('GET', '/api/stream/:type/:id', async (req, res, q, p) => {
   const busy = matchRecBusy(type, id, !!q.get('start'));
   if (busy) return bad(res, busy, 409);
   // the channel whose match is being recorded: the recording at its live edge, never a second provider connection
+  if (type === 'live' && !q.get('start') && !q.get('pv') && !q.get('air')) matchTakeover(id);
   const rec = type === 'live' && !q.get('start') ? sameChannelRec(id, ingressBase(req)) : null;
   if (rec && q.get('pv')) return bad(res, 'Matchen spelas in på kanalen', 409); // no preview from the recording's start
   if (rec) return ok(res, { live: true, sources: [{ kind: 'hls', url: rec.url }], rec });
@@ -1199,19 +1207,71 @@ function matchRecTick() {
       matchWait.set(key, now);
       break;
     }
-    const src = catalog.streamUrl('live', m.ch.id);
-    if (!src || !src.primary) continue;
-    try {
-      downloads.yieldTo('matchinspelning');
-      const sess = tsbuf.start(src.primary, { ua: catalog.ua(), maxMin: Math.ceil((m.e + MATCH_TAIL_MS - now) / 60e3), ch: m.title + ' på ' + (m.chName || m.ch.n), match: true });
-      if (had) {
-        console.log('[match] inspelningen av', m.title, 'avbröts – startar om');
-        had.restartAt = now; had.tries++;
-        const old = tsbuf.get(had.sessId); had.sessId = sess.id; had.parts = (had.parts || []).concat(old ? [old.id] : []);
-      }
-      else matchRecs.set(key, { key, s: m.s, e: m.e, title: m.title, chId: m.ch.id, chName: m.chName || m.ch.n, sessId: sess.id });
-    } catch (e) { console.error('[match]', e.message); }
+    try { startMatchRec(m, key, had, m.ch, now); } catch (e) { console.error('[match]', e.message); }
   }
+}
+
+/** Start (or restart) the recording of a match on channel `ch`. Throws when ffmpeg or the disk can't. */
+function startMatchRec(m, key, had, ch, now = Date.now()) {
+  const src = catalog.streamUrl('live', ch.id);
+  if (!src || !src.primary) throw new Error('kanalen saknas: ' + (ch.n || ch.id));
+  downloads.yieldTo('matchinspelning');
+  const chName = (m.chans && m.chans[0] === ch && m.chName) || ch.n;
+  const sess = tsbuf.start(src.primary, { ua: catalog.ua(), maxMin: Math.ceil((m.e + MATCH_TAIL_MS - now) / 60e3), ch: m.title + ' på ' + chName, match: true });
+  if (had) {
+    console.log('[match] inspelningen av', m.title, 'avbröts – startar om');
+    had.restartAt = now; had.tries = (had.tries || 0) + 1;
+    const old = tsbuf.get(had.sessId); had.sessId = sess.id; had.chId = ch.id; had.chName = chName; had.parts = (had.parts || []).concat(old ? [old.id] : []);
+  } else matchRecs.set(key, { key, s: m.s, e: m.e, title: m.title, chId: ch.id, chName, sessId: sess.id });
+  return sess;
+}
+
+/**
+ * The favourite's match on this channel when its recording should be running now (or starts within `aheadMs`) but
+ * isn't: { m, key, had, ch }. Someone watching or pausing that channel then gets the recording instead of the
+ * channel, so one provider connection gives both "from the start" and live.
+ */
+function dueMatch(chId, now = Date.now(), aheadMs = 0) {
+  if (!chId || !catalog.ready() || (store.config.options || {}).matchRec === false) return null;
+  let list = [];
+  try { list = sport.matchesToday(MATCH_TEAM, catalog.list('live', 'all', store.profile('')), catalog.epg, { now }); } catch (e) { return null; }
+  for (const m of list) {
+    const ch = (m.chans || [m.ch]).find(c => String(c.id) === String(chId));
+    if (!ch) continue;
+    const key = MATCH_TEAM + '|' + m.s;
+    if (matchStopped.has(key)) continue;
+    if (now < m.s - MATCH_LEAD_MS - aheadMs || now > m.e + MATCH_TAIL_MS) continue;
+    const had = matchRecs.get(key);
+    if (had) {
+      if (had.gaveUp) continue;
+      const hs = tsbuf.get(had.sessId);
+      if (hs && !hs.dead && (!hs.done || hs.full)) continue; // already recording (or finished as planned)
+    }
+    return { m, key, had, ch };
+  }
+  return null;
+}
+
+/** Pause on the match channel before the window opens: record from now to the end of the match. */
+function matchTakeoverPause(id, aheadMs) {
+  if (tsbuf.matchSession()) return false;
+  const due = dueMatch(id, Date.now(), aheadMs);
+  if (!due) return false;
+  takeConnection('matchinspelning');
+  try { startMatchRec(due.m, due.key, due.had, due.ch); console.log('[match]', due.m.title, '– pausad på kanalen: pausen blir matchinspelningen'); return true; } catch (e) { console.error('[match]', e.message); return false; }
+}
+
+/** A viewer asks for this live channel: start its match recording first when one is due, so they watch through it. */
+function matchTakeover(id) {
+  if (tsbuf.matchSession()) return false;
+  const due = dueMatch(id);
+  if (!due) return false;
+  takeConnection('matchinspelning');
+  try {
+    startMatchRec(due.m, due.key, due.had, due.ch);
+    console.log('[match]', due.m.title, '– du tittar på kanalen: spelar in och visar inspelningen live (en anslutning)');
+    return true;
+  } catch (e) { console.error('[match]', e.message); return false; }
 }
 
 route('GET', '/api/matchrec', (req, res) => {
@@ -1252,6 +1312,11 @@ route('POST', '/api/pause/start', async (req, res, q) => {
     const r = [...matchRecs.values()].find(x => x.sessId === ms.id);
     if (r && r.chId === id) return ok(res, { id: ms.id, url: ingressBase(req) + '/pause/' + ms.id + '/index.m3u8', max: ms.maxMin });
     return bad(res, 'Matchinspelningen pågår på ' + (r ? r.chName : 'en annan kanal') + '. Avbryt den först.', 409);
+  }
+  // pausing the favourite's match channel shortly before or during the match: the pause is the match recording
+  if (matchTakeoverPause(id, (+o.pauseMax || 60) * 60e3)) {
+    const ms2 = tsbuf.matchSession();
+    if (ms2) return ok(res, { id: ms2.id, url: ingressBase(req) + '/pause/' + ms2.id + '/index.m3u8', max: ms2.maxMin });
   }
   lastStreamAt = Date.now();
   dlYield('paus'); ff.stopAll(); proxy.abortAll(); // one connection: a film being converted or proxied ends when a channel is paused
@@ -1707,4 +1772,4 @@ for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { store.flush(); 
 
 if (require.main === module) start();
 
-module.exports = { server, store, catalog, proxy, start, _pool: pool, _maskUrl: (u) => maskUrl(u), _unmaskUrl: (a, b) => unmaskUrl(a, b), _linkSecrets: (u) => linkSecrets(u), _matchRecTick: matchRecTick, _imageAllowed: (u) => imageAllowed(new URL(u)), _privateHost: privateHost, _streamIdle: () => { lastStreamAt = 0; ff.stopAll(); } };
+module.exports = { server, store, catalog, proxy, start, _pool: pool, _maskUrl: (u) => maskUrl(u), _unmaskUrl: (a, b) => unmaskUrl(a, b), _linkSecrets: (u) => linkSecrets(u), _matchRecTick: matchRecTick, _matchReset: () => { matchStopped.clear(); for (const r of matchRecs.values()) { const x = tsbuf.get(r.sessId); if (x) tsbuf.stop(x, 'test'); } matchRecs.clear(); }, _imageAllowed: (u) => imageAllowed(new URL(u)), _privateHost: privateHost, _streamIdle: () => { lastStreamAt = 0; ff.stopAll(); } };

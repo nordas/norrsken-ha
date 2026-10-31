@@ -285,7 +285,7 @@ test('sport: the start page also follows Sweden (hockey, football) and the skiin
 test('pause: records the channel to disk, plays it back as HLS, stops and cleans up', async () => {
   const st = (await get('/api/status')).json;
   assert.deepEqual(st.pause, { mode: 'auto', max: 60, rec: true });
-  const r = await post('/api/pause/start?profile=p1', { id: '110' }); // no archive on this channel
+  const r = await post('/api/pause/start?profile=p1', { id: '108' }); // no archive on this channel (and no match: pausing the match channel records the match)
   assert.equal(r.status, 200, JSON.stringify(r.json));
   assert.match(r.json.url, /^\/pause\/\w+\/index\.m3u8$/);
   const pl = await until(async () => { const x = await get(r.json.url); return x.status === 200 && x.text; }, 30000);
@@ -311,18 +311,18 @@ test('pause: records the channel to disk, plays it back as HLS, stops and cleans
 });
 
 test('pause: a new pause ends the previous recording (one provider connection), and "archive only" refuses', async () => {
-  const a = (await post('/api/pause/start?profile=p1', { id: '110' })).json;
-  const b = (await post('/api/pause/start?profile=p1', { id: '111' })).json;
+  const a = (await post('/api/pause/start?profile=p1', { id: '108' })).json;
+  const b = (await post('/api/pause/start?profile=p1', { id: '109' })).json;
   assert.notEqual(a.id, b.id);
   assert.equal((await post('/api/pause/' + a.id + '/alive')).status, 404, 'first one stopped');
   await post('/api/pause/' + b.id + '/stop');
   await post('/api/setup', { options: { pauseMode: 'archive', pauseMax: 120 } });
   const st = (await get('/api/status')).json;
   assert.deepEqual(st.pause, { mode: 'archive', max: 120, rec: true });
-  assert.equal((await post('/api/pause/start?profile=p1', { id: '110' })).status, 403);
+  assert.equal((await post('/api/pause/start?profile=p1', { id: '108' })).status, 403);
   await post('/api/setup', { options: { pauseMode: 'auto', pauseMax: 60 } });
   // kids can't record a channel outside their categories
-  assert.equal((await post('/api/pause/start?profile=p2', { id: '110' })).status, 403);
+  assert.equal((await post('/api/pause/start?profile=p2', { id: '108' })).status, 403);
 });
 
 /* ------------------------------------------------------------------ streaming services */
@@ -398,7 +398,7 @@ test('match: the favourite\'s match is recorded from the start, kept for a day, 
   assert.equal((await get('/api/matchrec')).json.recs.length, 0, 'waits while a stream is in use');
   // someone has paused a channel (a pause recording): still watching, the match waits
   app._streamIdle();
-  const pz = (await post('/api/pause/start?profile=p1', { id: '111' })).json;
+  const pz = (await post('/api/pause/start?profile=p1', { id: '108' })).json;
   app._streamIdle();
   app._matchRecTick();
   assert.equal((await get('/api/matchrec')).json.recs.length, 0, 'waits while a channel is paused');
@@ -446,12 +446,52 @@ test('match: the favourite\'s match is recorded from the start, kept for a day, 
   assert.equal((await get('/api/matchrec')).json.recs.length, 0, 'a stopped match stays stopped');
 });
 
+test('match: watching the match channel when the match is due records it and shows the recording live (one connection), pausing it too', async () => {
+  app._matchReset();
+  app._streamIdle();
+  const m = (await get('/api/page/home?profile=p1')).json.sport;
+  const ch = m.chans[1]; // not the best channel: the one the viewer is on is the one recorded
+  // the player of that channel checks in: the server says to ask for the channel again
+  const w = (await post('/api/watching', { ch: ch.id })).json;
+  assert.equal(w.recNow, true, JSON.stringify(w));
+  assert.equal((await post('/api/watching', { ch: '108' })).json.recNow, false, 'a channel without the match: nothing to do');
+  // it asks again: the recording starts and is what it gets, at its live edge
+  const sc = await get('/api/stream/live/' + encodeURIComponent(ch.id) + '?profile=p1');
+  assert.equal(sc.status, 200, JSON.stringify(sc.json));
+  assert.ok(sc.json.rec && sc.json.rec.edge, 'the recording at its live edge');
+  const r = (await get('/api/matchrec')).json;
+  assert.equal(r.recs.length, 1);
+  assert.equal(String(r.recs[0].chId), String(ch.id), 'the channel being watched is the one recorded');
+  assert.equal(r.recs[0].id, sc.json.rec.id);
+  assert.equal((await post('/api/watching', { ch: ch.id })).json.recNow, false, 'already recording');
+  // a preview never starts it
+  app._matchReset();
+  app._streamIdle();
+  await get('/api/stream/live/' + encodeURIComponent(ch.id) + '?profile=p1&pv=1');
+  assert.equal((await get('/api/matchrec')).json.recs.length, 0, 'a preview does not start the recording');
+  // pausing the match channel: the pause is the match recording (not a short pause that ends at its limit)
+  app._streamIdle();
+  const pz = (await post('/api/pause/start?profile=p1', { id: m.ch.id })).json;
+  const r2 = (await get('/api/matchrec')).json;
+  assert.equal(r2.recs.length, 1, JSON.stringify(r2));
+  assert.equal(pz.id, r2.recs[0].id);
+  assert.ok(pz.max >= Math.floor((m.e - Date.now()) / 60e3) && pz.max > 60, 'long enough for the whole match (a pause is 60 min): ' + pz.max);
+  // a channel without the match pauses as before
+  app._matchReset();
+  app._streamIdle();
+  const other = (await post('/api/pause/start?profile=p1', { id: '108' })).json;
+  assert.ok(other.id);
+  assert.equal((await get('/api/matchrec')).json.recs.length, 0);
+  await post('/api/pause/' + other.id + '/stop');
+  app._matchReset();
+});
+
 test('one connection: a paused channel blocks the speed test, a new stream ends it; a finished match recording survives a new pause', async () => {
   const tsbuf = require('../lib/tsbuf');
   const st = (await get('/api/stream/movie/1002?profile=p1&ext=mkv&caps=vp9,opus')).json;
   assert.ok(st.t, 'a token for the speed test');
   app._streamIdle();
-  const pz = (await post('/api/pause/start?profile=p1', { id: '111' })).json;
+  const pz = (await post('/api/pause/start?profile=p1', { id: '108' })).json;
   assert.ok(pz.id, JSON.stringify(pz));
   const sp = await get('/api/speedtest?t=' + encodeURIComponent(st.t) + '&sec=3');
   assert.equal(sp.status, 409, 'the speed test waits for the paused channel');
@@ -464,7 +504,7 @@ test('one connection: a paused channel blocks the speed test, a new stream ends 
   // a match recording that has finished is kept for a day, even when someone pauses another channel
   const m = tsbuf.start(prov + '/live/demo/demo/110.ts', { maxMin: 1, ch: 'test', match: true });
   m.done = true; try { m.proc.kill('SIGKILL'); } catch (_) { /* gone */ }
-  const pz2 = (await post('/api/pause/start?profile=p1', { id: '111' })).json;
+  const pz2 = (await post('/api/pause/start?profile=p1', { id: '108' })).json;
   assert.ok(pz2.id, JSON.stringify(pz2));
   assert.ok(tsbuf.get(m.id), 'the finished match recording is still there');
   tsbuf.stop(m, 'test'); await post('/api/pause/' + pz2.id + '/stop');
