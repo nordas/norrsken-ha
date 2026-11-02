@@ -65,3 +65,12 @@ En Time Capsule pratar bara det gamla SMB1-protokollet. Home Assistants "Lägg t
 Så fungerar det: pausen och matchinspelningen skrivs först i en liten lokal mapp, färdiga delar (4 sekunder) kopieras direkt till Time Capsule och de gamla lokala delarna tas bort. Spolar du tillbaka hämtas delarna tillbaka därifrån. Tappar disken förbindelsen sparas allt lokalt tills den är tillbaka. Är `storage_dir` (monterad disk) också satt och fungerar, används den i stället.
 
 Nedladdningar ligger kvar på tilläggets egen disk (eller på `storage_dir`).
+
+## Luleås matcher spelas alltid in
+
+- Inspelningen startar när sändningen börjar (fem minuter innan), på kanalen med bäst bild: FHD före HD.
+- Tittar någon på något annat när matchen börjar får inspelningen leverantörens anslutning först; spelaren byter då till matchen.
+- Tittar du på matchkanalen tittar du via inspelningen: live och "från start" med samma enda anslutning.
+- Avbryts inspelningen (leverantören tappar den) startar den om, och "från start" spelar alla delar i ordning.
+- En omstart av tillägget (t.ex. en uppdatering mitt i matchen) tar inte bort inspelningen.
+- Med Time Capsule ligger delarna kvar på tilläggets egen disk så länge den har plats (minst 4 GB ledigt); kopian på Time Capsule används när disken blir full.

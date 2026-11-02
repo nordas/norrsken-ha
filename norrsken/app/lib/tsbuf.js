@@ -21,15 +21,52 @@ const rootDir = () => process.env.NSK_PAUSE_DIR || storage.pauseDir();
 // A Time Capsule Home Assistant cannot mount (SMB1): pieces are copied there as they are finished, see mirrorTick
 const mirrorOn = () => smb.enabled() && !process.env.NSK_PAUSE_DIR && !storage.mounted();
 const KEEP_LOCAL = 8; // the newest pieces always stay on the local disk
-const LOCAL_FOR_MS = +process.env.NSK_PAUSE_LOCAL_MS || 60e3; // and a piece that was copied stays this long (it is being played right now)
+const LOCAL_FOR_MS = +process.env.NSK_PAUSE_LOCAL_MS || 60e3; // and a piece that was copied stays at least this long
+// Local first: the pieces stay on the add-on's disk as long as it has room (watching from the start, live and AirPlay
+// then never wait for the Time Capsule); the copies on the Time Capsule are what is left when the disk runs low.
+const LOCAL_KEEP_FREE = (+process.env.NSK_LOCAL_KEEP_FREE_GB || 4) * 1e9;
+const KEEP_MATCH_DIR_MS = 24 * 3600e3;
 const IDLE_MS = 3 * 60e3; // the player checks in every 30 s, also while paused
 const MIN_FREE = 1.5e9; // leave room on the disk: Home Assistant needs it more than we do
 const sessions = new Map();
 
 /** Whatever an earlier run left behind (called when the server starts, not when the module is loaded). */
 function cleanStart() {
-  try { fs.rmSync(rootDir(), { recursive: true, force: true }); } catch (_) { /* nothing */ }
-  if (mirrorOn()) smb.check(true).then((r) => { if (r.ok) return smb.cleanSubdirs(smb.dir + '/pause'); }).catch(() => {});
+  // a match recording survives a restart (an update in the middle of the match must not lose its start); pauses do not
+  const keep = new Set();
+  const root = rootDir();
+  try {
+    for (const id of fs.readdirSync(root)) {
+      let meta = null;
+      try { meta = JSON.parse(fs.readFileSync(path.join(root, id, 'meta.json'), 'utf8')); } catch (_) { /* a pause or junk */ }
+      if (meta && meta.match && Date.now() - meta.started < KEEP_MATCH_DIR_MS && /^[a-z0-9]{4,12}$/.test(id)) { keep.add(id); continue; }
+      fs.rmSync(path.join(root, id), { recursive: true, force: true });
+    }
+  } catch (_) { /* nothing there */ }
+  if (mirrorOn()) smb.check(true).then((r) => { if (r.ok) return smb.cleanSubdirs(smb.dir + '/pause', keep); }).catch(() => {});
+  return [...keep];
+}
+
+/** Bring back the match recordings cleanStart kept: finished (nothing records into them now), playable, 24 h. */
+function restore(ids) {
+  const out = [];
+  for (const id of ids || []) {
+    const dir = path.join(rootDir(), id);
+    let meta = null;
+    try { meta = JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8')); } catch (_) { continue; }
+    const s = { id, url: '', dir, ch: meta.ch || '', proc: null, started: meta.started, last: Date.now(), dead: false, done: true, err: '', maxMin: meta.maxMin || 0, full: false, match: true, restored: true };
+    // ffmpeg stopped in the middle: the playlist has no end mark yet, the pieces it lists are whole
+    if (mirrorOn()) {
+      s.mirror = { dir: smb.dir + '/pause/' + id, ready: true, up: new Set(), busy: false, err: '', fetching: new Map(), bytes: 0 };
+      smb.listFiles(s.mirror.dir).then((names) => { for (const n of names) if (/^p\d{5}\.m4s$/.test(n)) s.mirror.up.add(n); }).catch(() => {});
+      s.mirrorT = setInterval(() => mirrorTick(s), 5000);
+      if (s.mirrorT.unref) s.mirrorT.unref();
+    }
+    sessions.set(id, s);
+    out.push(s);
+  }
+  if (out.length) console.log('[match]', out.length, 'matchinspelning(ar) finns kvar efter omstarten');
+  return out;
 }
 cleanStart.done = false;
 
@@ -103,6 +140,7 @@ function start(url, { ua, maxMin = 60, ch = '', match = false } = {}) {
   const dir = path.join(ROOT, id);
   fs.mkdirSync(dir, { recursive: true });
   const s = { id, url, dir, ch, proc: null, started: Date.now(), last: Date.now(), dead: false, done: false, err: '', maxMin, full: false, match: !!match };
+  try { fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({ id, ch, match: !!match, started: s.started, maxMin })); } catch (_) { /* the recording works without it */ }
   if (useMirror) s.mirror = { dir: smb.dir + '/pause/' + id, ready: false, up: new Set(), busy: false, err: '', fetching: new Map(), bytes: 0 };
   const hls = /\.m3u8?(\?|$)/i.test(url);
   /*
@@ -181,11 +219,17 @@ async function mirrorTick(s) {
       if (!r.ok) throw new Error(r.err);
       for (const n of todo) { m.up.add(n); try { m.bytes += fs.statSync(path.join(s.dir, n)).size; } catch (_) { /* gone */ } }
     }
+    // only when the local disk runs low: the oldest pieces that are safe on the Time Capsule leave it first
     const now = Date.now();
-    segs.slice(0, Math.max(0, segs.length - KEEP_LOCAL)).forEach((n) => {
-      const f = path.join(s.dir, n);
-      try { if (m.up.has(n) && now - fs.statSync(f).mtimeMs > LOCAL_FOR_MS) fs.rmSync(f, { force: true }); } catch (_) { /* gone */ }
-    });
+    if (freeBytes(s.dir) < LOCAL_KEEP_FREE) {
+      let freed = 0;
+      for (const n of segs.slice(0, Math.max(0, segs.length - KEEP_LOCAL))) {
+        if (freeBytes(s.dir) >= LOCAL_KEEP_FREE) break;
+        const f = path.join(s.dir, n);
+        try { if (m.up.has(n) && now - fs.statSync(f).mtimeMs > LOCAL_FOR_MS) { fs.rmSync(f, { force: true }); freed++; } } catch (_) { /* gone */ }
+      }
+      if (freed && !m.lowLogged) { m.lowLogged = true; console.log('[paus] lite plats på tilläggets disk: äldre delar finns nu bara på Time Capsule'); }
+    }
     if (m.err) console.log('[paus] Time Capsule är tillbaka');
     m.err = '';
   } catch (e) {
@@ -194,7 +238,7 @@ async function mirrorTick(s) {
   } finally { m.busy = false; }
 }
 
-/** A piece to play: on the local disk, or fetched back from the Time Capsule (the next two ahead of time). */
+/** A piece to play: on the local disk, or fetched back from the Time Capsule (with the next few in the same go). */
 async function fileReady(id, name) {
   const f = file(id, name);
   if (!f) return null;
@@ -202,15 +246,20 @@ async function fileReady(id, name) {
   const s = get(id);
   const m = s && s.mirror;
   if (!m || !m.up.has(name)) return null;
-  const fetch = (n) => {
-    let p = m.fetching.get(n);
-    if (!p) { p = smb.get(s.dir, m.dir, n).finally(() => m.fetching.delete(n)); m.fetching.set(n, p); }
-    return p;
-  };
-  const r = await fetch(name);
   const num = /^p(\d{5})\.m4s$/.exec(name);
-  if (num) for (let k = 1; k <= 2; k++) { const nx = 'p' + String(+num[1] + k).padStart(5, '0') + '.m4s'; if (m.up.has(nx) && !fs.existsSync(path.join(s.dir, nx))) fetch(nx).catch(() => {}); }
-  return r.ok && fs.existsSync(f) ? f : null;
+  const want = [name];
+  if (num) for (let k = 1; k <= 3; k++) { const nx = 'p' + String(+num[1] + k).padStart(5, '0') + '.m4s'; if (m.up.has(nx) && !fs.existsSync(path.join(s.dir, nx)) && !m.fetching.has(nx)) want.push(nx); }
+  let p = m.fetching.get(name);
+  if (!p) {
+    p = (async () => {
+      let r = await smb.getMany(s.dir, m.dir, want);
+      if (!r.ok && !fs.existsSync(f)) r = await smb.getMany(s.dir, m.dir, [name]); // once more, the piece itself
+      return r;
+    })().finally(() => { for (const n of want) m.fetching.delete(n); });
+    for (const n of want) m.fetching.set(n, p);
+  }
+  await p;
+  return fs.existsSync(f) ? f : null;
 }
 
 function get(id) {
@@ -220,7 +269,7 @@ function get(id) {
 }
 
 /** The recording as an HLS playlist, waiting for its first piece. Segment URIs point at prefix/<id>/. */
-async function playlist(s, prefix, { wait = 30000 } = {}) {
+async function playlist(s, prefix, { wait = 30000, edge = false } = {}) {
   const f = path.join(s.dir, 'index.m3u8');
   const t0 = Date.now();
   for (;;) {
@@ -229,7 +278,8 @@ async function playlist(s, prefix, { wait = 30000 } = {}) {
     if (/#EXTINF/.test(text)) {
       if (!s.fmtLogged) { s.fmtLogged = true; logFormat(s); }
       // play from the start of the recording (where you paused), not from its end
-      if (text.indexOf('#EXT-X-START') < 0) text = text.replace('#EXTM3U', '#EXTM3U\n#EXT-X-START:TIME-OFFSET=0,PRECISE=YES');
+      // live (edge): a little before its end, so a TV or Safari never starts by reading the oldest pieces
+      if (text.indexOf('#EXT-X-START') < 0) text = text.replace('#EXTM3U', '#EXTM3U\n#EXT-X-START:TIME-OFFSET=' + (edge ? '-12' : '0') + ',PRECISE=YES');
       // finished (time limit or disk): mark the end so the player doesn't wait for more
       if (s.done && text.indexOf('#EXT-X-ENDLIST') < 0) text = text.trimEnd() + '\n#EXT-X-ENDLIST\n';
       return text.split('\n').map((l) => {
@@ -241,6 +291,39 @@ async function playlist(s, prefix, { wait = 30000 } = {}) {
     if (Date.now() - t0 > wait) throw new Error('Inspelningen kom inte igång');
     await new Promise(ok => setTimeout(ok, 300));
   }
+}
+
+/**
+ * A match recording that was interrupted (the provider dropped it, the add-on restarted) is several recordings: one
+ * playlist of all of them in order, so "from the start" really is the start of the match.
+ */
+async function playlistMulti(list, prefix, { edge = false } = {}) {
+  const parts = list.filter(Boolean);
+  if (!parts.length) throw new Error('Inspelningen finns inte längre');
+  if (parts.length === 1) return playlist(parts[0], prefix, { edge });
+  const out = ['#EXTM3U', '#EXT-X-VERSION:7', '#EXT-X-START:TIME-OFFSET=' + (edge ? '-12' : '0') + ',PRECISE=YES', '#EXT-X-PLAYLIST-TYPE:EVENT', '#EXT-X-INDEPENDENT-SEGMENTS'];
+  let target = 4;
+  const body = [];
+  let first = true;
+  for (const s of parts) {
+    let text = '';
+    try { text = fs.readFileSync(path.join(s.dir, 'index.m3u8'), 'utf8'); } catch (_) { continue; }
+    if (!/#EXTINF/.test(text)) continue;
+    const td = /#EXT-X-TARGETDURATION:(\d+)/.exec(text);
+    if (td) target = Math.max(target, +td[1]);
+    if (!first) body.push('#EXT-X-DISCONTINUITY');
+    first = false;
+    body.push('#EXT-X-MAP:URI="' + prefix + '/' + s.id + '/init.mp4"');
+    for (const l of text.split('\n')) {
+      if (l.startsWith('#EXTINF')) body.push(l);
+      else if (l && l[0] !== '#') body.push(prefix + '/' + s.id + '/' + path.basename(l.trim()));
+    }
+  }
+  if (!body.length) throw new Error('Inspelningen kom inte igång');
+  const last = parts[parts.length - 1];
+  out.push('#EXT-X-TARGETDURATION:' + target, '#EXT-X-MEDIA-SEQUENCE:0', ...body);
+  if (last.done && last.full) out.push('#EXT-X-ENDLIST');
+  return out.join('\n') + '\n';
 }
 
 function file(id, name) {
@@ -275,4 +358,4 @@ function pauseActive() { let n = 0; for (const s of sessions.values()) if (!s.ma
 /** Every recording that runs (for the AirPlay test page). */
 function list() { return [...sessions.values()].filter(s => !s.dead).map(s => ({ id: s.id, ch: s.ch, match: s.match })); }
 
-module.exports = { list, _hideLinks: hideLinks, start, get, stop, stopAll, stopPauses, matchSession, playlist, file, fileReady, length, active, pauseActive, cleanStart, rootDir };
+module.exports = { list, restore, playlistMulti, _hideLinks: hideLinks, start, get, stop, stopAll, stopPauses, matchSession, playlist, file, fileReady, length, active, pauseActive, cleanStart, rootDir };

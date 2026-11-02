@@ -393,23 +393,22 @@ test('services: a wrong key says so instead of failing quietly', async () => {
 /* ------------------------------------------------------------------ match recording (Luleå, 24 h) */
 
 test('match: the favourite\'s match is recorded from the start, kept for a day, one stream at a time', async () => {
-  // someone watching (a stream started a moment ago): the recording waits instead of taking the connection
-  app._matchRecTick();
-  assert.equal((await get('/api/matchrec')).json.recs.length, 0, 'waits while a stream is in use');
-  // someone has paused a channel (a pause recording): still watching, the match waits
+  // Luleå's match is recorded from the start of the broadcast even when someone watches something else: on a
+  // one- or two-connection account the recording gets the connection, a paused channel gives way
   app._streamIdle();
   const pz = (await post('/api/pause/start?profile=p1', { id: '108' })).json;
-  app._streamIdle();
-  app._matchRecTick();
-  assert.equal((await get('/api/matchrec')).json.recs.length, 0, 'waits while a channel is paused');
-  await post('/api/pause/' + pz.id + '/stop');
-  app._streamIdle();
+  assert.ok(pz.id, JSON.stringify(pz));
   app._matchRecTick();
   const r = (await get('/api/matchrec')).json;
-  assert.equal(r.recs.length, 1, JSON.stringify(r));
+  assert.equal(r.recs.length, 1, 'recorded although a channel was paused: ' + JSON.stringify(r));
+  assert.equal((await get(pz.url)).status, 404, 'the pause gave way to the match (one connection)');
+  // the list is saved: a restart of the add-on carries on with it
+  const saved = JSON.parse(fs.readFileSync(path.join(process.env.DATA_DIR, 'matchrecs.json'), 'utf8'));
+  assert.equal(saved.length, 1);
+  assert.equal(saved[0].title, r.recs[0].title);
   const rec = r.recs[0];
   assert.match(rec.title, /Luleå – Färjestad/);
-  assert.match(rec.url, /\/pause\/\w+\/index\.m3u8$/);
+  assert.match(rec.url, /\/mrec\/\w+\/index\.m3u8$/, 'one playlist for the whole match (all its parts)');
   // while it runs, a pause on another channel waits; the same channel pauses into the recording
   assert.equal(rec.recording, true, 'the match recording runs');
   const other = await post('/api/pause/start?profile=p1', { id: '111' });
@@ -432,6 +431,8 @@ test('match: the favourite\'s match is recorded from the start, kept for a day, 
   // the playlist is there, growing from the start
   const pl = await until(async () => { const x = await get(rec.url); return x.status === 200 && x.text; }, 30000);
   assert.match(pl, /#EXT-X-PLAYLIST-TYPE:EVENT/);
+  assert.match(pl, /#EXT-X-START:TIME-OFFSET=0/, 'from the start of the match');
+  assert.match((await get(rec.url + '?edge=1')).text, /#EXT-X-START:TIME-OFFSET=-12/, 'live viewers (and AirPlay) start near the end');
   // a second tick does not start another one for the same match
   app._matchRecTick();
   assert.equal((await get('/api/matchrec')).json.recs.length, 1);
@@ -483,6 +484,32 @@ test('match: watching the match channel when the match is due records it and sho
   assert.ok(other.id);
   assert.equal((await get('/api/matchrec')).json.recs.length, 0);
   await post('/api/pause/' + other.id + '/stop');
+  app._matchReset();
+});
+
+test('match: a device playing something else when the match starts is told to switch; the FHD channel is preferred', async () => {
+  const sport = require('../lib/sport');
+  assert.ok(sport.channelScore('SE: TV4 Sport FHD') > sport.channelScore('SE: TV4 Sport HD'), 'FHD before HD');
+  assert.ok(sport.channelScore('SE: TV4 Sport HD') > sport.channelScore('SE: TV4 Sport'), 'HD before plain');
+  app._matchReset();
+  app._streamIdle();
+  const m = (await get('/api/page/home?profile=p1')).json.sport;
+  // a channel without the match, or a film (no channel): switch to the match
+  const w = (await post('/api/watching', { ch: '108' })).json;
+  assert.ok(w.matchOn, JSON.stringify(w));
+  assert.equal(w.matchOn.title, m.title);
+  assert.ok(m.chans.some(c => String(c.id) === String(w.matchOn.ch.id)), 'one of the match channels');
+  assert.equal(String(w.matchOn.ch.id), String(m.ch.id), 'the best (FHD/HD) one');
+  assert.ok((await post('/api/watching', {})).json.matchOn, 'a film too');
+  // the match channel itself: record it and watch through the recording (not "switch")
+  const own = (await post('/api/watching', { ch: m.ch.id })).json;
+  assert.equal(own.recNow, true);
+  assert.equal(own.matchOn, null);
+  // once it records, nothing more to say
+  app._streamIdle();
+  app._matchRecTick();
+  assert.equal((await get('/api/matchrec')).json.recs.length, 1);
+  assert.equal((await post('/api/watching', { ch: '108' })).json.matchOn, null);
   app._matchReset();
 });
 

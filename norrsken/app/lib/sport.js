@@ -60,7 +60,9 @@ function matchup(title, fav) {
 function channelScore(name) {
   const n = String(name || '');
   let s = 0;
-  if (/\b(fhd|hd|1080)\b/i.test(n)) s += 3;
+  // Full HD first (what Oskar wants recorded and shown), then HD
+  if (/\b(fhd|1080[pi]?)\b/i.test(n)) s += 5;
+  else if (/\bhd\b/i.test(n)) s += 3;
   if (/\b(4k|uhd)\b/i.test(n)) s += 2;
   if (/\bsd\b/i.test(n)) s -= 3;
   if (/(^|[\s|:[(])(se|swe|sverige)([\s|:\])]|$)/i.test(n)) s += 2;

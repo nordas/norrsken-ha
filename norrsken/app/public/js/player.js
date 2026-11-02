@@ -246,19 +246,35 @@
     this.every(500, function () { if (self.cuSeek) self.cuCatch(); });
     this.every(15000, function () { self.saveProgress(); if (self.hls && self.airBase && !self.airNative) self.addAirSource(); });
     // tell the server something is playing (direct streams included): a match recording waits for it
-    this.every(60000, function () { if (self.played && !self.suspended && !self.video.paused && !(self.tshift && self.tshift.url)) NS.api.post('api/watching', {}).catch(function () {}); });
+    this.every(60000, function () { if (!self.live && self.played && !self.suspended && !self.video.paused) NS.api.post('api/watching', {}).then(function (r) { self.onWatching(r); }).catch(function () {}); });
     // watching the channel the favourite's match is about to start on: the server records it, and this player
     // switches to the recording's live edge (same picture, but "from the start" works and only one connection is used)
     if (this.live) this.every(15000, function () {
-      if (!self.played || self.suspended || self.tshift || self.item.t === 'catchup' || self.airNative) return;
-      NS.api.post('api/watching', { ch: self.item.id }).then(function (r) {
-        if (!r || !r.recNow || self.tshift || self.suspended || self.airNative) return;
-        NS.toast('Matchen spelas in – du kan spola tillbaka till start', 'live');
-        self.play(self.item, 0);
-      }).catch(function () {});
+      if (!self.played || self.suspended || (self.tshift && !self.tshift.ios) || self.item.t === 'catchup' || self.airNative) return;
+      NS.api.post('api/watching', { ch: self.item.id }).then(function (r) { self.onWatching(r); }).catch(function () {});
     });
     if (this.live) this.every(30000, function () { NS.needEpg([self.item.id]); });
     if (this.live) this.every(1000, function () { if (self.tshift || self.livePausedAt) self.paintTshift(); self.paintLBar(); });
+  };
+  /**
+   * The server's answer to "still watching": this channel's match is to be recorded (watch it through the recording),
+   * or Luleå's match starts while something else plays (one provider connection: switch to the match).
+   */
+  Player.prototype.onWatching = function (r) {
+    if (!r || this.suspended || this.dead) return;
+    if (r.recNow && this.live && (!this.tshift || this.tshift.ios) && !this.airNative) {
+      NS.toast('Matchen spelas in – du kan spola tillbaka till start', 'live');
+      this.play(this.item, 0);
+      return;
+    }
+    if (r.matchOn && r.matchOn.ch && !(this.live && this.tshift && this.tshift.match)) {
+      if (this._matchOnAt && Date.now() - this._matchOnAt < 10 * 60e3) return; // once: the viewer may have switched back on purpose
+      this._matchOnAt = Date.now();
+      NS.toast(r.matchOn.title + ' börjar – Norrsken spelar in matchen och byter dit', 'live');
+      var ch = r.matchOn.ch;
+      if (!this.live) { this.saveProgress(true); NS.router.pop(); NS.playItem(ch, { list: [ch] }); return; }
+      this.play(ch, 0);
+    }
   };
   Player.prototype.every = function (ms, fn) { this.timers.push(setInterval(fn, ms)); };
   Player.prototype.deactivate = function () {
@@ -640,6 +656,11 @@
     var self = this, v = this.video;
     var ss = Math.floor(this.cur()); // airSrc() starts the film's own address here
     var src = this.airSrc();
+    // live at (or near) the end of a recording: the TV gets the edge playlist and starts there, instead of loading
+    // the recording from its first piece and being told to seek
+    var nearEnd = false;
+    try { nearEnd = this.live && v.seekable.length > 0 && v.seekable.end(v.seekable.length - 1) - v.currentTime < 45; } catch (e) { /* ignore */ }
+    if (nearEnd && src && /\/(mrec|pause)\//.test(src) && !/[?&]edge=1/.test(src)) src += (src.indexOf('?') < 0 ? '?' : '&') + 'edge=1';
     if (!src) { NS.toast('AirPlay: öppna Norrsken på tv-adressen (http://…:8787), inte från Home Assistant-menyn', 'info'); return false; }
     if ((this.hls || (this.airBase && !this.live)) && !this.airNative) {
       var rel = this.airBase ? 0 : v.currentTime || 0; // the film's own address already starts at the spot
@@ -653,7 +674,7 @@
       v.setAttribute('x-webkit-airplay', 'allow');
       v.src = src;
       if (this.airBase && !this.live) { this.kind = 'remux'; this.offset = ss; this.airWatch(ss); } // the time shown stays the film's
-      var seek = function () { v.removeEventListener('loadedmetadata', seek); if (rel > 1 && (!self.live || self.tshift)) { try { v.currentTime = rel; } catch (e) { /* ignore */ } } };
+      var seek = function () { v.removeEventListener('loadedmetadata', seek); if (rel > 1 && !nearEnd && (!self.live || self.tshift)) { try { v.currentTime = rel; } catch (e) { /* ignore */ } } };
       v.addEventListener('loadedmetadata', seek);
       this.playPromise();
       clearTimeout(this.airT);
@@ -1591,9 +1612,10 @@
     this.teardown();
     this.buffering(true);
     var ts = this.tshift = { mode: 'rec', ios: true, at: Date.now(), playing: true, pos: 0 };
-    NS.api.post('api/pause/start' + NS.pq(), { id: item.id }).then(function (r) {
+    NS.api.post('api/pause/start' + NS.pq(), { id: item.id, live: true }).then(function (r) {
       if (self.tshift !== ts || self.item !== item) { NS.api.post('api/pause/' + r.id + '/stop', {}).catch(function () {}); return; }
       ts.id = r.id; ts.url = r.url; ts.max = r.max; ts.edge = true;
+      if (r.match) ts.match = true; // the channel's match is being recorded: this is that recording (never stopped by us)
       ts.aliveT = setInterval(function () {
         NS.api.post('api/pause/' + ts.id + '/alive', {}).then(function (a) { ts.sec = a.sec; ts.full = a.full; self.paintTshift(); }).catch(function () { ts.lost = true; });
       }, 30000);
@@ -1628,12 +1650,13 @@
       hls.attachMedia(v);
     } else {
       this.kind = 'native';
-      if (at) this.pendingSeek = at;
-      if (ts.ios && ts.edge) {
-        ts.edge = false;
-        var ed = function () { v.removeEventListener('loadedmetadata', ed); try { if (v.seekable.length && v.seekable.end(0) > 12) v.currentTime = v.seekable.end(0) - 6; } catch (e) { /* ignore */ } };
-        v.addEventListener('loadedmetadata', ed);
-      }
+      // live: the playlist itself says "start near the end", so Safari (and a TV it hands the stream to with AirPlay)
+      // never begins by reading the oldest pieces of a recording that may be hours long
+      if ((ts.ios && ts.edge) || ts.atEdge) {
+        ts.edge = false; ts.atEdge = false;
+        url = url + (url.indexOf('?') < 0 ? '?' : '&') + 'edge=1';
+      } else if (at) this.pendingSeek = at;
+      this.airUrl = url;
       v.src = url;
       this.playPromise();
     }
@@ -1651,6 +1674,7 @@
       // a few seconds back from the newest piece: the playlist may be a little behind what the server has written
       ts.pos = a ? Math.max(0, a.sec - 6) : 0;
       ts.playing = true;
+      ts.atEdge = true; // Safari's own player: an edge playlist instead of a seek (see startRec)
       self.startRec(ts.pos);
     }).catch(function () { if (self.tshift === ts) self.startRec(ts.pos || 0); });
   };

@@ -1033,7 +1033,16 @@ route('POST', '/api/watching', async (req, res) => {
   try { b = await readBody(req); } catch (_) { /* nothing */ }
   // watching the channel of a match whose recording is due: the player asks for the channel again and gets the recording
   const ch = b && b.ch ? String(b.ch) : '';
-  ok(res, { ok: true, recNow: !!(ch && !tsbuf.matchSession() && dueMatch(ch)) });
+  const recNow = !!(ch && !tsbuf.matchSession() && dueMatch(ch));
+  // Luleå's match starts while this device plays something else straight from the provider (a connection the
+  // server can't end): on a one-connection account it has to give way, so the player switches to the match
+  let matchOn = null;
+  const maxConn = (catalog.data && catalog.data.maxConn) || 1;
+  if (!recNow && maxConn <= 2 && !tsbuf.matchSession()) {
+    const due = dueAny();
+    if (due && !(due.m.chans || [due.m.ch]).some(c => String(c.id) === ch)) matchOn = { title: due.m.title, ch: due.m.ch };
+  }
+  ok(res, { ok: true, recNow, matchOn });
 });
 
 route('POST', '/api/prepare/:type/:id', (req, res, q, p) => {
@@ -1136,7 +1145,30 @@ const MATCH_TEAM = 'lulea';
 const MATCH_LEAD_MS = 5 * 60e3; // start a little before the puck drops
 const MATCH_TAIL_MS = 10 * 60e3; // and go on a little after the final whistle
 const KEEP_MATCH_MS = 24 * 3600e3;
-const matchRecs = new Map(); // team|start → { key, s, e, title, chId, chName, sessId }
+const matchRecs = new Map(); // team|start → { key, mid, s, e, title, chId, chName, sessId, parts }
+const MATCH_FILE = path.join(DATA_DIR, 'matchrecs.json');
+/** The match recordings survive a restart of the add-on (an update in the middle of a match must not lose its start). */
+function saveMatchRecs() {
+  try { fs.writeFileSync(MATCH_FILE, JSON.stringify([...matchRecs.values()])); } catch (e) { console.error('[match] kunde inte spara listan:', e.message); }
+}
+function loadMatchRecs(keptIds) {
+  let list = [];
+  try { list = JSON.parse(fs.readFileSync(MATCH_FILE, 'utf8')); } catch (_) { return; }
+  const kept = new Set(keptIds);
+  for (const r of list) {
+    if (!r || !r.key || Date.now() - r.s > KEEP_MATCH_MS) continue;
+    const parts = [...(r.parts || []), r.sessId].filter(id => kept.has(id));
+    if (!parts.length) continue;
+    r.sessId = parts[parts.length - 1];
+    r.parts = parts.slice(0, -1);
+    r.mid = r.mid || Math.random().toString(36).slice(2, 10);
+    r.tries = 0; r.gaveUp = false;
+    matchRecs.set(r.key, r);
+  }
+  if (matchRecs.size) console.log('[match] fortsätter:', [...matchRecs.values()].map(r => r.title).join(', '));
+}
+/** Every recording of a match in order (earlier parts first: the provider dropped it, or the add-on restarted). */
+const recParts = (r) => [...(r.parts || []), r.sessId].map(id => tsbuf.get(id)).filter(Boolean);
 const matchStopped = new Map(); // team|start → when the viewer stopped it: not started again for that match
 let matchWaitLog = 0;
 const matchWait = new Map(); // team|start → when the recording last had to wait for another stream (shown on the start page)
@@ -1165,15 +1197,22 @@ function sameChannelRec(id, base) {
   const ms = tsbuf.matchSession();
   if (!ms) return null;
   const r = [...matchRecs.values()].find(x => x.sessId === ms.id);
-  if (!r || r.chId !== id) return null;
-  return { id: ms.id, url: base + '/pause/' + ms.id + '/index.m3u8', edge: true };
+  if (!r || String(r.chId) !== String(id)) return null;
+  return { id: ms.id, url: base + '/mrec/' + r.mid + '/index.m3u8', edge: true };
 }
 
 function recInfo(r, base) {
   const s = r && tsbuf.get(r.sessId);
   if (!s) return null;
-  return { id: s.id, url: base + '/pause/' + s.id + '/index.m3u8', sec: Math.round(tsbuf.length(s)), recording: !s.done && !s.dead, title: r.title, ch: r.chName, chId: r.chId, s: r.s, e: r.e };
+  const sec = recParts(r).reduce((n, x) => n + tsbuf.length(x), 0);
+  return { id: s.id, url: base + '/mrec/' + r.mid + '/index.m3u8', sec: Math.round(sec), recording: !s.done && !s.dead, title: r.title, ch: r.chName, chId: r.chId, s: r.s, e: r.e, parts: recParts(r).length };
 }
+route('GET', '/mrec/:mid/index.m3u8', async (req, res, q, p) => {
+  const r = [...matchRecs.values()].find(x => x.mid === p.mid);
+  if (!r) return bad(res, 'Inspelningen finns inte längre', 404);
+  for (const x of recParts(r)) tsbuf.get(x.id); // someone watches: keeps them
+  try { send(res, 200, await tsbuf.playlistMulti(recParts(r), ingressBase(req) + '/pause', { edge: q.get('edge') === '1' }), 'application/vnd.apple.mpegurl', { 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' }); } catch (e) { bad(res, e.message, 502); }
+});
 
 /** Records every match of the favourite team (Luleå Hockey) from just before it starts until the end, if it's on a channel we have. */
 function matchRecTick() {
@@ -1181,7 +1220,7 @@ function matchRecTick() {
   const now = Date.now();
   for (const [k, t] of matchStopped) if (now - t > KEEP_MATCH_MS) matchStopped.delete(k);
   for (const [k, r] of matchRecs) {
-    if (now - r.s > KEEP_MATCH_MS) { for (const id of [r.sessId].concat(r.parts || [])) { const s = tsbuf.get(id); if (s) tsbuf.stop(s, 'ett dygn gånget'); } matchRecs.delete(k); }
+    if (now - r.s > KEEP_MATCH_MS) { for (const id of [r.sessId].concat(r.parts || [])) { const s = tsbuf.get(id); if (s) tsbuf.stop(s, 'ett dygn gånget'); } matchRecs.delete(k); saveMatchRecs(); }
   }
   if ((store.config.options || {}).matchRec === false) return;
   let list = [];
@@ -1197,16 +1236,18 @@ function matchRecTick() {
       if (hs && (!hs.done || hs.full)) continue;
       if (!hs) continue; // removed by the viewer
       had.tries = had.tries || 0;
-      if (had.tries >= 6) { if (!had.gaveUp) { had.gaveUp = true; console.log('[match] inspelningen av', m.title, 'avbröts sex gånger – försöker inte mer'); } continue; }
-      if (now - (had.restartAt || 0) < Math.min(8, 2 ** had.tries) * 60e3) continue;
+      // the whole match matters: never give up while it is on; wait a little longer each time (at most a minute)
+      if (now - (had.restartAt || 0) < Math.min(60e3, 15e3 * 2 ** had.tries)) continue;
+      if (had.tries && had.tries % 10 === 0 && had.loggedTries !== had.tries) { had.loggedTries = had.tries; console.log('[match] inspelningen av', m.title, 'har avbrutits', had.tries, 'gånger – fortsätter försöka'); }
     }
     if (tsbuf.matchSession()) break; // the provider gives one connection: the recording that runs goes on
-    // someone is watching (a conversion, or a stream started in the last few minutes): their picture isn't cut off;
-    // the recording starts as soon as the connection is free
-    if (ff.activeSessions() > 0 || tsbuf.pauseActive() > 0 || proxy.activeCount() > 0 || Date.now() - lastStreamAt < 3 * 60e3) {
-      if (now - (matchWaitLog || 0) > 5 * 60e3) { matchWaitLog = now; console.log('[match]', m.title, 'börjar snart – väntar med inspelningen tills ingen annan ström används'); }
+    // Luleå's matches are always recorded from the start of the broadcast. Someone watching something else on a
+    // one-connection account gives way (their player is told to switch to the match); with more connections both go.
+    const maxConn = (catalog.data && catalog.data.maxConn) || 1;
+    if (maxConn <= 2 && (ff.activeSessions() > 0 || tsbuf.pauseActive() > 0 || proxy.activeCount() > 0 || Date.now() - lastStreamAt < 3 * 60e3)) {
+      if (now - (matchWaitLog || 0) > 5 * 60e3) { matchWaitLog = now; console.log('[match]', m.title, 'börjar – matchinspelningen tar leverantörens anslutning före annat tittande'); }
       matchWait.set(key, now);
-      break;
+      takeConnection('matchinspelning');
     }
     try { startMatchRec(m, key, had, m.ch, now); } catch (e) { console.error('[match]', e.message); }
   }
@@ -1223,7 +1264,8 @@ function startMatchRec(m, key, had, ch, now = Date.now()) {
     console.log('[match] inspelningen av', m.title, 'avbröts – startar om');
     had.restartAt = now; had.tries = (had.tries || 0) + 1;
     const old = tsbuf.get(had.sessId); had.sessId = sess.id; had.chId = ch.id; had.chName = chName; had.parts = (had.parts || []).concat(old ? [old.id] : []);
-  } else matchRecs.set(key, { key, s: m.s, e: m.e, title: m.title, chId: ch.id, chName, sessId: sess.id });
+  } else matchRecs.set(key, { key, mid: Math.random().toString(36).slice(2, 10), s: m.s, e: m.e, title: m.title, chId: ch.id, chName, sessId: sess.id, parts: [] });
+  saveMatchRecs();
   return sess;
 }
 
@@ -1262,6 +1304,19 @@ function matchTakeoverPause(id, aheadMs) {
   try { startMatchRec(due.m, due.key, due.had, due.ch); console.log('[match]', due.m.title, '– pausad på kanalen: pausen blir matchinspelningen'); return true; } catch (e) { console.error('[match]', e.message); return false; }
 }
 
+/** Luleå's match whose recording should run now, on whichever channel. */
+function dueAny(now = Date.now()) {
+  if (!catalog.ready() || (store.config.options || {}).matchRec === false) return null;
+  let list = [];
+  try { list = sport.matchesToday(MATCH_TEAM, catalog.list('live', 'all', store.profile('')), catalog.epg, { now }); } catch (e) { return null; }
+  for (const m of list) {
+    const key = MATCH_TEAM + '|' + m.s;
+    if (matchStopped.has(key) || now < m.s - MATCH_LEAD_MS || now > m.e + MATCH_TAIL_MS) continue;
+    return { m, key };
+  }
+  return null;
+}
+
 /** A viewer asks for this live channel: start its match recording first when one is due, so they watch through it. */
 function matchTakeover(id) {
   if (tsbuf.matchSession()) return false;
@@ -1291,6 +1346,7 @@ route('POST', '/api/matchrec/stop', (req, res) => {
     }
     matchRecs.delete(k);
   }
+  saveMatchRecs();
   ok(res, { ok: true, stopped: n });
 });
 
@@ -1311,19 +1367,21 @@ route('POST', '/api/pause/start', async (req, res, q) => {
   const ms = tsbuf.matchSession();
   if (ms) {
     const r = [...matchRecs.values()].find(x => x.sessId === ms.id);
-    if (r && r.chId === id) return ok(res, { id: ms.id, url: ingressBase(req) + '/pause/' + ms.id + '/index.m3u8', max: ms.maxMin });
+    if (r && String(r.chId) === id) return ok(res, { id: ms.id, url: ingressBase(req) + '/mrec/' + r.mid + '/index.m3u8', max: ms.maxMin, match: true });
     return bad(res, 'Matchinspelningen pågår på ' + (r ? r.chName : 'en annan kanal') + '. Avbryt den först.', 409);
   }
   // pausing the favourite's match channel shortly before or during the match: the pause is the match recording
   if (matchTakeoverPause(id, (+o.pauseMax || 60) * 60e3)) {
     const ms2 = tsbuf.matchSession();
-    if (ms2) return ok(res, { id: ms2.id, url: ingressBase(req) + '/pause/' + ms2.id + '/index.m3u8', max: ms2.maxMin });
+    const r2 = ms2 && [...matchRecs.values()].find(x => x.sessId === ms2.id);
+    if (ms2 && r2) return ok(res, { id: ms2.id, url: ingressBase(req) + '/mrec/' + r2.mid + '/index.m3u8', max: ms2.maxMin, match: true });
   }
   lastStreamAt = Date.now();
   dlYield('paus'); ff.stopAll(); proxy.abortAll(); // one connection: a film being converted or proxied ends when a channel is paused
   try {
     const it = catalog.get('live', id) || {};
-    const s = tsbuf.start(src.primary, { ua: catalog.ua(), maxMin: +o.pauseMax || 60, ch: it.n || id });
+    // live on an iPhone goes through this recording the whole time it is watched: long enough for an evening
+    const s = tsbuf.start(src.primary, { ua: catalog.ua(), maxMin: b.live ? 360 : (+o.pauseMax || 60), ch: it.n || id });
     ok(res, { id: s.id, url: ingressBase(req) + '/pause/' + s.id + '/index.m3u8', max: s.maxMin });
   } catch (e) { bad(res, e.message, 507); }
 });
@@ -1341,7 +1399,7 @@ route('POST', '/api/pause/:id/stop', (req, res, q, p) => {
 route('GET', '/pause/:id/index.m3u8', async (req, res, q, p) => {
   const s = tsbuf.get(p.id);
   if (!s) return bad(res, 'Inspelningen finns inte längre', 404);
-  try { send(res, 200, await tsbuf.playlist(s, ingressBase(req) + '/pause'), 'application/vnd.apple.mpegurl', { 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' }); } catch (e) { bad(res, e.message, 502); }
+  try { send(res, 200, await tsbuf.playlist(s, ingressBase(req) + '/pause', { edge: q.get('edge') === '1' }), 'application/vnd.apple.mpegurl', { 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' }); } catch (e) { bad(res, e.message, 502); }
 });
 route('GET', '/pause/:id/:name', async (req, res, q, p) => {
   const f = await tsbuf.fileReady(p.id, p.name);
@@ -1786,7 +1844,9 @@ server.keepAliveTimeout = 65000;
 
 function start() {
   ff.cleanStart();
-  tsbuf.cleanStart();
+  const keptRecs = tsbuf.cleanStart();
+  tsbuf.restore(keptRecs);
+  loadMatchRecs(keptRecs);
   server.listen(PORT, HOST, () => {
     const urls = process.env.PUBLIC_URL ? [process.env.PUBLIC_URL.replace(/\/$/, '')] : lanUrls();
     console.log(`\n  ${store.config.options.appName || 'Norrsken'} ${pkg.version} kör på port ${PORT}`);

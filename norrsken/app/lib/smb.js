@@ -133,13 +133,37 @@ function rmdirAll(dir) {
   return exec('del "' + dir + '/*"; rmdir "' + dir + '"', { ignore: /NO_SUCH_FILE|NOT_FOUND|OBJECT_NAME_NOT_FOUND|PATH_NOT_FOUND|NO_SUCH_FILE/i });
 }
 
-/** Remove every sub-folder of `dir` (what an earlier run left behind). */
-async function cleanSubdirs(dir) {
+/** Fetch several files of one folder into `cwd` in one go (one login: the Time Capsule is slow to log in). */
+function getMany(cwd, dir, names) {
+  if (!SAFE_PATH.test(dir) || !names.length || !names.every(n => SAFE_NAME.test(n))) return Promise.resolve({ ok: false, err: 'Ogiltigt namn' });
+  const fsm = require('fs');
+  const pth = require('path');
+  return exec('cd "' + dir + '"; ' + names.map(n => 'get "' + n + '" "' + n + '.fetch"').join('; '), { cwd, timeout: 10 * 60e3 }).then((r) => {
+    let all = true;
+    for (const n of names) {
+      try { fsm.renameSync(pth.join(cwd, n + '.fetch'), pth.join(cwd, n)); } catch (_) { all = false; }
+    }
+    return all ? { ok: true, out: r.out, err: '' } : { ok: false, out: r.out, err: r.err || 'Alla delar kom inte' };
+  });
+}
+
+/** The file names in a remote folder. */
+async function listFiles(dir) {
+  if (!SAFE_PATH.test(dir)) return [];
+  const l = await exec('ls "' + dir + '/*"');
+  if (!l.ok) return [];
+  const names = [];
+  for (const line of l.out.split('\n')) { const m = /^\s+([\w.-]+)\s+[AHSRN]*\s+\d+\s/.exec(line); if (m && m[1] !== '.' && m[1] !== '..') names.push(m[1]); }
+  return names;
+}
+
+/** Remove every sub-folder of `dir` (what an earlier run left behind), except those in `keep`. */
+async function cleanSubdirs(dir, keep) {
   if (!SAFE_PATH.test(dir)) return { ok: false, err: 'Ogiltig mapp' };
   const l = await exec('ls "' + dir + '/*"');
   if (!l.ok) return l;
   const names = [];
-  for (const line of l.out.split('\n')) { const m = /^\s+([\w.-]+)\s+D\s+0\s/.exec(line); if (m && m[1] !== '.' && m[1] !== '..') names.push(m[1]); }
+  for (const line of l.out.split('\n')) { const m = /^\s+([\w.-]+)\s+D\s+0\s/.exec(line); if (m && m[1] !== '.' && m[1] !== '..' && !(keep && keep.has(m[1]))) names.push(m[1]); }
   if (!names.length) return { ok: true, out: '', err: '' };
   return exec(names.map(n => 'del "' + dir + '/' + n + '/*"; rmdir "' + dir + '/' + n + '"').join('; '), { ignore: /NO_SUCH_FILE|NOT_FOUND/i });
 }
@@ -180,4 +204,4 @@ function info() {
   return { configured: true, ok: st.ok, err: st.err, freeGb: Math.round(st.free / 1e8) / 10, totalGb: Math.round(st.total / 1e8) / 10, share: SHARE + '/' + DIR };
 }
 
-module.exports = { enabled, exec, ensure, put, get, rmdirAll, cleanSubdirs, check, info, parseDf, friendly, normShare, dir: DIR, free: () => st.free };
+module.exports = { enabled, exec, ensure, put, get, getMany, listFiles, rmdirAll, cleanSubdirs, check, info, parseDf, friendly, normShare, dir: DIR, free: () => st.free };

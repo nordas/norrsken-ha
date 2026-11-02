@@ -157,7 +157,10 @@ function plan(info, caps = {}, { a = 0, audioMode = 'auto', maxRes = 'orig' } = 
   const vc = info ? info.video : '';
   const tenBit = info && /10/.test(info.pix || '');
   const hevcOk = caps.hevc && (!tenBit || caps.hevc10);
-  const vcopy = !info || vc === 'h264' || ((vc === 'hevc' || vc === 'h265') && hevcOk) || (vc === 'vp9' && caps.vp9) || (vc === 'av1' && caps.av1);
+  // H.264 in 10 bits or with full colour (4:2:2/4:4:4) plays on almost nothing (not on Apple devices, not over AirPlay
+  // to a TV: green picture): that one is converted to ordinary 8-bit H.264
+  const h264Odd = vc === 'h264' && info && /10|12|422|444/.test(info.pix || '');
+  const vcopy = !info || (vc === 'h264' && !h264Odd) || ((vc === 'hevc' || vc === 'h265') && hevcOk) || (vc === 'vp9' && caps.vp9) || (vc === 'av1' && caps.av1);
   const big = info && info.height > 1100;
   return { audio: aout, videoCopy: vcopy, scale: !vcopy && big && maxRes === '1080', big, vcodec: vc };
 }
