@@ -1925,12 +1925,14 @@ const errSeen = new Map(); // message → when last written (the same error in a
 function logUncaught(e) {
   const text = tsbuf._hideLinks(String((e && e.stack) || e)).split('\n').slice(0, 6).join(' | ');
   const key = text.slice(0, 200);
-  if (Date.now() - (errSeen.get(key) || 0) < 60e3) return;
+  const seen = errSeen.get(key);
+  if (seen && Date.now() - seen.at < 60e3) { seen.n++; return; }
   if (errSeen.size > 200) errSeen.clear();
-  errSeen.set(key, Date.now());
-  console.error('[fel]', text);
+  errSeen.set(key, { at: Date.now(), n: 0 });
+  console.error('[fel]', text + (seen && seen.n ? ' (+' + seen.n + ' likadana sedan förra raden)' : ''));
 }
 process.on('uncaughtException', logUncaught);
+
 process.on('unhandledRejection', logUncaught);
 
 function start() {
@@ -1957,4 +1959,4 @@ for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { store.flush(); 
 
 if (require.main === module) start();
 
-module.exports = { server, store, catalog, proxy, start, _pool: pool, _maskUrl: (u) => maskUrl(u), _unmaskUrl: (a, b) => unmaskUrl(a, b), _linkSecrets: (u) => linkSecrets(u), _matchRecTick: matchRecTick, _matchReset: () => { matchStopped.clear(); matchFailAt.clear(); for (const r of matchRecs.values()) { const x = tsbuf.get(r.sessId); if (x) tsbuf.stop(x, 'test'); } matchRecs.clear(); }, _imageAllowed: (u) => imageAllowed(new URL(u)), _privateHost: privateHost, _streamIdle: () => { lastStreamAt = 0; ff.stopAll(); } };
+module.exports = { server, store, catalog, proxy, start, _pool: pool, _maskUrl: (u) => maskUrl(u), _unmaskUrl: (a, b) => unmaskUrl(a, b), _linkSecrets: (u) => linkSecrets(u), _matchRecTick: matchRecTick, _logUncaught: (e) => logUncaught(e), _matchReset: () => { matchStopped.clear(); matchFailAt.clear(); for (const r of matchRecs.values()) { const x = tsbuf.get(r.sessId); if (x) tsbuf.stop(x, 'test'); } matchRecs.clear(); }, _imageAllowed: (u) => imageAllowed(new URL(u)), _privateHost: privateHost, _streamIdle: () => { lastStreamAt = 0; ff.stopAll(); } };

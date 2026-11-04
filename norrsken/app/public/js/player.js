@@ -322,6 +322,7 @@
     var self = this;
     if (this.tshift && (!this.tshift.match || item.id !== this.tshift.chId)) this.endTshift();
     this.iosLiveOff = false;
+    this.downloaded = false; // until the server says this one plays from its disk
     this.item = item;
     this.start = start || 0;
     this.offset = 0;

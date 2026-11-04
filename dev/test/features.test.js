@@ -679,3 +679,16 @@ test('AirPlay test page: the /setup PIN is needed, and names from the provider a
   assert.ok(html.includes('&lt;img src=x onerror=alert(1)&gt;'));
   assert.match(airtest.pinPage('Fel PIN-kod'), /name="pin"/);
 });
+
+test('an error nobody caught is logged once a minute with a count, masked', () => {
+  const lines = [];
+  const orig = console.error;
+  console.error = (...a) => lines.push(a.join(' '));
+  try {
+    const e = new Error('trasigt http://u:hemligt@prov.example/live/1.ts');
+    for (let i = 0; i < 5; i++) app._logUncaught(e);
+  } finally { console.error = orig; }
+  assert.equal(lines.length, 1, 'the same error in a loop: one line');
+  assert.match(lines[0], /^\[fel\]/);
+  assert.ok(!lines[0].includes('hemligt'), 'the link is masked');
+});
