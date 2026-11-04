@@ -392,7 +392,13 @@
       self.safeMode = false;
       self.tok = res.t || '';
       // a downloaded file: the server read its sound tracks already (there is no token to ask with)
-      if (!self.tok && res.probe) { self.probe = res.probe; if (res.probe.dur) self.dur = res.probe.dur; }
+      if (!self.tok && res.probe) {
+        self.probe = res.probe;
+        if (res.probe.dur) self.dur = res.probe.dur;
+        var pa0 = res.probe.audio || [];
+        var def0 = pa0.find(function (a) { return a.def; }) || pa0[0];
+        if (def0) self.audioIdx = def0.i; // the file's default track is what plays
+      }
       self.si = 0;
       if (!self.sources.length) return self.fail('Ingen ström hittades');
       self.prepAir();
@@ -1172,7 +1178,7 @@
       o.audio = pa.map(function (t) { return { kind: 'ff', i: t.i, label: t.label + (t.title && t.title !== t.label ? ' – ' + t.title : ''), code: NS.langCode(t.lang || t.label), note: chNote(t.ch), on: self.audioIdx === t.i }; });
       // only the converter switches these: without it (a downloaded file in a browser that can't pick tracks) just show what plays
       var canSwitch = (this.sources || []).some(function (s) { return s.kind === 'remux'; });
-      if (!canSwitch) o.audio = o.audio.filter(function (t) { return t.on; }).slice(0, 1);
+      if (!canSwitch) { var cur = o.audio.find(function (t) { return t.on; }) || o.audio[0]; o.audio = [cur]; }
       if (o.audio.length === 1) o.audio[0].on = true;
     }
     var sub = this.sub;

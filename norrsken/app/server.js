@@ -1096,8 +1096,9 @@ route('GET', '/api/stream/:type/:id', async (req, res, q, p) => {
   const dl = type === 'live' ? null : downloads.doneFor(type, id);
   if (dl) {
     // its sound tracks (read from the local file, fast): the player offers them although nothing is converted
-    const local = downloads.fileOf(downloads.get(dl.id));
-    const pr = ff.has() ? await Promise.race([ff.probe(local).catch(() => null), new Promise(r => setTimeout(() => r(null), 5000))]) : null;
+    const it = downloads.get(dl.id);
+    let timer = null;
+    const pr = it && ff.has() ? await Promise.race([ff.probe(downloads.fileOf(it)).catch(() => null), new Promise(r => { timer = setTimeout(() => r(null), 5000); })]).finally(() => clearTimeout(timer)) : null;
     return ok(res, { live: false, sources: [{ kind: 'file', url: ingressBase(req) + '/dl/' + dl.file + '?ft=' + fileToken(dl.id) }], ext: 'mp4', t: '', downloaded: true,
       probe: pr ? { audio: pr.audio || [], subs: [], dur: pr.dur || 0 } : null });
   }
@@ -1938,7 +1939,6 @@ function logUncaught(e) {
   console.error('[fel]', text + (seen && seen.n ? ' (+' + seen.n + ' likadana sedan förra raden)' : ''));
 }
 process.on('uncaughtException', logUncaught);
-
 process.on('unhandledRejection', logUncaught);
 
 function start() {
