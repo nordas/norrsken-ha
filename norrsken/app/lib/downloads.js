@@ -59,7 +59,7 @@ function doneFor(type, id) {
   const it = items.get(safeId(type, id));
   return it && it.status === 'done' && fs.existsSync(fileOf(it)) ? view(it) : null;
 }
-function fileOf(it) { return path.join(dir(), it.id + '.mp4'); }
+function fileOf(it) { return path.join(it.dir || dir(), it.id + '.mp4'); }
 
 /** Queue a film or episode. Returns the item (already existing ones are left alone, a failed one is retried). */
 let seq = 0;
@@ -169,6 +169,7 @@ async function start(it) {
       console.error('[nedladdning] tom fil:', it.title);
     } else if (code === 0 && fs.existsSync(out)) {
       try {
+        it.dir = dir(); // where it was saved (the network disk may come and go later)
         fs.renameSync(out, fileOf(it));
         it.status = 'done'; it.pct = 1; it.done = Date.now(); it.bytes = fs.statSync(fileOf(it)).size; it.err = '';
         console.log('[nedladdning] klar:', it.title, Math.round(it.bytes / 1e6) + ' MB');
@@ -176,7 +177,8 @@ async function start(it) {
     } else {
       fs.rm(out, { force: true }, () => {});
       it.status = 'error';
-      it.err = (err.split('\n').filter(Boolean).slice(-1)[0] || 'ffmpeg avslutades med fel ' + code).replace(/[a-z][a-z0-9+.-]*:\/\/\S+/gi, '<länk>').slice(0, 200);
+      // the link carries the account (also a password with spaces): masked the same way as everywhere else
+      it.err = require('./tsbuf')._hideLinks(err.split('\n').filter(Boolean).slice(-1)[0] || 'ffmpeg avslutades med fel ' + code).slice(0, 200);
       console.error('[nedladdning] fel:', it.title, it.err);
     }
     save();

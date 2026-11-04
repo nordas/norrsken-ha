@@ -206,3 +206,20 @@ test('without the network disk everything falls back to the add-on disk and says
   assert.equal(none.i.configured, false);
   assert.equal(none.i.ok, true);
 });
+
+test('downloads need the profile: a kids profile neither sees nor deletes what its library does not show; a bad address is 400', async () => {
+  const ids = async (p) => new Set((await get('/api/list?type=movie&cat=all&offset=0&limit=500&profile=' + p)).json.items.map(i => i.id));
+  const adult = await ids('p1');
+  const kidsLib = await ids('p2');
+  const hidden = [...adult].find(id => !kidsLib.has(id));
+  assert.ok(hidden);
+  // an adult profile queues a film the kids library does not have
+  const q = await post('/api/downloads?profile=p1', { type: 'movie', id: hidden, title: 'Vuxenfilm' });
+  assert.equal(q.status, 200, JSON.stringify(q.json));
+  assert.ok((await get('/api/downloads?profile=p1')).json.items.some(x => x.id === 'movie-' + hidden), 'the adult sees it');
+  assert.ok(!(await get('/api/downloads?profile=p2')).json.items.some(x => x.id === 'movie-' + hidden), 'the kids profile does not');
+  assert.equal((await post('/api/downloads/movie-' + hidden + '/delete?profile=p2', {})).status, 403, 'nor can it delete it');
+  assert.equal((await post('/api/downloads/movie-' + hidden + '/delete?profile=p1', {})).status, 200);
+  assert.equal((await post('/api/downloads/%E0%A4%A/delete?profile=p1', {})).status, 400);
+  assert.equal((await fetch(base + '/dl/%E0%A4%A/x.mp4')).status, 400);
+});

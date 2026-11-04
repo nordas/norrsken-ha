@@ -16,7 +16,7 @@ const BIN = process.env.SMBCLIENT_PATH || 'smbclient';
 const USER = String(process.env.NSK_SMB_USER || '').trim();
 const PASS = String(process.env.NSK_SMB_PASS || '');
 const PORT = String(process.env.NSK_SMB_PORT || '').trim(); // for tests; a real disk uses the standard port
-const DIR = String(process.env.NSK_SMB_DIR || 'Norrsken').replace(/[^\w.-]+/g, '') || 'Norrsken';
+const DIR = (() => { const d = String(process.env.NSK_SMB_DIR || 'Norrsken').replace(/[^\w.-]+/g, ''); return !d || /^\.+$/.test(d) ? 'Norrsken' : d; })();
 
 /** "//host/share", "\\\\host\\share", "smb://host/share" or "host/share" → "//host/share" */
 function normShare(s) {
@@ -27,8 +27,9 @@ function normShare(s) {
 const SHARE = normShare(process.env.NSK_SMB_SHARE);
 
 const enabled = () => !!SHARE;
-const SAFE_NAME = /^[\w.-]+$/;
-const SAFE_PATH = /^[\w.-]+(\/[\w.-]+)*$/;
+// names and folders: letters, digits, _ . -, never "." or ".." (that would leave the Norrsken folder)
+const SAFE_NAME = /^(?!\.{1,2}$)[\w.-]+$/;
+const SAFE_PATH = /^(?!\.{1,2}(\/|$))[\w.-]+(\/(?!\.{1,2}(\/|$))[\w.-]+)*$/;
 
 const STATUS = [
   [/LOGON_FAILURE|ACCESS_DENIED|WRONG_PASSWORD|ACCOUNT_/i, 'Fel användarnamn eller lösenord till Time Capsule'],
@@ -163,7 +164,7 @@ async function cleanSubdirs(dir, keep) {
   const l = await exec('ls "' + dir + '/*"');
   if (!l.ok) return l;
   const names = [];
-  for (const line of l.out.split('\n')) { const m = /^\s+([\w.-]+)\s+D\s+0\s/.exec(line); if (m && m[1] !== '.' && m[1] !== '..' && !(keep && keep.has(m[1]))) names.push(m[1]); }
+  for (const line of l.out.split('\n')) { const m = /^\s+([\w.-]+)\s+D\s+0\s/.exec(line); if (m && m[1] !== '.' && m[1] !== '..' && !(keep && (typeof keep === 'function' ? keep(m[1]) : keep.has(m[1])))) names.push(m[1]); }
   if (!names.length) return { ok: true, out: '', err: '' };
   return exec(names.map(n => 'del "' + dir + '/' + n + '/*"; rmdir "' + dir + '/' + n + '"').join('; '), { ignore: /NO_SUCH_FILE|NOT_FOUND/i });
 }

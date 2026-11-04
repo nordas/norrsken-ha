@@ -878,7 +878,7 @@
       if (x.status === 'downloading') th.appendChild(NS.progEl(x.pct));
       var acts = [];
       if (x.status === 'done') {
-        acts.push(h('a', { class: 'm-icon', 'aria-label': 'Spara på enheten', href: 'dl/' + x.file + '?dl=1', download: '', onclick: function (e) { e.stopPropagation(); } }, NS.icon('save')));
+        acts.push(h('a', { class: 'm-icon', 'aria-label': 'Spara på enheten', href: 'dl/' + x.file + NS.pq() + '&dl=1', download: '', onclick: function (e) { e.stopPropagation(); } }, NS.icon('save')));
       }
       if (x.status === 'error') acts.push(h('button', { class: 'm-icon', 'aria-label': 'Försök igen', onclick: function (e) { e.stopPropagation(); NS.dl.retry(x); } }, NS.icon('refresh')));
       acts.push(h('button', { class: 'm-icon', 'aria-label': x.status === 'done' ? 'Ta bort' : 'Avbryt', onclick: function (e) {

@@ -25,7 +25,7 @@
   }
   dl.refresh = function () {
     return NS.api.get('api/downloads').then(function (r) {
-      dl.items = r.items || []; dl.storage = r.storage || null; dl.on = r.on !== false; dl.loaded = true;
+      dl.items = r.items || []; dl.storage = r.storage || null; dl.on = r.on !== false; dl.wait = r.wait || ''; dl.loaded = true;
       emit(); schedule();
       return r;
     }).catch(function () { schedule(); });
@@ -39,10 +39,10 @@
     }).catch(function (e) { NS.toast(e.message || 'Kunde inte ladda ner', 'info'); });
   };
   dl.remove = function (it) {
-    return NS.api.post('api/downloads/' + encodeURIComponent(it.id) + '/delete', {}).then(function () { return dl.refresh(); });
+    return NS.api.post('api/downloads/' + encodeURIComponent(it.id) + '/delete' + NS.pq(), {}).then(function () { return dl.refresh(); });
   };
   dl.retry = function (it) {
-    return NS.api.post('api/downloads/' + encodeURIComponent(it.id) + '/retry', {}).then(function () { return dl.refresh(); });
+    return NS.api.post('api/downloads/' + encodeURIComponent(it.id) + '/retry' + NS.pq(), {}).then(function () { return dl.refresh(); });
   };
 
   /** The movie or episode as a download request. */
@@ -56,7 +56,7 @@
   dl.label = function (x) {
     if (x.status === 'done') return 'Nedladdad · ' + dl.fmtBytes(x.bytes);
     if (x.status === 'downloading') return 'Laddar ner ' + Math.round(x.pct) + '%' + (x.bytes ? ' · ' + dl.fmtBytes(x.bytes) : '');
-    if (x.status === 'queued') return 'Väntar – startar när ingen tittar';
+    if (x.status === 'queued') return dl.wait === 'match' ? 'Väntar – matchen spelas in just nu' : 'Väntar – startar när ingen tittar';
     return x.err || 'Misslyckades';
   };
 

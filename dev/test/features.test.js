@@ -404,8 +404,8 @@ test('match: the favourite\'s match is recorded from the start, kept for a day, 
   assert.equal((await get(pz.url)).status, 404, 'the pause gave way to the match (one connection)');
   // the list is saved: a restart of the add-on carries on with it
   const saved = JSON.parse(fs.readFileSync(path.join(process.env.DATA_DIR, 'matchrecs.json'), 'utf8'));
-  assert.equal(saved.length, 1);
-  assert.equal(saved[0].title, r.recs[0].title);
+  assert.equal(saved.recs.length, 1);
+  assert.equal(saved.recs[0].title, r.recs[0].title);
   const rec = r.recs[0];
   assert.match(rec.title, /Luleå – Färjestad/);
   assert.match(rec.url, /\/mrec\/\w+\/index\.m3u8$/, 'one playlist for the whole match (all its parts)');
@@ -510,6 +510,9 @@ test('match: a device playing something else when the match starts is told to sw
   app._matchRecTick();
   assert.equal((await get('/api/matchrec')).json.recs.length, 1);
   assert.equal((await post('/api/watching', { ch: '108' })).json.matchOn, null);
+  // a downloaded film plays from the server's disk: it never has to give way
+  app._matchReset();
+  assert.equal((await post('/api/watching', { dl: true })).json.matchOn, null);
   app._matchReset();
 });
 
@@ -645,4 +648,12 @@ test('AirPlay test page: four forms of a test clip, each playable from the serve
   assert.equal(part.status, 206);
   assert.equal((await part.arrayBuffer()).byteLength, 100);
   assert.equal((await get('/airtest/a/..%2Fsecret')).status, 404, 'only the clips');
+});
+
+test('AirPlay test page: the /setup PIN is needed, and names from the provider are escaped', async () => {
+  const airtest = require('../lib/airtest');
+  const html = airtest.page('', [{ name: '<img src=x onerror=alert(1)>', url: '/pause/x/index.m3u8' }]);
+  assert.ok(!html.includes('<img src=x'), 'a channel name cannot add HTML');
+  assert.ok(html.includes('&lt;img src=x onerror=alert(1)&gt;'));
+  assert.match(airtest.pinPage('Fel PIN-kod'), /name="pin"/);
 });

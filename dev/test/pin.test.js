@@ -30,6 +30,11 @@ test('setup: a PIN is made on the first start and asked for', async () => {
   assert.equal(r.status, 200);
   const cfg = await r.json();
   assert.ok(!JSON.stringify(cfg).includes(pin), 'the PIN never goes back out');
+  // the AirPlay test page asks for the same PIN (it shows what is recorded and starts test encodings)
+  const a0 = await fetch(base + '/airtest');
+  assert.equal(a0.status, 401);
+  assert.match(await a0.text(), /name="pin"/, 'a page that asks for it');
+  assert.equal((await fetch(base + '/airtest?pin=000000')).status, 401);
   // it stays the same after a restart (saved)
   assert.equal(JSON.parse(fs.readFileSync(path.join(process.env.DATA_DIR, 'config.json'), 'utf8')).setupPin, pin);
 });

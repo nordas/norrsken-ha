@@ -128,3 +128,10 @@ test('a Time Capsule that only takes the old login (NTLMv1) is reached anyway, a
   assert.equal(bad.ok, false);
   assert.match(bad.err, /Fel användarnamn eller lösenord/);
 });
+
+test('a Time Capsule folder setting of "." or ".." never leaves the Norrsken folder', async () => {
+  assert.equal((await smb.ensure('../x')).ok, false);
+  assert.equal((await smb.ensure('Norrsken/../../x')).ok, false);
+  assert.equal((await smb.put(tmp, ['..'], 'Norrsken/pause')).ok, false);
+  assert.equal((await smb.rmdirAll('..')).ok, false);
+});

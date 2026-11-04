@@ -43,7 +43,8 @@ function cleanStart() {
       fs.rmSync(path.join(root, id), { recursive: true, force: true });
     }
   } catch (_) { /* nothing there */ }
-  if (mirrorOn()) smb.check(true).then((r) => { if (r.ok) return smb.cleanSubdirs(smb.dir + '/pause', keep); }).catch(() => {});
+  // decided per folder when it is about to go (the Time Capsule is slow to answer: a recording may have started since)
+  if (mirrorOn()) smb.check(true).then((r) => { if (r.ok) return smb.cleanSubdirs(smb.dir + '/pause', (n) => keep.has(n) || sessions.has(n)); }).catch(() => {});
   return [...keep];
 }
 
@@ -54,7 +55,9 @@ function restore(ids) {
     const dir = path.join(rootDir(), id);
     let meta = null;
     try { meta = JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8')); } catch (_) { continue; }
-    const s = { id, url: '', dir, ch: meta.ch || '', proc: null, started: meta.started, last: Date.now(), dead: false, done: true, err: '', maxMin: meta.maxMin || 0, full: false, match: true, restored: true };
+    // over by now (its planned length has passed): finished; otherwise it goes on in a new part after the restart
+    const over = Date.now() > meta.started + (meta.maxMin || 0) * 60e3;
+    const s = { id, url: '', dir, ch: meta.ch || '', proc: null, started: meta.started, last: Date.now(), dead: false, done: true, err: '', maxMin: meta.maxMin || 0, full: over, match: true, restored: true };
     // ffmpeg stopped in the middle: the playlist has no end mark yet, the pieces it lists are whole
     if (mirrorOn()) {
       s.mirror = { dir: smb.dir + '/pause/' + id, ready: true, up: new Set(), busy: false, err: '', fetching: new Map(), bytes: 0 };
@@ -281,7 +284,10 @@ async function playlist(s, prefix, { wait = 30000, edge = false } = {}) {
       // live (edge): a little before its end, so a TV or Safari never starts by reading the oldest pieces
       if (text.indexOf('#EXT-X-START') < 0) text = text.replace('#EXTM3U', '#EXTM3U\n#EXT-X-START:TIME-OFFSET=' + (edge ? '-12' : '0') + ',PRECISE=YES');
       // finished (time limit or disk): mark the end so the player doesn't wait for more
-      if (s.done && text.indexOf('#EXT-X-ENDLIST') < 0) text = text.trimEnd() + '\n#EXT-X-ENDLIST\n';
+      // finished: mark the end so the player doesn't wait for more. A match recording the provider dropped is not
+      // finished (the server starts it again and the playlist goes on): only when it ran its full length
+      if (s.match && !s.full) text = text.replace(/^#EXT-X-ENDLIST\s*$/m, ''); // ffmpeg writes it when the stream ends
+      else if (s.done && text.indexOf('#EXT-X-ENDLIST') < 0) text = text.trimEnd() + '\n#EXT-X-ENDLIST\n';
       return text.split('\n').map((l) => {
         if (l.startsWith('#EXT-X-MAP:URI="')) return l.replace(/URI="([^"]+)"/, (m, u) => 'URI="' + prefix + '/' + s.id + '/' + path.basename(u) + '"');
         return l && l[0] !== '#' ? prefix + '/' + s.id + '/' + path.basename(l.trim()) : l;
@@ -352,10 +358,20 @@ setInterval(() => {
 }, 20e3).unref();
 
 function active() { return sessions.size; }
+/** Recordings that still read from the provider (a finished match recording kept for a day does not). */
+function recording() { let n = 0; for (const s of sessions.values()) if (!s.dead && !s.done) n++; return n; }
+/** '' when a recording can start (disks have room), otherwise why not. */
+function preflight() {
+  try { fs.mkdirSync(rootDir(), { recursive: true }); } catch (e) { return 'mappen för inspelningar går inte att skapa'; }
+  const useMirror = mirrorOn() && smb.info().ok;
+  if (freeBytes(rootDir()) < (useMirror ? MIN_FREE * 0.4 : MIN_FREE)) return 'för lite ledigt diskutrymme';
+  if (useMirror && smb.free() && smb.free() < MIN_FREE) return 'för lite ledigt utrymme på Time Capsule';
+  return '';
+}
 /** Pause recordings someone is using (a paused channel), not match recordings. */
 function pauseActive() { let n = 0; for (const s of sessions.values()) if (!s.match && !s.dead) n++; return n; }
 
 /** Every recording that runs (for the AirPlay test page). */
 function list() { return [...sessions.values()].filter(s => !s.dead).map(s => ({ id: s.id, ch: s.ch, match: s.match })); }
 
-module.exports = { list, restore, playlistMulti, _hideLinks: hideLinks, start, get, stop, stopAll, stopPauses, matchSession, playlist, file, fileReady, length, active, pauseActive, cleanStart, rootDir };
+module.exports = { recording, preflight, list, restore, playlistMulti, _hideLinks: hideLinks, start, get, stop, stopAll, stopPauses, matchSession, playlist, file, fileReady, length, active, pauseActive, cleanStart, rootDir };

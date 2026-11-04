@@ -105,3 +105,20 @@ test('with a Time Capsule the pieces stay on the local disk while it has room (w
   assert.ok(r.up >= 5 && r.remote >= 5, 'copied to the Time Capsule: ' + JSON.stringify(r));
   assert.ok(r.local >= r.up, 'and still on the local disk: ' + JSON.stringify(r));
 });
+
+test('a match the provider dropped is not marked finished (the player waits for the next part); a pause that ended is', () => {
+  const dir = path.join(tmp, 'rec3');
+  const r = run(`
+    const srv = await serve();
+    const url = 'http://127.0.0.1:' + srv.address().port + '/x.ts';
+    const m = tsbuf.start(url, { maxMin: 60, ch: 'match', match: true });
+    await until(() => m.done); // the stream ended long before the planned 60 minutes
+    const p = tsbuf.start(url, { maxMin: 60, ch: 'TV10' });
+    await until(() => p.done);
+    return { match: await tsbuf.playlist(m, '/pause'), multi: await tsbuf.playlistMulti([m], '/pause'), pause: await tsbuf.playlist(p, '/pause') };
+  `, { NSK_PAUSE_DIR: dir });
+  assert.ok(!r.error, r.error);
+  assert.doesNotMatch(r.match, /#EXT-X-ENDLIST/, 'the match goes on');
+  assert.doesNotMatch(r.multi, /#EXT-X-ENDLIST/);
+  assert.match(r.pause, /#EXT-X-ENDLIST/, 'a pause that ended is over');
+});

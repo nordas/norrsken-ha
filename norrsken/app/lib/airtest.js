@@ -82,11 +82,21 @@ function file(variant, name) {
   return fs.existsSync(f) ? f : null;
 }
 
+const esc = (t) => String(t == null ? '' : t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+
+/** Asks for the /setup PIN (the test page shows what is being recorded). */
+function pinPage(msg) {
+  return `<!doctype html><html lang="sv"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AirPlay-test</title>
+<style>body{margin:0;padding:24px;background:#0b0b0d;color:#fff;font:17px/1.4 -apple-system,system-ui,sans-serif}input,button{font:inherit;padding:10px 12px;border-radius:8px;border:0}button{background:#fff;color:#111;margin-left:8px}p{color:#bbb}.e{color:#ff8a80}</style></head>
+<body><h1>AirPlay-test</h1><p>Samma PIN-kod som för inställningarna (/setup).</p>${msg ? '<p class="e">' + esc(msg) + '</p>' : ''}
+<form method="get"><input name="pin" type="password" inputmode="numeric" autocomplete="off" autofocus placeholder="PIN-kod"><button>Öppna</button></form></body></html>`;
+}
+
 function page(lan, extra = []) {
   const base = (lan || '').replace(/\/$/, '');
   const sec = (k, name, src) => `
-  <section><h2>${k.toUpperCase()}. ${name}</h2>
-    <video controls playsinline x-webkit-airplay="allow" preload="metadata" src="${src}"></video></section>`;
+  <section><h2>${esc(k.toUpperCase())}. ${esc(name)}</h2>
+    <video controls playsinline x-webkit-airplay="allow" preload="metadata" src="${esc(src)}"></video></section>`;
   const items = Object.entries(VARIANTS).map(([k, v]) => sec(k, v.name, base + '/airtest/' + k + '/' + path.basename(v.file))).join('') +
     Object.entries(LIVE).map(([k, v]) => sec(k, v.name, base + '/airtest/' + k + '/index.m3u8')).join('') +
     extra.map((x, i) => sec(String.fromCharCode(104 + i), x.name, base + x.url)).join('');
@@ -102,4 +112,4 @@ ${items}
 </body></html>`;
 }
 
-module.exports = { ensure, file, page, startLive, livePlaylist, VARIANTS, LIVE };
+module.exports = { pinPage, ensure, file, page, startLive, livePlaylist, VARIANTS, LIVE };

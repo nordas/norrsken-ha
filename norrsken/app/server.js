@@ -1024,13 +1024,15 @@ route('GET', '/api/services/title/:mt/:id', async (req, res, q, p) => {
   } catch (e) { bad(res, e.message, 502); }
 });
 
-catalog.isBusy = () => Date.now() - lastStreamAt < 15 * 60e3 || ff.activeSessions() > 0 || tsbuf.active() > 0 || downloads.active() > 0;
+catalog.isBusy = () => Date.now() - lastStreamAt < 15 * 60e3 || ff.activeSessions() > 0 || tsbuf.recording() > 0 || downloads.active() > 0;
 /* A device that plays (also straight from the provider, which the server never sees) says so every minute:
    the match recording then waits instead of taking the one connection. */
 route('POST', '/api/watching', async (req, res) => {
   lastStreamAt = lastPlayAt = Date.now();
   let b = {};
   try { b = await readBody(req); } catch (_) { /* nothing */ }
+  // a device playing straight from the provider (the server can't see that connection): a download gives way to it
+  if (!b.dl) dlYield('en enhet spelar');
   // watching the channel of a match whose recording is due: the player asks for the channel again and gets the recording
   const ch = b && b.ch ? String(b.ch) : '';
   const recNow = !!(ch && !tsbuf.matchSession() && dueMatch(ch));
@@ -1038,7 +1040,7 @@ route('POST', '/api/watching', async (req, res) => {
   // server can't end): on a one-connection account it has to give way, so the player switches to the match
   let matchOn = null;
   const maxConn = (catalog.data && catalog.data.maxConn) || 1;
-  if (!recNow && maxConn <= 2 && !tsbuf.matchSession()) {
+  if (!recNow && !b.dl && maxConn <= 2 && !tsbuf.matchSession()) { // a downloaded film uses no provider connection
     const due = dueAny();
     if (due && !(due.m.chans || [due.m.ch]).some(c => String(c.id) === ch)) matchOn = { title: due.m.title, ch: due.m.ch };
   }
@@ -1077,7 +1079,7 @@ route('GET', '/api/stream/:type/:id', async (req, res, q, p) => {
   if (rec) return ok(res, { live: true, sources: [{ kind: 'hls', url: rec.url }], rec });
   // downloaded to the storage disk: played from there, no provider connection (and nothing else is cut off)
   const dl = type === 'live' ? null : downloads.doneFor(type, id);
-  if (dl) return ok(res, { live: false, sources: [{ kind: 'file', url: ingressBase(req) + '/dl/' + dl.file }], ext: 'mp4', t: '', downloaded: true });
+  if (dl) return ok(res, { live: false, sources: [{ kind: 'file', url: ingressBase(req) + '/dl/' + dl.file + '?profile=' + encodeURIComponent(prof.id || '') + (q.get('pt') ? '&pt=' + encodeURIComponent(q.get('pt')) : '') }], ext: 'mp4', t: '', downloaded: true });
   // one connection: a new stream ends a paused channel; a preview (start page, guide) gives way to it instead
   const air = !!q.get('air'); // AirPlay preparation: just the addresses, it must not end what plays or open a connection
   if (q.get('pv') && (tsbuf.pauseActive() > 0 || ff.activeSessions() > 0 || proxy.activeCount() > 0 || downloads.active() > 0)) return bad(res, 'Något annat spelas just nu', 409);
@@ -1149,11 +1151,16 @@ const matchRecs = new Map(); // team|start → { key, mid, s, e, title, chId, ch
 const MATCH_FILE = path.join(DATA_DIR, 'matchrecs.json');
 /** The match recordings survive a restart of the add-on (an update in the middle of a match must not lose its start). */
 function saveMatchRecs() {
-  try { fs.writeFileSync(MATCH_FILE, JSON.stringify([...matchRecs.values()])); } catch (e) { console.error('[match] kunde inte spara listan:', e.message); }
+  try { fs.writeFileSync(MATCH_FILE, JSON.stringify({ recs: [...matchRecs.values()], stopped: [...matchStopped] })); } catch (e) { console.error('[match] kunde inte spara listan:', e.message); }
 }
 function loadMatchRecs(keptIds) {
   let list = [];
-  try { list = JSON.parse(fs.readFileSync(MATCH_FILE, 'utf8')); } catch (_) { return; }
+  try {
+    const j = JSON.parse(fs.readFileSync(MATCH_FILE, 'utf8'));
+    list = Array.isArray(j) ? j : (j.recs || []);
+    // a match the viewer stopped stays stopped after a restart
+    for (const [k, t] of (Array.isArray(j) ? [] : j.stopped || [])) if (Date.now() - t < KEEP_MATCH_MS) matchStopped.set(k, t);
+  } catch (_) { return; }
   const kept = new Set(keptIds);
   for (const r of list) {
     if (!r || !r.key || Date.now() - r.s > KEEP_MATCH_MS) continue;
@@ -1171,6 +1178,19 @@ function loadMatchRecs(keptIds) {
 const recParts = (r) => [...(r.parts || []), r.sessId].map(id => tsbuf.get(id)).filter(Boolean);
 const matchStopped = new Map(); // team|start → when the viewer stopped it: not started again for that match
 let matchWaitLog = 0;
+const matchFailAt = new Map(); // team|start → when starting its recording last failed (so nobody loops on it)
+/**
+ * How long after the recording stopped before it is started again: 15 s, 30 s, then every minute; after ten breaks in
+ * a row every five minutes (the provider is down: don't hammer it, and don't keep cutting off what others watch).
+ */
+const matchBackoff = (tries) => ((tries || 0) >= 10 ? 5 * 60e3 : Math.min(60e3, 15e3 * 2 ** (tries || 0)));
+/** '' when a match recording of this channel can start now, otherwise why not (no channel, no ffmpeg, disk full). */
+function startMatchPreflight(ch) {
+  const src = catalog.streamUrl('live', ch.id);
+  if (!src || !src.primary) return 'kanalen saknas';
+  if (!ff.has()) return 'ffmpeg saknas';
+  return tsbuf.preflight();
+}
 const matchWait = new Map(); // team|start → when the recording last had to wait for another stream (shown on the start page)
 
 /** A match is being recorded on another channel: the reason to refuse a new stream (the provider gives one). */
@@ -1237,19 +1257,23 @@ function matchRecTick() {
       if (!hs) continue; // removed by the viewer
       had.tries = had.tries || 0;
       // the whole match matters: never give up while it is on; wait a little longer each time (at most a minute)
-      if (now - (had.restartAt || 0) < Math.min(60e3, 15e3 * 2 ** had.tries)) continue;
+      if (now - (had.restartAt || 0) < matchBackoff(had.tries)) continue;
       if (had.tries && had.tries % 10 === 0 && had.loggedTries !== had.tries) { had.loggedTries = had.tries; console.log('[match] inspelningen av', m.title, 'har avbrutits', had.tries, 'gånger – fortsätter försöka'); }
     }
     if (tsbuf.matchSession()) break; // the provider gives one connection: the recording that runs goes on
     // Luleå's matches are always recorded from the start of the broadcast. Someone watching something else on a
     // one-connection account gives way (their player is told to switch to the match); with more connections both go.
+    if (now - (matchFailAt.get(key) || 0) < matchBackoff(had ? had.tries : 0) * (matchFailAt.has(key) ? 2 : 1)) continue; // it could not start a moment ago
+    // check that it can start (channel, disk) before anyone's picture is cut off for it
+    const pre = startMatchPreflight(m.ch);
+    if (pre) { matchFailAt.set(key, now); if (now - (matchWaitLog || 0) > 5 * 60e3) { matchWaitLog = now; console.error('[match]', m.title, '– kan inte spela in:', pre); } continue; }
     const maxConn = (catalog.data && catalog.data.maxConn) || 1;
     if (maxConn <= 2 && (ff.activeSessions() > 0 || tsbuf.pauseActive() > 0 || proxy.activeCount() > 0 || Date.now() - lastStreamAt < 3 * 60e3)) {
       if (now - (matchWaitLog || 0) > 5 * 60e3) { matchWaitLog = now; console.log('[match]', m.title, 'börjar – matchinspelningen tar leverantörens anslutning före annat tittande'); }
       matchWait.set(key, now);
       takeConnection('matchinspelning');
     }
-    try { startMatchRec(m, key, had, m.ch, now); } catch (e) { console.error('[match]', e.message); }
+    try { startMatchRec(m, key, had, m.ch, now); } catch (e) { matchFailAt.set(key, now); console.error('[match]', e.message); }
   }
 }
 
@@ -1262,6 +1286,8 @@ function startMatchRec(m, key, had, ch, now = Date.now()) {
   const sess = tsbuf.start(src.primary, { ua: catalog.ua(), maxMin: Math.ceil((m.e + MATCH_TAIL_MS - now) / 60e3), ch: m.title + ' på ' + chName, match: true });
   if (had) {
     console.log('[match] inspelningen av', m.title, 'avbröts – startar om');
+    const prev = tsbuf.get(had.sessId);
+    if (prev && tsbuf.length(prev) > 600) had.tries = 0; // it ran ten minutes: a new break, not the same one
     had.restartAt = now; had.tries = (had.tries || 0) + 1;
     const old = tsbuf.get(had.sessId); had.sessId = sess.id; had.chId = ch.id; had.chName = chName; had.parts = (had.parts || []).concat(old ? [old.id] : []);
   } else matchRecs.set(key, { key, mid: Math.random().toString(36).slice(2, 10), s: m.s, e: m.e, title: m.title, chId: ch.id, chName, sessId: sess.id, parts: [] });
@@ -1286,10 +1312,11 @@ function dueMatch(chId, now = Date.now(), aheadMs = 0) {
     if (now < m.s - MATCH_LEAD_MS - aheadMs || now > m.e + MATCH_TAIL_MS) continue;
     const had = matchRecs.get(key);
     if (had) {
-      if (had.gaveUp) continue;
       const hs = tsbuf.get(had.sessId);
       if (hs && !hs.dead && (!hs.done || hs.full)) continue; // already recording (or finished as planned)
+      if (now - (had.restartAt || 0) < matchBackoff(had.tries)) continue; // it just stopped: not again at once
     }
+    if (now - (matchFailAt.get(key) || 0) < 60e3) continue; // it could not start a moment ago (disk, channel)
     return { m, key, had, ch };
   }
   return null;
@@ -1301,7 +1328,7 @@ function matchTakeoverPause(id, aheadMs) {
   const due = dueMatch(id, Date.now(), aheadMs);
   if (!due) return false;
   takeConnection('matchinspelning');
-  try { startMatchRec(due.m, due.key, due.had, due.ch); console.log('[match]', due.m.title, '– pausad på kanalen: pausen blir matchinspelningen'); return true; } catch (e) { console.error('[match]', e.message); return false; }
+  try { startMatchRec(due.m, due.key, due.had, due.ch); console.log('[match]', due.m.title, '– pausad på kanalen: pausen blir matchinspelningen'); return true; } catch (e) { matchFailAt.set(due.key, Date.now()); console.error('[match]', e.message); return false; }
 }
 
 /** Luleå's match whose recording should run now, on whichever channel. */
@@ -1327,7 +1354,7 @@ function matchTakeover(id) {
     startMatchRec(due.m, due.key, due.had, due.ch);
     console.log('[match]', due.m.title, '– du tittar på kanalen: spelar in och visar inspelningen live (en anslutning)');
     return true;
-  } catch (e) { console.error('[match]', e.message); return false; }
+  } catch (e) { matchFailAt.set(due.key, Date.now()); console.error('[match]', e.message); return false; }
 }
 
 route('GET', '/api/matchrec', (req, res) => {
@@ -1414,14 +1441,22 @@ route('GET', '/pause/:id/:name', async (req, res, q, p) => {
 
 /* ------------------------------------------------------------------ downloads (to the storage disk) */
 downloads.configure({
-  busy: () => Date.now() - lastPlayAt < 3 * 60e3 || Date.now() - lastStreamAt < 20000 || ff.activeSessions() > 0 || tsbuf.active() > 0 || proxy.activeCount() > 0 || !catalog.ready(),
+  busy: () => Date.now() - lastPlayAt < 3 * 60e3 || Date.now() - lastStreamAt < 20000 || ff.activeSessions() > 0 || tsbuf.recording() > 0 || proxy.activeCount() > 0 || !catalog.ready(),
   maxConn: () => (catalog.data && catalog.data.maxConn) || 1,
   probe: (u, ua) => ff.probe(u, ua),
   url: (type, id, ext) => catalog.streamUrl(type, id, ext),
   ua: () => catalog.ua(),
 });
 
-route('GET', '/api/downloads', (req, res) => ok(res, { items: downloads.list(), storage: storage.info(), on: ff.has() }));
+/** A URL part, or null when it isn't valid percent-encoding (then: 400, not a server error). */
+function dec(x) { try { return decodeURIComponent(x); } catch (_) { return null; } }
+/** What this profile may see of the downloads (a kids profile: only what its library shows). */
+const dlVisible = (prof) => (x) => !prof.kids || catalog.allowed(x.type === 'episode' ? 'episode' : 'movie', x.mid, prof);
+route('GET', '/api/downloads', (req, res, q) => {
+  const prof = profileOf(q);
+  if (!pinOk(q, prof)) return bad(res, 'Profilen är låst', 401);
+  ok(res, { items: downloads.list().filter(dlVisible(prof)), storage: storage.info(), on: ff.has(), wait: tsbuf.matchSession() ? 'match' : '' });
+});
 
 route('POST', '/api/downloads', async (req, res, q) => {
   if (!ff.has()) return bad(res, 'Nedladdning kräver ffmpeg', 503);
@@ -1443,18 +1478,34 @@ route('POST', '/api/downloads', async (req, res, q) => {
   ok(res, { items: out });
 });
 
-route('POST', '/api/downloads/:id/delete', (req, res, q, p) => ok(res, { ok: downloads.remove(decodeURIComponent(p.id)) }));
+/** A download this profile may change: a locked profile needs its PIN, a kids profile can't delete or retry. */
+function dlFor(req, res, q, p) {
+  const prof = profileOf(q);
+  if (!pinOk(q, prof)) { bad(res, 'Profilen är låst', 401); return null; }
+  if (prof.kids) { bad(res, 'Barnprofilen kan inte ändra nedladdningar', 403); return null; }
+  const id = dec(p.id);
+  if (id === null) { bad(res, 'Ogiltig adress', 400); return null; }
+  return id;
+}
+route('POST', '/api/downloads/:id/delete', (req, res, q, p) => { const id = dlFor(req, res, q, p); if (id !== null) ok(res, { ok: downloads.remove(id) }); });
 route('POST', '/api/downloads/:id/retry', (req, res, q, p) => {
-  const it = downloads.get(decodeURIComponent(p.id));
-  if (!it) return bad(res, 'finns inte', 404);
+  const id = dlFor(req, res, q, p);
+  if (id === null) return;
+  const it = downloads.get(id);
+  if (!it) return bad(res, 'Finns inte', 404);
   if (it.status === 'error') { it.status = 'queued'; it.err = ''; downloads.pump(); }
   ok(res, { ok: true });
 });
 
 /** A finished download: played from the server (Range, so seeking works) or saved to the device (?dl=1). */
 route('GET', '/dl/:id/:name', (req, res, q, p) => {
-  const it = downloads.get(decodeURIComponent(p.id));
+  const id = dec(p.id);
+  if (id === null) return bad(res, 'Ogiltig adress', 400);
+  const it = downloads.get(id);
   if (!it || it.status !== 'done') return bad(res, 'Filen finns inte', 404);
+  // the profile the address was made for: a kids profile only gets what its library shows
+  const prof = profileOf(q);
+  if (!pinOk(q, prof) || !dlVisible(prof)(it)) return bad(res, 'Filen finns inte', 404);
   const f = downloads.fileOf(it);
   fs.stat(f, (err, st) => {
     if (err || !st.isFile()) return bad(res, 'Filen saknas på lagringsdisken', 404);
@@ -1476,8 +1527,18 @@ route('GET', '/dl/:id/:name', (req, res, q, p) => {
 });
 
 /* AirPlay test page: four forms of one test clip, to see which the TV's AirPlay plays (no provider involved). */
-route('GET', '/airtest', async (req, res) => {
+route('GET', '/airtest', async (req, res, q) => {
   if (!ff.has()) return bad(res, 'ffmpeg saknas på servern', 501);
+  // the same PIN as /setup (it shows what is being recorded and starts test encodings); asked for in the page
+  const pin = setupPin();
+  if (pin) {
+    const key = 'airtest:' + clientKey(req);
+    const wait = pinLocked(key);
+    const sent = q.get('pin') || '';
+    if (wait) return send(res, 429, airtest.pinPage('För många fel PIN-koder – vänta ' + wait + ' s'), 'text/html; charset=utf-8');
+    if (!sent || !sameText(sent, pin)) { if (sent) pinFailed(key); return send(res, 401, airtest.pinPage(sent ? 'Fel PIN-kod' : ''), 'text/html; charset=utf-8'); }
+    pinFails.delete(key);
+  }
   await airtest.ensure();
   airtest.startLive();
   const lan = process.env.PUBLIC_URL ? process.env.PUBLIC_URL.replace(/\/$/, '') : (lanUrls()[0] || '');
@@ -1841,6 +1902,9 @@ const server = http.createServer(async (req, res) => {
   }
 });
 server.keepAliveTimeout = 65000;
+// an error nobody caught is written to the log (masked) instead of the add-on silently stopping in the middle of a match
+process.on('uncaughtException', (e) => { console.error('[fel]', tsbuf._hideLinks(String((e && e.stack) || e)).split('\n').slice(0, 6).join(' | ')); });
+process.on('unhandledRejection', (e) => { console.error('[fel]', tsbuf._hideLinks(String((e && e.stack) || e)).split('\n').slice(0, 6).join(' | ')); });
 
 function start() {
   ff.cleanStart();

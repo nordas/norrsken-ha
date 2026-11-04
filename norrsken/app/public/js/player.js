@@ -246,7 +246,7 @@
     this.every(500, function () { if (self.cuSeek) self.cuCatch(); });
     this.every(15000, function () { self.saveProgress(); if (self.hls && self.airBase && !self.airNative) self.addAirSource(); });
     // tell the server something is playing (direct streams included): a match recording waits for it
-    this.every(60000, function () { if (!self.live && self.played && !self.suspended && !self.video.paused) NS.api.post('api/watching', {}).then(function (r) { self.onWatching(r); }).catch(function () {}); });
+    this.every(60000, function () { if (!self.live && self.played && !self.suspended && !self.video.paused) NS.api.post('api/watching', { dl: !!self.downloaded }).then(function (r) { self.onWatching(r); }).catch(function () {}); });
     // watching the channel the favourite's match is about to start on: the server records it, and this player
     // switches to the recording's live edge (same picture, but "from the start" works and only one connection is used)
     if (this.live) this.every(15000, function () {
@@ -263,6 +263,8 @@
   Player.prototype.onWatching = function (r) {
     if (!r || this.suspended || this.dead) return;
     if (r.recNow && this.live && (!this.tshift || this.tshift.ios) && !this.airNative) {
+      if (this._recNowAt && Date.now() - this._recNowAt < 120000) return; // once: never a loop of restarts
+      this._recNowAt = Date.now();
       NS.toast('Matchen spelas in – du kan spola tillbaka till start', 'live');
       this.play(this.item, 0);
       return;
@@ -383,6 +385,7 @@
         return;
       }
       self.sources = NS.usableSources(res.sources || []);
+      self.downloaded = !!res.downloaded; // played from the server's disk: no provider connection
       self.media = res.media || null;
       self.safeMode = false;
       self.tok = res.t || '';
