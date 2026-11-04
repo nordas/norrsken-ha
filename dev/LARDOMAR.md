@@ -8,3 +8,10 @@
 6. Testa i samma miljö/mediafråga som den riktiga enheten och rapportera när det inte går.
 7. En flagga som ger ett "bara läsa"-läge hoppar bara över sidoeffekter; alla spärrar och behörighetskontroller ligger före flaggan.
 8. Funktion först. Main-push och nya lärdomar kräver Oskars uttryckliga ja.
+
+## Bekräftade av Oskar 2026-11-04
+
+9. En pågående inspelnings spellista markeras som slut först när hela händelsen är över, inte när leverantören tappar strömmen.
+10. Ett skydd som bara kontrolleras vid start måste också ge vika för nya signaler, och automatiska omstarter behöver växande väntetid (backoff).
+11. Varje ny sida eller adress får samma PIN-krav, barnprofilskontroll och escaping, och testas från klientens sida.
+12. Varje sorts signerad länk har sin egen härledda nyckel.

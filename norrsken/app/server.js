@@ -1094,7 +1094,13 @@ route('GET', '/api/stream/:type/:id', async (req, res, q, p) => {
   if (rec) return ok(res, { live: true, sources: [{ kind: 'hls', url: rec.url }], rec });
   // downloaded to the storage disk: played from there, no provider connection (and nothing else is cut off)
   const dl = type === 'live' ? null : downloads.doneFor(type, id);
-  if (dl) return ok(res, { live: false, sources: [{ kind: 'file', url: ingressBase(req) + '/dl/' + dl.file + '?ft=' + fileToken(dl.id) }], ext: 'mp4', t: '', downloaded: true });
+  if (dl) {
+    // its sound tracks (read from the local file, fast): the player offers them although nothing is converted
+    const local = downloads.fileOf(downloads.get(dl.id));
+    const pr = ff.has() ? await Promise.race([ff.probe(local).catch(() => null), new Promise(r => setTimeout(() => r(null), 5000))]) : null;
+    return ok(res, { live: false, sources: [{ kind: 'file', url: ingressBase(req) + '/dl/' + dl.file + '?ft=' + fileToken(dl.id) }], ext: 'mp4', t: '', downloaded: true,
+      probe: pr ? { audio: pr.audio || [], subs: [], dur: pr.dur || 0 } : null });
+  }
   // one connection: a new stream ends a paused channel; a preview (start page, guide) gives way to it instead
   const air = !!q.get('air'); // AirPlay preparation: just the addresses, it must not end what plays or open a connection
   if (q.get('pv') && (tsbuf.pauseActive() > 0 || ff.activeSessions() > 0 || proxy.activeCount() > 0 || downloads.active() > 0)) return bad(res, 'Något annat spelas just nu', 409);

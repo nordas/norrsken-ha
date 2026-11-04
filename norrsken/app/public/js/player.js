@@ -183,7 +183,7 @@
       // the screen's own player may list the file's sound tracks (Safari, many TVs): offer them right away
       if (self.nativeAudio()) { self.autoTracks(); self.renderButtons(); }
     });
-    try { if (v.audioTracks && v.audioTracks.addEventListener) v.audioTracks.addEventListener('addtrack', function () { if (self.nativeAudio()) self.autoTracks(); }); } catch (e) { /* ignore */ }
+    try { if (v.audioTracks && v.audioTracks.addEventListener) v.audioTracks.addEventListener('addtrack', function () { if (self.nativeAudio()) { self.autoTracks(); if (!self.live) self.renderButtons(); self.paintTrackBtns(); } }); } catch (e) { /* ignore */ }
     on('ended', function () { self.onEnded(); });
     on('error', function () {
       if (self.kind === 'hls' && self.hls) return; // hls.js reports its own errors
@@ -391,6 +391,8 @@
       self.media = res.media || null;
       self.safeMode = false;
       self.tok = res.t || '';
+      // a downloaded file: the server read its sound tracks already (there is no token to ask with)
+      if (!self.tok && res.probe) { self.probe = res.probe; if (res.probe.dur) self.dur = res.probe.dur; }
       self.si = 0;
       if (!self.sources.length) return self.fail('Ingen ström hittades');
       self.prepAir();
@@ -1166,8 +1168,12 @@
         var label = p ? p.label + (p.title && p.title !== p.label ? ' – ' + p.title : '') : (NS.langName(code) || t.label || 'Ljud ' + (i + 1));
         return { kind: 'native', i: i, label: label, code: code, note: p ? chNote(p.ch) : '', on: !!t.enabled };
       });
-    } else if (pa.length > 1) {
+    } else if (pa.length) {
       o.audio = pa.map(function (t) { return { kind: 'ff', i: t.i, label: t.label + (t.title && t.title !== t.label ? ' – ' + t.title : ''), code: NS.langCode(t.lang || t.label), note: chNote(t.ch), on: self.audioIdx === t.i }; });
+      // only the converter switches these: without it (a downloaded file in a browser that can't pick tracks) just show what plays
+      var canSwitch = (this.sources || []).some(function (s) { return s.kind === 'remux'; });
+      if (!canSwitch) o.audio = o.audio.filter(function (t) { return t.on; }).slice(0, 1);
+      if (o.audio.length === 1) o.audio[0].on = true;
     }
     var sub = this.sub;
     o.subs.push({ kind: 'off', i: -1, label: 'Av', on: !sub });
@@ -1229,7 +1235,7 @@
     b.push({ id: 'ff', icon: 'ff', label: '10 s' });
     var L = this.trackLabels();
     b.push({ id: 'subs', icon: 'sub', label: L.subOn ? 'Text: ' + L.sub : L.sub }); // "Text: Svenska" / "Ljud: Svenska": the two aren't told apart by the icon alone
-    if (L.audioCount > 1) b.push({ id: 'audio', icon: 'audio', label: 'Ljud: ' + L.audio });
+    if (L.audioCount > 1 || (L.audioCount && !this.live)) b.push({ id: 'audio', icon: 'audio', label: 'Ljud: ' + L.audio }); // a film always shows its sound
     if (this.nextEp()) b.push({ id: 'next', icon: 'next', label: 'Nästa avsnitt' });
     b.push({ id: 'restart', icon: 'restart', label: 'Från början' });
     if (this.item.t === 'catchup') b.push({ id: 'live', icon: 'live', label: 'Gå till live' });
@@ -1337,6 +1343,7 @@
     if (!t) return;
     if (t.act) { t.act(); return; }
     if (t.group === 'Ljud') {
+      if (t.on) { this.closePanel(); return; } // already playing: no restart of the conversion
       this.setAudio(t);
       if (t.code) NS.setPref('audio', t.code);
       // foreign speech and no subtitles on: the profile's subtitle language comes on, as it does at the start
@@ -1723,7 +1730,7 @@
     var L = this.trackLabels();
     var short = this.lctl && this.lctl.classList.contains('tl'); // phone: a short word under the icon
     this.lSubB.lastChild.textContent = short ? 'Text' : L.subOn ? 'Text: ' + L.sub : L.sub;
-    this.lAudB.style.display = L.audioCount > 1 ? '' : 'none';
+    this.lAudB.style.display = L.audioCount > 1 || (L.audioCount && !this.live) ? '' : 'none';
     this.lAudB.lastChild.textContent = short ? 'Ljud' : 'Ljud: ' + L.audio;
   };
   /** Where we are in the recording, and how much has been recorded (seconds). */

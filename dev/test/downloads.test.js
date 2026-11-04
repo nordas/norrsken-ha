@@ -117,6 +117,9 @@ test('playing a downloaded film uses the file on the server and no provider conn
   assert.equal(s.sources.length, 1);
   assert.match(s.sources[0].url, /\/dl\/movie-1002\//);
   assert.equal(s.sources[0].kind, 'file');
+  // its sound tracks come along (read from the file on the server): the player shows the sound button for it too
+  assert.ok(s.probe && Array.isArray(s.probe.audio) && s.probe.audio.length >= 1, JSON.stringify(s.probe));
+  assert.ok(s.probe.audio[0].label);
   // the player's address carries a short-lived token for this file, never the profile's own token
   assert.match(s.sources[0].url, /[?&]ft=[0-9a-z]+\.[0-9a-f]{24}$/);
   assert.doesNotMatch(s.sources[0].url, /[?&]pt=/);
