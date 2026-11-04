@@ -135,3 +135,14 @@ test('a Time Capsule folder setting of "." or ".." never leaves the Norrsken fol
   assert.equal((await smb.put(tmp, ['..'], 'Norrsken/pause')).ok, false);
   assert.equal((await smb.rmdirAll('..')).ok, false);
 });
+
+test('tidying the Time Capsule asks per folder at the moment of deleting (a recording started since is kept)', async () => {
+  const base = path.join(share, 'Norrsken', 'pause');
+  for (const n of ['gammal1', 'ny2']) { fs.mkdirSync(path.join(base, n), { recursive: true }); fs.writeFileSync(path.join(base, n, 'p00000.m4s'), 'x'); }
+  const asked = [];
+  const r = await smb.cleanSubdirs('Norrsken/pause', (n) => { asked.push(n); return n === 'ny2'; });
+  assert.equal(r.ok, true);
+  assert.ok(asked.includes('gammal1') && asked.includes('ny2'));
+  assert.equal(fs.existsSync(path.join(base, 'gammal1')), false, 'left over from before: removed');
+  assert.equal(fs.existsSync(path.join(base, 'ny2')), true, 'started since: kept');
+});

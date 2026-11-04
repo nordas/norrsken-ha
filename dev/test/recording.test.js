@@ -122,3 +122,19 @@ test('a match the provider dropped is not marked finished (the player waits for 
   assert.doesNotMatch(r.multi, /#EXT-X-ENDLIST/);
   assert.match(r.pause, /#EXT-X-ENDLIST/, 'a pause that ended is over');
 });
+
+test('a match whose last part the provider dropped is marked finished once its planned end has passed', () => {
+  const dir = path.join(tmp, 'rec4');
+  const r = run(`
+    const srv = await serve();
+    const m = tsbuf.start('http://127.0.0.1:' + srv.address().port + '/x.ts', { maxMin: 60, ch: 'match', match: true });
+    await until(() => m.done);
+    const before = await tsbuf.playlist(m, '/pause');
+    m.started = Date.now() - 61 * 60e3; // the match (and its tail) is over by now
+    return { before, after: await tsbuf.playlist(m, '/pause'), multi: await tsbuf.playlistMulti([m, m], '/pause') };
+  `, { NSK_PAUSE_DIR: dir });
+  assert.ok(!r.error, r.error);
+  assert.doesNotMatch(r.before, /#EXT-X-ENDLIST/, 'during the match: the player waits for the next part');
+  assert.match(r.after, /#EXT-X-ENDLIST/, 'after it: finished');
+  assert.match(r.multi, /#EXT-X-ENDLIST/);
+});

@@ -56,7 +56,7 @@ function restore(ids) {
     let meta = null;
     try { meta = JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8')); } catch (_) { continue; }
     // over by now (its planned length has passed): finished; otherwise it goes on in a new part after the restart
-    const over = Date.now() > meta.started + (meta.maxMin || 0) * 60e3;
+    const over = !!meta.maxMin && Date.now() > meta.started + meta.maxMin * 60e3;
     const s = { id, url: '', dir, ch: meta.ch || '', proc: null, started: meta.started, last: Date.now(), dead: false, done: true, err: '', maxMin: meta.maxMin || 0, full: over, match: true, restored: true };
     // ffmpeg stopped in the middle: the playlist has no end mark yet, the pieces it lists are whole
     if (mirrorOn()) {
@@ -286,7 +286,7 @@ async function playlist(s, prefix, { wait = 30000, edge = false } = {}) {
       // finished (time limit or disk): mark the end so the player doesn't wait for more
       // finished: mark the end so the player doesn't wait for more. A match recording the provider dropped is not
       // finished (the server starts it again and the playlist goes on): only when it ran its full length
-      if (s.match && !s.full) text = text.replace(/^#EXT-X-ENDLIST\s*$/m, ''); // ffmpeg writes it when the stream ends
+      if (s.match && !s.full && !pastEnd(s)) text = text.replace(/^#EXT-X-ENDLIST\s*$/m, ''); // ffmpeg writes it when the stream ends
       else if (s.done && text.indexOf('#EXT-X-ENDLIST') < 0) text = text.trimEnd() + '\n#EXT-X-ENDLIST\n';
       return text.split('\n').map((l) => {
         if (l.startsWith('#EXT-X-MAP:URI="')) return l.replace(/URI="([^"]+)"/, (m, u) => 'URI="' + prefix + '/' + s.id + '/' + path.basename(u) + '"');
@@ -298,6 +298,9 @@ async function playlist(s, prefix, { wait = 30000, edge = false } = {}) {
     await new Promise(ok => setTimeout(ok, 300));
   }
 }
+
+/** The planned end of the recording has passed (a match: its end plus the tail): nothing more will come. */
+function pastEnd(s) { return !!s.maxMin && Date.now() > s.started + s.maxMin * 60e3; }
 
 /**
  * A match recording that was interrupted (the provider dropped it, the add-on restarted) is several recordings: one
@@ -328,7 +331,7 @@ async function playlistMulti(list, prefix, { edge = false } = {}) {
   if (!body.length) throw new Error('Inspelningen kom inte igång');
   const last = parts[parts.length - 1];
   out.push('#EXT-X-TARGETDURATION:' + target, '#EXT-X-MEDIA-SEQUENCE:0', ...body);
-  if (last.done && last.full) out.push('#EXT-X-ENDLIST');
+  if (last.done && (last.full || pastEnd(last))) out.push('#EXT-X-ENDLIST');
   return out.join('\n') + '\n';
 }
 

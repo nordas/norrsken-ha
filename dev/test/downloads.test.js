@@ -117,6 +117,11 @@ test('playing a downloaded film uses the file on the server and no provider conn
   assert.equal(s.sources.length, 1);
   assert.match(s.sources[0].url, /\/dl\/movie-1002\//);
   assert.equal(s.sources[0].kind, 'file');
+  // the player's address carries a short-lived token for this file, never the profile's own token
+  assert.match(s.sources[0].url, /[?&]ft=[0-9a-z]+\.[0-9a-f]{24}$/);
+  assert.doesNotMatch(s.sources[0].url, /[?&]pt=/);
+  const play = await get(s.sources[0].url.replace(/^https?:\/\/[^/]+/, ''), { headers: { Range: 'bytes=0-99' } });
+  assert.equal(play.status, 206, 'it plays with that token');
   // one that is not downloaded still goes to the provider
   const n = (await get('/api/stream/movie/1005?profile=p1&caps=h264,aac')).json;
   assert.ok(!n.downloaded);

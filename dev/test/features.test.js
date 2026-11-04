@@ -516,6 +516,28 @@ test('match: a device playing something else when the match starts is told to sw
   app._matchReset();
 });
 
+test('match: when its recording cannot start (disk full, no channel) nobody watching is cut off for it', async () => {
+  const tsbuf = require('../lib/tsbuf');
+  app._matchReset();
+  app._streamIdle();
+  const pz = (await post('/api/pause/start?profile=p1', { id: '108' })).json;
+  assert.ok(pz.id);
+  const real = tsbuf.preflight;
+  tsbuf.preflight = () => 'för lite ledigt diskutrymme';
+  try {
+    app._matchRecTick();
+    assert.equal((await get('/api/matchrec')).json.recs.length, 0, 'nothing recorded');
+    assert.equal((await get(pz.url)).status, 200, 'the paused channel goes on');
+    // and the next tick a moment later does not try again at once
+    tsbuf.preflight = real;
+    app._matchRecTick();
+    assert.equal((await get('/api/matchrec')).json.recs.length, 0, 'it waits a while before the next try');
+    assert.equal((await get(pz.url)).status, 200);
+  } finally { tsbuf.preflight = real; }
+  await post('/api/pause/' + pz.id + '/stop');
+  app._matchReset();
+});
+
 test('one connection: a paused channel blocks the speed test, a new stream ends it; a finished match recording survives a new pause', async () => {
   const tsbuf = require('../lib/tsbuf');
   const st = (await get('/api/stream/movie/1002?profile=p1&ext=mkv&caps=vp9,opus')).json;

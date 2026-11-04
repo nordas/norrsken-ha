@@ -378,6 +378,7 @@
       return NS.api.stream(item.t, item.vid || item.id, item.ext);
     }).then(function (res) {
       if (req !== self.reqId) return;
+      self.downloaded = !!res.downloaded;
       if (res.rec && self.live) {
         // the server says this channel's match is being recorded: watch the recording at its live edge (one connection)
         self.tshift = { mode: 'rec', match: true, chId: item.id, id: res.rec.id, url: res.rec.url, at: Date.now(), playing: true, pos: 0, edge: true };

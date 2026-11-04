@@ -84,6 +84,19 @@ function pinSecret() {
 }
 function profToken(p) { return require('crypto').createHmac('sha256', pinSecret()).update(p.id + ':' + p.pin).digest('hex').slice(0, 24); }
 function pinOk(q, prof) { return !prof.pin || q.get('pt') === profToken(prof); }
+/**
+ * A short-lived token for one downloaded file (what a video element's address carries instead of the profile's own
+ * token, which never changes): valid 12 hours, for that file only.
+ */
+function fileToken(id, exp = Date.now() + 12 * 3600e3) {
+  const e = Math.floor(exp / 1000).toString(36);
+  return e + '.' + require('crypto').createHmac('sha256', pinSecret()).update('dl:' + id + ':' + e).digest('hex').slice(0, 24);
+}
+function fileTokenOk(id, t) {
+  const m = /^([0-9a-z]{1,10})\.([0-9a-f]{24})$/.exec(String(t || ''));
+  if (!m || parseInt(m[1], 36) * 1000 < Date.now()) return false;
+  return sameText(fileToken(id, parseInt(m[1], 36) * 1000), t);
+}
 
 function snapshot(it) {
   if (!it || !it.t) return null;
@@ -1079,7 +1092,7 @@ route('GET', '/api/stream/:type/:id', async (req, res, q, p) => {
   if (rec) return ok(res, { live: true, sources: [{ kind: 'hls', url: rec.url }], rec });
   // downloaded to the storage disk: played from there, no provider connection (and nothing else is cut off)
   const dl = type === 'live' ? null : downloads.doneFor(type, id);
-  if (dl) return ok(res, { live: false, sources: [{ kind: 'file', url: ingressBase(req) + '/dl/' + dl.file + '?profile=' + encodeURIComponent(prof.id || '') + (q.get('pt') ? '&pt=' + encodeURIComponent(q.get('pt')) : '') }], ext: 'mp4', t: '', downloaded: true });
+  if (dl) return ok(res, { live: false, sources: [{ kind: 'file', url: ingressBase(req) + '/dl/' + dl.file + '?ft=' + fileToken(dl.id) }], ext: 'mp4', t: '', downloaded: true });
   // one connection: a new stream ends a paused channel; a preview (start page, guide) gives way to it instead
   const air = !!q.get('air'); // AirPlay preparation: just the addresses, it must not end what plays or open a connection
   if (q.get('pv') && (tsbuf.pauseActive() > 0 || ff.activeSessions() > 0 || proxy.activeCount() > 0 || downloads.active() > 0)) return bad(res, 'Något annat spelas just nu', 409);
@@ -1503,9 +1516,12 @@ route('GET', '/dl/:id/:name', (req, res, q, p) => {
   if (id === null) return bad(res, 'Ogiltig adress', 400);
   const it = downloads.get(id);
   if (!it || it.status !== 'done') return bad(res, 'Filen finns inte', 404);
-  // the profile the address was made for: a kids profile only gets what its library shows
-  const prof = profileOf(q);
-  if (!pinOk(q, prof) || !dlVisible(prof)(it)) return bad(res, 'Filen finns inte', 404);
+  // a player's address carries a token for this file (made after the profile checks in /api/stream); saving to the
+  // device carries the profile: a kids profile only gets what its library shows
+  if (!fileTokenOk(it.id, q.get('ft'))) {
+    const prof = profileOf(q);
+    if (!pinOk(q, prof) || !dlVisible(prof)(it)) return bad(res, 'Filen finns inte', 404);
+  }
   const f = downloads.fileOf(it);
   fs.stat(f, (err, st) => {
     if (err || !st.isFile()) return bad(res, 'Filen saknas på lagringsdisken', 404);
@@ -1903,8 +1919,17 @@ const server = http.createServer(async (req, res) => {
 });
 server.keepAliveTimeout = 65000;
 // an error nobody caught is written to the log (masked) instead of the add-on silently stopping in the middle of a match
-process.on('uncaughtException', (e) => { console.error('[fel]', tsbuf._hideLinks(String((e && e.stack) || e)).split('\n').slice(0, 6).join(' | ')); });
-process.on('unhandledRejection', (e) => { console.error('[fel]', tsbuf._hideLinks(String((e && e.stack) || e)).split('\n').slice(0, 6).join(' | ')); });
+const errSeen = new Map(); // message → when last written (the same error in a loop is written once a minute)
+function logUncaught(e) {
+  const text = tsbuf._hideLinks(String((e && e.stack) || e)).split('\n').slice(0, 6).join(' | ');
+  const key = text.slice(0, 200);
+  if (Date.now() - (errSeen.get(key) || 0) < 60e3) return;
+  if (errSeen.size > 200) errSeen.clear();
+  errSeen.set(key, Date.now());
+  console.error('[fel]', text);
+}
+process.on('uncaughtException', logUncaught);
+process.on('unhandledRejection', logUncaught);
 
 function start() {
   ff.cleanStart();
@@ -1930,4 +1955,4 @@ for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { store.flush(); 
 
 if (require.main === module) start();
 
-module.exports = { server, store, catalog, proxy, start, _pool: pool, _maskUrl: (u) => maskUrl(u), _unmaskUrl: (a, b) => unmaskUrl(a, b), _linkSecrets: (u) => linkSecrets(u), _matchRecTick: matchRecTick, _matchReset: () => { matchStopped.clear(); for (const r of matchRecs.values()) { const x = tsbuf.get(r.sessId); if (x) tsbuf.stop(x, 'test'); } matchRecs.clear(); }, _imageAllowed: (u) => imageAllowed(new URL(u)), _privateHost: privateHost, _streamIdle: () => { lastStreamAt = 0; ff.stopAll(); } };
+module.exports = { server, store, catalog, proxy, start, _pool: pool, _maskUrl: (u) => maskUrl(u), _unmaskUrl: (a, b) => unmaskUrl(a, b), _linkSecrets: (u) => linkSecrets(u), _matchRecTick: matchRecTick, _matchReset: () => { matchStopped.clear(); matchFailAt.clear(); for (const r of matchRecs.values()) { const x = tsbuf.get(r.sessId); if (x) tsbuf.stop(x, 'test'); } matchRecs.clear(); }, _imageAllowed: (u) => imageAllowed(new URL(u)), _privateHost: privateHost, _streamIdle: () => { lastStreamAt = 0; ff.stopAll(); } };
