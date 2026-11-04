@@ -90,7 +90,9 @@ function pinOk(q, prof) { return !prof.pin || q.get('pt') === profToken(prof); }
  */
 function fileToken(id, exp = Date.now() + 12 * 3600e3) {
   const e = Math.floor(exp / 1000).toString(36);
-  return e + '.' + require('crypto').createHmac('sha256', pinSecret()).update('dl:' + id + ':' + e).digest('hex').slice(0, 24);
+  // its own key (derived from the secret), so it can never equal a profile's token whatever ids and PINs exist
+  const key = require('crypto').createHmac('sha256', pinSecret()).update('norrsken-filtoken').digest();
+  return e + '.' + require('crypto').createHmac('sha256', key).update(id + ':' + e).digest('hex').slice(0, 24);
 }
 function fileTokenOk(id, t) {
   const m = /^([0-9a-z]{1,10})\.([0-9a-f]{24})$/.exec(String(t || ''));
