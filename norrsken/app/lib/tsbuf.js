@@ -33,10 +33,13 @@ const tcMode = () => !process.env.NSK_PAUSE_DIR && !storage.mounted();
 // a mounted network folder, or the memory buffer in front of the Time Capsule; looked up each time (shares come and go)
 const rootDir = () => process.env.NSK_PAUSE_DIR || (tcMode() ? stageRoot() : storage.pauseDir());
 const mirrorOn = () => tcMode() && smb.enabled();
-const KEEP_LOCAL = 8; // the newest pieces stay in the buffer (live, AirPlay)
+const KEEP_LOCAL = 8; // at least the newest pieces stay in the buffer (live, AirPlay)
+// and as many more of the newest as fit in this much memory: a player a minute or two behind live (an iPhone after a
+// few stalls, a short pause) then never waits for the Time Capsule, which is slow to fetch from (one SMB1 login a go)
+const LOCAL_BUDGET = (+process.env.NSK_LOCAL_MB || 150) * 1e6;
 const LOCAL_FOR_MS = +process.env.NSK_PAUSE_LOCAL_MS || 60e3; // a piece fetched back stays this long, then leaves again
-const RING = 8; // live without the Time Capsule: this many pieces in memory, no more
-const STAGE_MAX = (+process.env.NSK_STAGE_MAX_MB || 200) * 1e6; // the buffer of one recording never grows past this
+const RING = 20; // live without the Time Capsule: this many pieces (80 s) in memory, no more
+const STAGE_MAX = (+process.env.NSK_STAGE_MAX_MB || 300) * 1e6; // the buffer of one recording never grows past this
 const TC_GRACE_MS = +process.env.NSK_TC_GRACE_MS || 120e3; // the Time Capsule may be away this long, then the recording stops
 const KEEP_MS = 24 * 3600e3; // hard: nothing is kept longer, here or on the Time Capsule
 const KEEP_MATCH_DIR_MS = KEEP_MS;
@@ -307,13 +310,23 @@ async function mirrorTick(s) {
   }
 }
 
-/** Pieces that are on the Time Capsule leave the buffer at once, except the newest KEEP_LOCAL and those just fetched back. */
+/**
+ * Pieces that are on the Time Capsule leave the buffer, except the newest (at least KEEP_LOCAL, more while they fit in
+ * LOCAL_BUDGET) and those just fetched back.
+ */
 function evict(s) {
   const m = s.mirror;
   const now = Date.now();
   let segs = [];
   try { segs = fs.readdirSync(s.dir).filter(n => /^p\d{5}\.m4s$/.test(n)).sort(); } catch (_) { return; }
-  for (const n of segs.slice(0, Math.max(0, segs.length - KEEP_LOCAL))) {
+  let keep = 0;
+  let bytes = 0;
+  for (let i = segs.length - 1; i >= 0; i--) {
+    try { bytes += fs.statSync(path.join(s.dir, segs[i])).size; } catch (_) { /* gone */ }
+    if (keep >= KEEP_LOCAL && bytes > LOCAL_BUDGET) break;
+    keep++;
+  }
+  for (const n of segs.slice(0, Math.max(0, segs.length - keep))) {
     const f = path.join(s.dir, n);
     const back = m.fetchedAt.get(n);
     if (!m.up.has(n) || m.fetching.has(n) || (back && now - back < LOCAL_FOR_MS)) continue;
@@ -322,7 +335,7 @@ function evict(s) {
   }
 }
 
-/** A piece to play: on the local disk, or fetched back from the Time Capsule (with the next few in the same go). */
+/** A piece to play: in the buffer, or fetched back from the Time Capsule (with the next 7, half a minute, in the same go). */
 async function fileReady(id, name) {
   const f = file(id, name);
   if (!f) return null;
@@ -332,7 +345,7 @@ async function fileReady(id, name) {
   if (!m || !m.up.has(name)) return null;
   const num = /^p(\d{5})\.m4s$/.exec(name);
   const want = [name];
-  if (num) for (let k = 1; k <= 3; k++) { const nx = 'p' + String(+num[1] + k).padStart(5, '0') + '.m4s'; if (m.up.has(nx) && !fs.existsSync(path.join(s.dir, nx)) && !m.fetching.has(nx)) want.push(nx); }
+  if (num) for (let k = 1; k <= 7; k++) { const nx = 'p' + String(+num[1] + k).padStart(5, '0') + '.m4s'; if (m.up.has(nx) && !fs.existsSync(path.join(s.dir, nx)) && !m.fetching.has(nx)) want.push(nx); }
   let p = m.fetching.get(name);
   if (!p) {
     p = (async () => {

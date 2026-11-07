@@ -1658,8 +1658,12 @@
     var url = ts.url;
     this.airUrl = url; // AirPlay of a recording: the recording itself (fMP4 HLS from the add-on)
     if (window.Hls && window.Hls.isSupported() && !NS.iosNative(v)) {
-      // an EVENT playlist: start where the recording starts and never jump ahead to its end
-      var hls = this.hls = new window.Hls({ enableWorker: true, startPosition: at || 0, liveSyncDurationCount: 99999, liveMaxLatencyDurationCount: Infinity,
+      // live on an iPhone (and "Gå till live"): near the end of the recording, as Safari's own player does; otherwise
+      // the time it took to start, and every stall, would add up behind live
+      var edge = !!(ts.ios && ts.edge);
+      if (edge) { ts.edge = false; url = url + (url.indexOf('?') < 0 ? '?' : '&') + 'edge=1'; this.airUrl = url; }
+      // an EVENT playlist: start where the recording starts (or near its end, above) and never jump ahead by itself
+      var hls = this.hls = new window.Hls({ enableWorker: true, startPosition: edge ? -1 : (at || 0), liveSyncDurationCount: edge ? 3 : 99999, liveMaxLatencyDurationCount: Infinity,
         maxBufferLength: 40, backBufferLength: 60, manifestLoadingTimeOut: 40000, manifestLoadingMaxRetry: 2, levelLoadingMaxRetry: 6, fragLoadingMaxRetry: 6 });
       hls.on(window.Hls.Events.ERROR, function (ev, d) { if (d && d.fatal) { NS.diag('pausinspelning: ' + d.details); self.goLive(); } });
       hls.on(window.Hls.Events.MANIFEST_PARSED, function () { self.playPromise(); });

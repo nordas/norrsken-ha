@@ -16,7 +16,7 @@ const log = path.join(tmp, 'calls.log');
 fs.mkdirSync(share);
 Object.assign(process.env, {
   SMBCLIENT_PATH: path.join(__dirname, 'fake-smbclient.js'), FAKE_SMB_ROOT: share, FAKE_SMB_PASS: 'hemligt ord', FAKE_SMB_LOG: log,
-  NSK_SMB_SHARE: 'smb://192.168.1.5/Data', NSK_SMB_USER: 'oskar', NSK_SMB_PASS: 'hemligt ord', NSK_PAUSE_LOCAL_MS: '1', NSK_SMB_DIR: 'Norrsken', NSK_TC_GRACE_MS: '1500',
+  NSK_SMB_SHARE: 'smb://192.168.1.5/Data', NSK_SMB_USER: 'oskar', NSK_SMB_PASS: 'hemligt ord', NSK_PAUSE_LOCAL_MS: '1', NSK_LOCAL_MB: '0.001', NSK_SMB_DIR: 'Norrsken', NSK_TC_GRACE_MS: '1500',
   NSK_STAGE_DIR: path.join(tmp, 'stage'), // the memory buffer (/dev/shm in Home Assistant)
 });
 delete process.env.NSK_STORAGE_DIR;
