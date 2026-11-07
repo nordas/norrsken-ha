@@ -1,8 +1,9 @@
 'use strict';
 /**
  * Pause for live TV on channels without an archive: from the moment you pause, the server records the channel
- * to disk (the stream as it is, nothing converted). Resuming plays the recording, which keeps growing, so you
- * carry on exactly where you were, behind live; "Gå till live" ends it.
+ * (the stream as it is, nothing converted) to the Time Capsule, never to Home Assistant's disk (see below).
+ * Resuming plays the recording, which keeps growing, so you carry on exactly where you were, behind live;
+ * "Gå till live" ends it.
  *
  * One recording at a time: the player stops its own stream first, so the provider only ever sees one connection.
  * A recording is removed when the player says stop, when nobody has asked about it for a while, or on restart.
@@ -16,25 +17,73 @@ const { DEFAULT_UA } = require('./util');
 const FF = process.env.FFMPEG_PATH || 'ffmpeg';
 const storage = require('./storage');
 const smb = require('./smb');
-// the storage disk (the AirPort's, when set up) or the add-on's own; looked up each time since the share may come and go
-const rootDir = () => process.env.NSK_PAUSE_DIR || storage.pauseDir();
-// A Time Capsule Home Assistant cannot mount (SMB1): pieces are copied there as they are finished, see mirrorTick
-const mirrorOn = () => smb.enabled() && !process.env.NSK_PAUSE_DIR && !storage.mounted();
-const KEEP_LOCAL = 8; // the newest pieces always stay on the local disk
-const LOCAL_FOR_MS = +process.env.NSK_PAUSE_LOCAL_MS || 60e3; // and a piece that was copied stays at least this long
-// Local first: the pieces stay on the add-on's disk as long as it has room (watching from the start, live and AirPlay
-// then never wait for the Time Capsule); the copies on the Time Capsule are what is left when the disk runs low.
-const LOCAL_KEEP_FREE = (+process.env.NSK_LOCAL_KEEP_FREE_GB || 4) * 1e9;
-const KEEP_MATCH_DIR_MS = 24 * 3600e3;
+/*
+ * NOTHING is ever kept on Home Assistant's own disk (it lives on a small SSD that filled up once and froze it).
+ * Without a mounted network folder (storage_dir) the recording goes to the Time Capsule: ffmpeg writes into a small
+ * buffer in memory (/dev/shm), every finished piece is copied to the Time Capsule at once and leaves the buffer; only
+ * the newest few stay for live and AirPlay. No Time Capsule, no recording. Everything is gone after 24 h.
+ */
+const IN_HA = !!process.env.SUPERVISOR_TOKEN;
+function stageRoot() {
+  if (process.env.NSK_STAGE_DIR) return process.env.NSK_STAGE_DIR;
+  if (fs.existsSync('/dev/shm')) return '/dev/shm/norrsken-pause';
+  return IN_HA ? '' : path.join(os.tmpdir(), 'norrsken-pause'); // tests on a Mac; never in Home Assistant
+}
+const tcMode = () => !process.env.NSK_PAUSE_DIR && !storage.mounted();
+// a mounted network folder, or the memory buffer in front of the Time Capsule; looked up each time (shares come and go)
+const rootDir = () => process.env.NSK_PAUSE_DIR || (tcMode() ? stageRoot() : storage.pauseDir());
+const mirrorOn = () => tcMode() && smb.enabled();
+const KEEP_LOCAL = 8; // the newest pieces stay in the buffer (live, AirPlay)
+const LOCAL_FOR_MS = +process.env.NSK_PAUSE_LOCAL_MS || 60e3; // a piece fetched back stays this long, then leaves again
+const RING = 8; // live without the Time Capsule: this many pieces in memory, no more
+const STAGE_MAX = (+process.env.NSK_STAGE_MAX_MB || 200) * 1e6; // the buffer of one recording never grows past this
+const TC_GRACE_MS = +process.env.NSK_TC_GRACE_MS || 120e3; // the Time Capsule may be away this long, then the recording stops
+const KEEP_MS = 24 * 3600e3; // hard: nothing is kept longer, here or on the Time Capsule
+const KEEP_MATCH_DIR_MS = KEEP_MS;
 const IDLE_MS = 3 * 60e3; // the player checks in every 30 s, also while paused
 const MIN_FREE = 1.5e9; // leave room on the disk: Home Assistant needs it more than we do
+const MIN_FREE_STAGE = 200e6; // and in memory
 const sessions = new Map();
+
+/** '' when the Time Capsule can take a recording now, otherwise why not (nothing is then recorded at all). */
+function tcProblem() {
+  if (!tcMode()) return '';
+  if (!smb.enabled()) return 'Ingen Time Capsule inställd (smb_share) – paus och matchinspelning sparas bara där';
+  if (!stageRoot()) return 'Inget minnesutrymme för inspelningen (/dev/shm saknas)';
+  const i = smb.info();
+  if (!i.ok) { smb.check(true).catch(() => {}); return 'Time Capsule svarar inte' + (i.err ? ' (' + i.err + ')' : '') + ' – ingen inspelning, inget sparas på Home Assistants disk'; }
+  if (smb.free() && smb.free() < MIN_FREE) return 'För lite ledigt utrymme på Time Capsule';
+  return '';
+}
+
+/**
+ * The Time Capsule's disk sleeps: just after it wakes it answers "no such share" for a minute or so. Before a
+ * recording starts, ask it again (never trust an old answer) and give it a little time to wake up.
+ */
+async function wakeTC(tries = 4, gap = 5000) {
+  // it answered last time (that answer is renewed whenever it is asked for): go at once; a disk that dozed off
+  // since gets TC_GRACE_MS to wake up while the first pieces wait in memory
+  if (!mirrorOn() || smb.info().ok) return;
+  for (let i = 0; i < tries; i++) {
+    const r = await smb.check(true).catch(() => ({ ok: false }));
+    if (r.ok) return;
+    if (i < tries - 1) await new Promise(ok => setTimeout(ok, gap));
+  }
+}
+
+/** Remove every folder on the Time Capsule that no running recording owns (left behind, or older than 24 h). */
+function sweepRemote() {
+  if (!mirrorOn()) return Promise.resolve();
+  return smb.check(true).then((r) => { if (r.ok) return smb.cleanSubdirs(smb.dir + '/pause', (n) => sessions.has(n)); }).catch(() => {});
+}
 
 /** Whatever an earlier run left behind (called when the server starts, not when the module is loaded). */
 function cleanStart() {
   // a match recording survives a restart (an update in the middle of the match must not lose its start); pauses do not
   const keep = new Set();
   const root = rootDir();
+  // what 1.14.4 and older left on the add-on's own disk: never kept
+  if (tcMode()) try { fs.rmSync(path.join(os.tmpdir(), 'norrsken-pause'), { recursive: true, force: true }); } catch (_) { /* nothing there */ }
   try {
     for (const id of fs.readdirSync(root)) {
       let meta = null;
@@ -60,7 +109,7 @@ function restore(ids) {
     const s = { id, url: '', dir, ch: meta.ch || '', proc: null, started: meta.started, last: Date.now(), dead: false, done: true, err: '', maxMin: meta.maxMin || 0, full: over, match: true, restored: true };
     // ffmpeg stopped in the middle: the playlist has no end mark yet, the pieces it lists are whole
     if (mirrorOn()) {
-      s.mirror = { dir: smb.dir + '/pause/' + id, ready: true, up: new Set(), busy: false, err: '', fetching: new Map(), bytes: 0 };
+      s.mirror = { dir: smb.dir + '/pause/' + id, ready: true, up: new Set(), busy: false, err: '', fetching: new Map(), fetchedAt: new Map(), bytes: 0 };
       smb.listFiles(s.mirror.dir).then((names) => { for (const n of names) if (/^p\d{5}\.m4s$/.test(n)) s.mirror.up.add(n); }).catch(() => {});
       s.mirrorT = setInterval(() => mirrorTick(s), 5000);
       if (s.mirrorT.unref) s.mirrorT.unref();
@@ -111,6 +160,19 @@ function stop(s, why) {
   setTimeout(() => fs.rm(s.dir, { recursive: true, force: true }, () => {}), 1500);
 }
 
+/**
+ * Stop recording here (what is recorded stays playable). full: as far as it goes (a disk is full); otherwise the
+ * Time Capsule was away and a match recording may start again in a new part once it is back.
+ */
+function halt(s, why, full = true) {
+  if (s.halted || s.dead) return;
+  s.halted = true;
+  console.log('[paus] inspelningen stannar här:', why);
+  try { if (s.proc) s.proc.kill('SIGINT'); } catch (_) { /* gone */ }
+  if (full) s.full = true;
+  if (s.diskT) clearInterval(s.diskT);
+}
+
 function stopAll(why) { for (const s of [...sessions.values()]) stop(s, why); }
 /** The pause recordings only: a finished match recording stays (it is kept a day). */
 function stopPauses(why) { let n = 0; for (const s of [...sessions.values()]) if (!s.match) { stop(s, why); n++; } return n; }
@@ -126,25 +188,29 @@ function matchSession() {
  * match: a match recording (keeps 24 h, not stopped when nobody asks). It takes over from a pause, but a pause
  * never takes over from a match recording.
  */
-function start(url, { ua, maxMin = 60, ch = '', match = false } = {}) {
+function start(url, { ua, maxMin = 60, ch = '', match = false, live = false } = {}) {
   if (match) { for (const s of [...sessions.values()]) if (!s.match) stop(s, 'matchinspelning'); }
   else {
     if (matchSession()) throw new Error('Matchinspelningen pågår på en annan kanal');
     stopPauses('ny paus'); // one connection: a new pause ends the previous one (a finished match recording stays)
   }
+  const why = tcProblem();
+  // plain live viewing (an iPhone watches live through this) still works without the Time Capsule: only the newest
+  // pieces, in memory, ffmpeg removes the older ones itself; no pausing back, nothing kept anywhere
+  const ring = !!why && live && !match && tcMode() && !!stageRoot();
+  if (why && !ring) { console.log('[paus] ingen inspelning:', why); throw new Error(why); }
+  if (ring) console.log('[paus]', why, '– live går bara via minnet (ingen paus bakåt)');
+  const useMirror = tcMode() && !ring;
   const ROOT = rootDir();
   fs.mkdirSync(ROOT, { recursive: true });
-  const useMirror = mirrorOn() && smb.info().ok;
-  if (mirrorOn() && !useMirror) { smb.check(true).catch(() => {}); console.log('[paus] Time Capsule svarar inte – spelar in på tilläggets egen disk'); }
   const free = freeBytes(ROOT);
-  if (free < (useMirror ? MIN_FREE * 0.4 : MIN_FREE)) throw new Error('För lite ledigt diskutrymme för att spela in pausen');
-  if (useMirror && smb.free() && smb.free() < MIN_FREE) throw new Error('För lite ledigt utrymme på Time Capsule');
+  if (free < (useMirror ? MIN_FREE_STAGE : MIN_FREE)) throw new Error(useMirror ? 'För lite ledigt minne för att spela in pausen' : 'För lite ledigt diskutrymme för att spela in pausen');
   const id = Math.random().toString(36).slice(2, 10);
   const dir = path.join(ROOT, id);
   fs.mkdirSync(dir, { recursive: true });
-  const s = { id, url, dir, ch, proc: null, started: Date.now(), last: Date.now(), dead: false, done: false, err: '', maxMin, full: false, match: !!match };
+  const s = { id, url, dir, ch, proc: null, started: Date.now(), last: Date.now(), dead: false, done: false, err: '', maxMin, full: false, match: !!match, ring };
   try { fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({ id, ch, match: !!match, started: s.started, maxMin })); } catch (_) { /* the recording works without it */ }
-  if (useMirror) s.mirror = { dir: smb.dir + '/pause/' + id, ready: false, up: new Set(), busy: false, err: '', fetching: new Map(), bytes: 0 };
+  if (useMirror) s.mirror = { dir: smb.dir + '/pause/' + id, ready: false, up: new Set(), busy: false, err: '', fetching: new Map(), fetchedAt: new Map(), bytes: 0 };
   const hls = /\.m3u8?(\?|$)/i.test(url);
   /*
    * AAC in a transport stream is ADTS, and ffmpeg's HLS muxer stops at the first piece ("Malformed AAC bitstream")
@@ -157,10 +223,12 @@ function start(url, { ua, maxMin = 60, ch = '', match = false } = {}) {
     args.push('-fflags', '+genpts+discardcorrupt', '-i', url,
       '-map', '0:v:0?', '-map', '0:a:0?', '-c', 'copy');
     if (bsf) args.push('-bsf:a', 'aac_adtstoasc');
-    args.push('-t', String(Math.max(1, maxMin) * 60),
-      '-f', 'hls', '-hls_time', '4', '-hls_list_size', '0', '-hls_playlist_type', 'event',
-      // fragmented MP4 like the converter: every codec a provider sends (H.264, HEVC, AAC, AC-3…) fits as it is
-      '-hls_flags', 'independent_segments+temp_file', '-hls_segment_type', 'fmp4', '-hls_fmp4_init_filename', 'init.mp4',
+    args.push('-t', String(Math.max(1, maxMin) * 60), '-f', 'hls', '-hls_time', '4');
+    // ring (live only, no Time Capsule): a sliding list of the newest pieces, ffmpeg removes the older ones
+    if (ring) args.push('-hls_list_size', String(RING), '-hls_flags', 'independent_segments+temp_file+delete_segments');
+    else args.push('-hls_list_size', '0', '-hls_playlist_type', 'event', '-hls_flags', 'independent_segments+temp_file');
+    // fragmented MP4 like the converter: every codec a provider sends (H.264, HEVC, AAC, AC-3…) fits as it is
+    args.push('-hls_segment_type', 'fmp4', '-hls_fmp4_init_filename', 'init.mp4',
       '-hls_segment_filename', path.join(dir, 'p%05d.m4s'), path.join(dir, 'index.m3u8'));
     const proc = s.proc = spawn(FF, args);
     proc.stderr.on('data', d => { if (s.err.length < 3000) s.err += d; });
@@ -179,7 +247,8 @@ function start(url, { ua, maxMin = 60, ch = '', match = false } = {}) {
   s.diskT = setInterval(() => {
     if (s.dead) return clearInterval(s.diskT);
     if (s.mirror) smb.check().catch(() => {});
-    if (freeBytes(path.dirname(s.dir)) < (s.mirror ? MIN_FREE * 0.25 : MIN_FREE * 0.6) || (s.mirror && smb.free() && smb.free() < MIN_FREE * 0.6)) { console.log('[paus] disken börjar bli full: inspelningen stannar här'); try { s.proc.kill('SIGINT'); } catch (_) { /* gone */ } s.full = true; clearInterval(s.diskT); }
+    if (s.ring && dirBytes(s.dir) > STAGE_MAX) return halt(s, 'bufferten i minnet är full', false);
+    if (freeBytes(path.dirname(s.dir)) < (s.mirror ? MIN_FREE_STAGE * 0.5 : MIN_FREE * 0.6) || (s.mirror && smb.free() && smb.free() < MIN_FREE * 0.6)) halt(s, s.mirror ? 'minnet eller Time Capsule börjar bli fullt' : 'disken börjar bli full');
   }, 15000);
   if (s.diskT.unref) s.diskT.unref();
   sessions.set(id, s);
@@ -207,7 +276,7 @@ function logFormat(s) {
   });
 }
 
-/** Copy finished pieces to the Time Capsule, and free the local disk of the old ones. */
+/** Copy finished pieces to the Time Capsule at once; a piece that is there leaves the buffer (the newest few stay). */
 async function mirrorTick(s) {
   const m = s.mirror;
   if (!m || m.busy || s.dead) return;
@@ -222,23 +291,35 @@ async function mirrorTick(s) {
       if (!r.ok) throw new Error(r.err);
       for (const n of todo) { m.up.add(n); try { m.bytes += fs.statSync(path.join(s.dir, n)).size; } catch (_) { /* gone */ } }
     }
-    // only when the local disk runs low: the oldest pieces that are safe on the Time Capsule leave it first
-    const now = Date.now();
-    if (freeBytes(s.dir) < LOCAL_KEEP_FREE) {
-      let freed = 0;
-      for (const n of segs.slice(0, Math.max(0, segs.length - KEEP_LOCAL))) {
-        if (freeBytes(s.dir) >= LOCAL_KEEP_FREE) break;
-        const f = path.join(s.dir, n);
-        try { if (m.up.has(n) && now - fs.statSync(f).mtimeMs > LOCAL_FOR_MS) { fs.rmSync(f, { force: true }); freed++; } } catch (_) { /* gone */ }
-      }
-      if (freed && !m.lowLogged) { m.lowLogged = true; console.log('[paus] lite plats på tilläggets disk: äldre delar finns nu bara på Time Capsule'); }
-    }
+    evict(s);
     if (m.err) console.log('[paus] Time Capsule är tillbaka');
     m.err = '';
+    m.errSince = 0;
   } catch (e) {
-    if (e.message !== m.err) console.error('[paus] kunde inte kopiera till Time Capsule:', e.message, '(sparar lokalt tills vidare)');
+    if (e.message !== m.err) console.error('[paus] kunde inte kopiera till Time Capsule:', e.message);
     m.err = e.message;
-  } finally { m.busy = false; }
+    if (!m.errSince) m.errSince = Date.now();
+    // nothing is kept on Home Assistant's disk, and the memory buffer is small: when the Time Capsule stays away, stop
+    if (!s.done && Date.now() - m.errSince > TC_GRACE_MS) halt(s, 'Time Capsule svarar inte (' + e.message + ')', false);
+  } finally {
+    m.busy = false;
+    if (!s.done && !s.dead && dirBytes(s.dir) > STAGE_MAX) halt(s, 'Time Capsule hinner inte med (bufferten i minnet är full)', false);
+  }
+}
+
+/** Pieces that are on the Time Capsule leave the buffer at once, except the newest KEEP_LOCAL and those just fetched back. */
+function evict(s) {
+  const m = s.mirror;
+  const now = Date.now();
+  let segs = [];
+  try { segs = fs.readdirSync(s.dir).filter(n => /^p\d{5}\.m4s$/.test(n)).sort(); } catch (_) { return; }
+  for (const n of segs.slice(0, Math.max(0, segs.length - KEEP_LOCAL))) {
+    const f = path.join(s.dir, n);
+    const back = m.fetchedAt.get(n);
+    if (!m.up.has(n) || m.fetching.has(n) || (back && now - back < LOCAL_FOR_MS)) continue;
+    m.fetchedAt.delete(n);
+    try { fs.rmSync(f, { force: true }); } catch (_) { /* gone */ }
+  }
 }
 
 /** A piece to play: on the local disk, or fetched back from the Time Capsule (with the next few in the same go). */
@@ -257,6 +338,8 @@ async function fileReady(id, name) {
     p = (async () => {
       let r = await smb.getMany(s.dir, m.dir, want);
       if (!r.ok && !fs.existsSync(f)) r = await smb.getMany(s.dir, m.dir, [name]); // once more, the piece itself
+      // fetched back: it stays LOCAL_FOR_MS for the player, then leaves the buffer again (evict)
+      for (const n of want) m.fetchedAt.set(n, Date.now());
       return r;
     })().finally(() => { for (const n of want) m.fetching.delete(n); });
     for (const n of want) m.fetching.set(n, p);
@@ -351,24 +434,27 @@ function length(s) {
   } catch (_) { return 0; }
 }
 
-const KEEP_MATCH_MS = 24 * 3600e3;
 setInterval(() => {
   const now = Date.now();
   for (const s of [...sessions.values()]) {
-    if (s.match) { if (now - s.started > KEEP_MATCH_MS) stop(s, 'ett dygn gånget'); continue; } // a match stays a day
-    if (now - s.last > IDLE_MS) stop(s, 'ingen tittar');
+    if (now - s.started > KEEP_MS) { stop(s, 'ett dygn gånget'); continue; } // hard: never longer, match or pause
+    if (!s.match && now - s.last > IDLE_MS) stop(s, 'ingen tittar');
   }
 }, 20e3).unref();
+// and on the Time Capsule: every hour, whatever no running recording owns goes (a crash or a reboot left it behind)
+setInterval(() => { sweepRemote(); }, 3600e3).unref();
+// an answer "it is away" is never left standing: asked again every minute until it is back (it wakes up by itself)
+setInterval(() => { if (mirrorOn() && !smb.info().ok) smb.check(true).catch(() => {}); }, 60e3).unref();
 
 function active() { return sessions.size; }
 /** Recordings that still read from the provider (a finished match recording kept for a day does not). */
 function recording() { let n = 0; for (const s of sessions.values()) if (!s.dead && !s.done) n++; return n; }
 /** '' when a recording can start (disks have room), otherwise why not. */
 function preflight() {
+  const why = tcProblem();
+  if (why) return why;
   try { fs.mkdirSync(rootDir(), { recursive: true }); } catch (e) { return 'mappen för inspelningar går inte att skapa'; }
-  const useMirror = mirrorOn() && smb.info().ok;
-  if (freeBytes(rootDir()) < (useMirror ? MIN_FREE * 0.4 : MIN_FREE)) return 'för lite ledigt diskutrymme';
-  if (useMirror && smb.free() && smb.free() < MIN_FREE) return 'för lite ledigt utrymme på Time Capsule';
+  if (freeBytes(rootDir()) < (tcMode() ? MIN_FREE_STAGE : MIN_FREE)) return tcMode() ? 'för lite ledigt minne' : 'för lite ledigt diskutrymme';
   return '';
 }
 /** Pause recordings someone is using (a paused channel), not match recordings. */
@@ -377,4 +463,4 @@ function pauseActive() { let n = 0; for (const s of sessions.values()) if (!s.ma
 /** Every recording that runs (for the AirPlay test page). */
 function list() { return [...sessions.values()].filter(s => !s.dead).map(s => ({ id: s.id, ch: s.ch, match: s.match })); }
 
-module.exports = { recording, preflight, list, restore, playlistMulti, _hideLinks: hideLinks, start, get, stop, stopAll, stopPauses, matchSession, playlist, file, fileReady, length, active, pauseActive, cleanStart, rootDir };
+module.exports = { wakeTC, sweepRemote, recording, preflight, list, restore, playlistMulti, _hideLinks: hideLinks, start, get, stop, stopAll, stopPauses, matchSession, playlist, file, fileReady, length, active, pauseActive, cleanStart, rootDir };

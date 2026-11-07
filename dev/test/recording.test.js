@@ -1,6 +1,6 @@
 'use strict';
 // Match recordings over a whole evening: they survive a restart of the add-on, an interrupted recording plays as
-// one from the start, live viewers get an "edge" playlist, and with a Time Capsule the pieces stay local first.
+// one from the start, live viewers get an "edge" playlist, and with a Time Capsule only the newest pieces stay in the buffer.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
@@ -85,7 +85,7 @@ test('an interrupted match plays as one recording from the start (all parts in o
   assert.match(r.one, /#EXT-X-START:TIME-OFFSET=-12/);
 });
 
-test('with a Time Capsule the pieces stay on the local disk while it has room (watching from the start never waits for it)', () => {
+test('with a Time Capsule every piece goes there at once; only the newest few stay in the memory buffer', () => {
   const share = path.join(tmp, 'share');
   fs.mkdirSync(share, { recursive: true });
   const r = run(`
@@ -99,11 +99,11 @@ test('with a Time Capsule the pieces stay on the local disk while it has room (w
     return { up: s.mirror.up.size, local, remote: fs.readdirSync(path.join(${JSON.stringify(share)}, 'Norrsken', 'pause', s.id)).length };
   `, {
     SMBCLIENT_PATH: path.join(__dirname, 'fake-smbclient.js'), FAKE_SMB_ROOT: share, FAKE_SMB_PASS: 'pw', NSK_SMB_SHARE: '//192.168.1.5/Data', NSK_SMB_USER: 'u', NSK_SMB_PASS: 'pw',
-    NSK_PAUSE_LOCAL_MS: '1', NSK_PAUSE_DIR: '', NSK_STORAGE_DIR: '', TMPDIR: tmp,
+    NSK_PAUSE_LOCAL_MS: '1', NSK_PAUSE_DIR: '', NSK_STORAGE_DIR: '', NSK_STAGE_DIR: path.join(tmp, 'stage'), TMPDIR: tmp,
   });
   assert.ok(!r.error, r.error);
   assert.ok(r.up >= 5 && r.remote >= 5, 'copied to the Time Capsule: ' + JSON.stringify(r));
-  assert.ok(r.local >= r.up, 'and still on the local disk: ' + JSON.stringify(r));
+  assert.ok(r.local <= 8, 'only the newest pieces stay in the buffer: ' + JSON.stringify(r));
 });
 
 test('a match the provider dropped is not marked finished (the player waits for the next part); a pause that ended is', () => {

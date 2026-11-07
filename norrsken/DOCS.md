@@ -62,7 +62,12 @@ En Time Capsule pratar bara det gamla SMB1-protokollet. Home Assistants "Lägg t
 1. Sätt `smb_share` till disken, t.ex. `//192.168.1.5/Data` (IP eller namn på Time Capsule, och diskens delningsnamn). Sätt `smb_user` och `smb_password` (lämna tomma om disken saknar lösenord). `smb_dir` är mappen på disken, standard `Norrsken`; Norrsken skapar den själv.
 2. Starta om tillägget. Loggen skriver `[time capsule] ansluten`, eller varför det inte gick (fel lösenord, fel delningsnamn, disken svarar inte).
 
-Så fungerar det: pausen och matchinspelningen skrivs först i en liten lokal mapp, färdiga delar (4 sekunder) kopieras direkt till Time Capsule och de gamla lokala delarna tas bort. Spolar du tillbaka hämtas delarna tillbaka därifrån. Tappar disken förbindelsen sparas allt lokalt tills den är tillbaka. Är `storage_dir` (monterad disk) också satt och fungerar, används den i stället.
+Så fungerar det: **ingenting av pausen eller matchinspelningen sparas någonsin på Home Assistants egen disk.** ffmpeg skriver i en liten buffert i minnet (`/dev/shm`), varje färdig del (4 sekunder) kopieras direkt till Time Capsule och lämnar bufferten; bara de 8 senaste ligger kvar (live, AirPlay). Spolar du tillbaka hämtas delarna tillbaka därifrån en stund. Allt tas bort efter 24 timmar, hårt, även på Time Capsule (varje timme städas det som ingen inspelning äger).
+
+- Svarar Time Capsule inte blir det ingen paus och ingen matchinspelning (ingenting sparas lokalt i stället). Sover disken väntar Norrsken en stund på att den vaknar (den svarar "delningen finns inte" första minuten) och frågar igen varje minut.
+- Försvinner den mitt i en inspelning får den 2 minuter, sedan stannar inspelningen. En matchinspelning startar om i en ny del när den är tillbaka.
+- Live på iPhone (som går via samma inspelning) fungerar även utan Time Capsule: bara de senaste delarna i minnet, ingen paus bakåt.
+- Är `storage_dir` (monterad disk) satt och fungerar, används den i stället.
 
 Nedladdningar ligger kvar på tilläggets egen disk (eller på `storage_dir`).
 
@@ -73,4 +78,4 @@ Nedladdningar ligger kvar på tilläggets egen disk (eller på `storage_dir`).
 - Tittar du på matchkanalen tittar du via inspelningen: live och "från start" med samma enda anslutning.
 - Avbryts inspelningen (leverantören tappar den) startar den om, och "från start" spelar alla delar i ordning.
 - En omstart av tillägget (t.ex. en uppdatering mitt i matchen) tar inte bort inspelningen.
-- Med Time Capsule ligger delarna kvar på tilläggets egen disk så länge den har plats (minst 4 GB ledigt); kopian på Time Capsule används när disken blir full.
+- Inspelningen sparas bara på Time Capsule (se ovan) och tas bort efter 24 timmar. Svarar Time Capsule inte blir det ingen inspelning, men du kan fortfarande titta live.

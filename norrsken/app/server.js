@@ -1429,8 +1429,9 @@ route('POST', '/api/pause/start', async (req, res, q) => {
   dlYield('paus'); ff.stopAll(); proxy.abortAll(); // one connection: a film being converted or proxied ends when a channel is paused
   try {
     const it = catalog.get('live', id) || {};
+    await tsbuf.wakeTC(); // the Time Capsule's disk may be asleep: wait for it rather than trust an old answer
     // live on an iPhone goes through this recording the whole time it is watched: long enough for an evening
-    const s = tsbuf.start(src.primary, { ua: catalog.ua(), maxMin: b.live ? 360 : (+o.pauseMax || 60), ch: it.n || id });
+    const s = tsbuf.start(src.primary, { ua: catalog.ua(), maxMin: b.live ? 360 : (+o.pauseMax || 60), ch: it.n || id, live: !!b.live });
     ok(res, { id: s.id, url: ingressBase(req) + '/pause/' + s.id + '/index.m3u8', max: s.maxMin });
   } catch (e) { bad(res, e.message, 507); }
 });

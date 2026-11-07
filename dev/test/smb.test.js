@@ -16,7 +16,8 @@ const log = path.join(tmp, 'calls.log');
 fs.mkdirSync(share);
 Object.assign(process.env, {
   SMBCLIENT_PATH: path.join(__dirname, 'fake-smbclient.js'), FAKE_SMB_ROOT: share, FAKE_SMB_PASS: 'hemligt ord', FAKE_SMB_LOG: log,
-  NSK_SMB_SHARE: 'smb://192.168.1.5/Data', NSK_SMB_USER: 'oskar', NSK_SMB_PASS: 'hemligt ord', NSK_PAUSE_LOCAL_MS: '1', NSK_SMB_DIR: 'Norrsken', NSK_LOCAL_KEEP_FREE_GB: '100000000', // a full local disk: old pieces leave it (local first otherwise)
+  NSK_SMB_SHARE: 'smb://192.168.1.5/Data', NSK_SMB_USER: 'oskar', NSK_SMB_PASS: 'hemligt ord', NSK_PAUSE_LOCAL_MS: '1', NSK_SMB_DIR: 'Norrsken', NSK_TC_GRACE_MS: '1500',
+  NSK_STAGE_DIR: path.join(tmp, 'stage'), // the memory buffer (/dev/shm in Home Assistant)
 });
 delete process.env.NSK_STORAGE_DIR;
 delete process.env.NSK_PAUSE_DIR;
@@ -100,22 +101,86 @@ for (const audio of ['aac', 'ac3']) {
   });
 }
 
-test('when the Time Capsule drops out the recording goes on locally and is copied when it is back', async () => {
-  const file = path.join(tmp, 'live-aac.ts');
-  const srv = serve(file);
-  let s;
+// a live channel: the clip arrives over 20 s, like a real broadcast, so the recording is still running
+function serveSlow(file) {
+  const data = fs.readFileSync(file);
+  const step = Math.ceil(data.length / 200);
+  return http.createServer((q, r) => {
+    r.setHeader('Content-Type', 'video/mp2t');
+    let at = 0;
+    const t = setInterval(() => { if (at >= data.length) { clearInterval(t); r.end(); return; } r.write(data.subarray(at, at + step)); at += step; }, 100);
+    r.on('close', () => clearInterval(t));
+  }).listen(0);
+}
+const stage = process.env.NSK_STAGE_DIR;
+const stageCount = () => (fs.existsSync(stage) ? fs.readdirSync(stage).length : 0);
+
+test('without the Time Capsule nothing is recorded at all: nothing ever lands on Home Assistant\'s disk', async () => {
+  const srv = serve(path.join(tmp, 'live-aac.ts'));
   try {
     process.env.FAKE_SMB_DOWN = '1';
+    await smb.check(true);
+    const before = stageCount();
+    assert.throws(() => tsbuf.start('http://127.0.0.1:' + srv.address().port + '/live.ts', { maxMin: 5, ch: 'Test' }), /Time Capsule svarar inte/);
+    assert.throws(() => tsbuf.start('http://127.0.0.1:' + srv.address().port + '/live.ts', { maxMin: 5, ch: 'Match', match: true }), /Time Capsule svarar inte/);
+    assert.match(tsbuf.preflight(), /Time Capsule svarar inte/);
+    assert.equal(stageCount(), before, 'no folder was made');
+    assert.equal(fs.existsSync(path.join(os.tmpdir(), 'norrsken-pause')), false, 'and nothing in the add-on\'s own temp folder');
+    // plain live viewing (an iPhone) still plays: a sliding window in memory, not copied anywhere
+    const live = tsbuf.start('http://127.0.0.1:' + srv.address().port + '/live.ts', { maxMin: 5, ch: 'Live', live: true });
+    try {
+      assert.equal(live.ring, true);
+      assert.equal(live.mirror, undefined, 'nothing goes to the Time Capsule');
+      assert.ok(live.dir.startsWith(stage), 'in the memory buffer');
+      const pl = await tsbuf.playlist(live, '/pause', { edge: true });
+      assert.ok(pl.split('\n').some(l => l.startsWith('/pause/' + live.id + '/')), 'it plays');
+      await waitFor(() => live.done, 30000);
+      assert.ok(fs.readdirSync(live.dir).filter(n => n.endsWith('.m4s')).length <= 10, 'only the newest pieces are kept');
+    } finally { tsbuf.stop(live, 'test'); }
+  } finally { delete process.env.FAKE_SMB_DOWN; await smb.check(true); srv.close(); }
+  assert.equal(tsbuf.preflight(), '', 'back: recordings may start again');
+});
+
+test('a Time Capsule that is waking up (it says "no such share" for a while) is waited for, not taken as gone', async () => {
+  process.env.FAKE_SMB_DOWN = '1';
+  await smb.check(true);
+  assert.equal(smb.info().ok, false);
+  setTimeout(() => { delete process.env.FAKE_SMB_DOWN; }, 1500);
+  await tsbuf.wakeTC(5, 800);
+  assert.equal(smb.info().ok, true, 'awake again');
+  assert.equal(tsbuf.preflight(), '');
+});
+
+test('when the Time Capsule drops out mid-recording the recording stops (it is not kept locally), the buffer stays small', async () => {
+  const srv = serveSlow(path.join(tmp, 'live-aac.ts'));
+  let s;
+  try {
     s = tsbuf.start('http://127.0.0.1:' + srv.address().port + '/live.ts', { maxMin: 5, ch: 'Test' });
-    await waitFor(() => s.done, 30000);
-    await waitFor(() => s.mirror.err, 15000);
-    assert.match(s.mirror.err, /Time Capsule svarar inte/);
-    assert.equal(s.mirror.up.size, 0);
-    assert.ok(fs.readdirSync(s.dir).filter(n => n.endsWith('.m4s')).length >= 10, 'nothing is lost locally');
-    delete process.env.FAKE_SMB_DOWN;
-    await waitFor(() => s.mirror.up.size >= 10, 30000);
-    assert.equal(s.mirror.err, '');
+    await waitFor(() => s.mirror.up.size >= 2, 20000);
+    process.env.FAKE_SMB_DOWN = '1';
+    await waitFor(() => s.halted, 15000);
+    assert.equal(s.full, false, 'not finished: a match recording starts again once the Time Capsule is back');
+    await waitFor(() => s.done, 15000);
+    assert.ok(secs(s) < 36, 'it stopped before the end of the broadcast: ' + secs(s));
+    const bytes = fs.readdirSync(s.dir).reduce((n, f) => n + fs.statSync(path.join(s.dir, f)).size, 0);
+    assert.ok(bytes < 96e6, 'the buffer never grows past its cap: ' + bytes);
   } finally { delete process.env.FAKE_SMB_DOWN; srv.close(); if (s) tsbuf.stop(s, 'test'); }
+});
+
+test('nothing on the Time Capsule outlives its recording: left-behind folders go, running ones stay', async () => {
+  const orphan = path.join(share, 'Norrsken', 'pause', 'gammal1');
+  fs.mkdirSync(orphan, { recursive: true });
+  fs.writeFileSync(path.join(orphan, 'p00000.m4s'), 'x');
+  await smb.check(true); // the disk is back after the test before
+  const srv = serveSlow(path.join(tmp, 'live-aac.ts'));
+  let s;
+  try {
+    s = tsbuf.start('http://127.0.0.1:' + srv.address().port + '/live.ts', { maxMin: 5, ch: 'Test' });
+    await waitFor(() => s.mirror.up.size >= 1, 20000);
+    await tsbuf.sweepRemote();
+    assert.equal(fs.existsSync(orphan), false, 'the left-behind folder is gone');
+    assert.equal(fs.existsSync(remoteDir(s)), true, 'the running recording is kept');
+  } finally { srv.close(); if (s) tsbuf.stop(s, 'test'); }
 });
 
 test('a Time Capsule that only takes the old login (NTLMv1) is reached anyway, and a wrong password still says so', () => {
