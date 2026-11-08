@@ -35,7 +35,9 @@ Obs: en gammal AirPort Extreme pratar äldre SMB-versioner. Om Home Assistant in
 
 ## Nedladdningar
 
-Tryck på **Ladda ner** på en film eller ett avsnitt (eller **Ladda ner säsongen**). Servern sparar filen som MP4 på lagringsdisken: bilden kopieras orörd, ljud som iPhone/tv:n inte kan spela (DTS, TrueHD) görs om till E-AC-3. Nedladdade titlar spelas från servern och använder inte leverantörens anslutning. Under **Min sida → Nedladdningar** kan du spela, spara filen på telefonen eller datorn, eller ta bort den.
+Tryck på **Ladda ner** på en film eller ett avsnitt (eller **Ladda ner säsongen**). Servern sparar filen som MP4 på lagringsdisken: bilden kopieras orörd, ljud som iPhone/tv:n inte kan spela (DTS, TrueHD) görs om till E-AC-3. Nedladdade titlar spelas från servern och använder inte leverantörens anslutning.
+
+**Film och serier på iPhone/iPad** spelas i Norrskens egen spelare, som buffrar långt framåt. Vill du se på tv:n: tryck **Spela på tv** (AirPlay-knappen uppe till höger) – då byter filmen till Safaris spelare innan du väljer tv, så tv:n får bilden. Live-tv spelas i Safaris spelare från början. Under **Min sida → Nedladdningar** kan du spela, spara filen på telefonen eller datorn, eller ta bort den.
 
 Leverantören ger bara en eller ett par anslutningar. Därför väntar en nedladdning tills ingen tittar, och den pausas (och börjar om från början) när du startar något annat eller en matchinspelning ska börja.
 

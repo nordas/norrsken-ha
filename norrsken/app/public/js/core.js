@@ -214,7 +214,7 @@
     return out.join(',');
   })();
   /**
-   * iPhone/iPad: Safari's own HLS player instead of hls.js. AirPlay to a TV (other than an Apple TV) only works when
+   * iPhone/iPad, live TV: Safari's own HLS player instead of hls.js (films: see Player.iosOwn). AirPlay to a TV (other than an Apple TV) only works when
    * the video already plays a plain address the TV can fetch: switching away from hls.js once AirPlay is on ends the
    * AirPlay session on those TVs. "hls.js" can still be chosen in the player settings.
    */

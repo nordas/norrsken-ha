@@ -435,6 +435,14 @@
     try { v.load(); } catch (e) { /* ignore */ }
   };
 
+  /**
+   * Safari's own HLS player on iPhone/iPad: for live TV only (AirPlay to the TV needs it from the start there). Films,
+   * series and the archive play in Norrsken's player (hls.js), which keeps far more ahead: Safari's own stalled on
+   * converted films with nothing buffered while the server was well ahead. The AirPlay button ("Spela på tv") moves a
+   * film to Safari's own player before the TV is picked.
+   */
+  Player.prototype.iosOwn = function () { return this.live && NS.iosNative(this.video); };
+
   Player.prototype.startSource = function (at) {
     var self = this;
     if (this.suspended) return;
@@ -481,7 +489,7 @@
     at = at || 0;
     if (src.kind === 'hls') {
       // "Tv:ns egen spelare" chosen in the player settings: the screen's own HLS instead of hls.js
-      var ownHls = (NS.store.get('engine', '') === 'native' || NS.iosNative(v)) && v.canPlayType('application/vnd.apple.mpegurl');
+      var ownHls = (NS.store.get('engine', '') === 'native' || this.iosOwn()) && v.canPlayType('application/vnd.apple.mpegurl');
       if (window.Hls && window.Hls.isSupported() && !ownHls) {
         var hls = this.hls = new window.Hls({
           enableWorker: true, lowLatencyMode: false, backBufferLength: 30, maxBufferLength: 40, maxMaxBufferLength: 120,
@@ -544,7 +552,7 @@
     this.offset = at || 0;
     var url = NS.remuxUrl(src.url, this.offset, this.audioIdx, this.safeMode);
     // during AirPlay Safari's own player keeps going (a new sound track or position too): hls.js would send only sound
-    if (window.Hls && window.Hls.isSupported() && !this.airNative && !NS.iosNative(v)) {
+    if (window.Hls && window.Hls.isSupported() && !this.airNative && !this.iosOwn()) {
       // 4K is uneven: action scenes need two to three times the average. hls.js stops filling at 60 MB by default,
       // only 10–20 s of 4K, so a slow stretch from the provider empties it. Phones and computers keep far more ahead
       // (the TV has less memory: it keeps the default).
@@ -2008,7 +2016,7 @@
     if (cur && cur.kind === 'hls' && window.Hls && window.Hls.isSupported() && this.video.canPlayType('application/vnd.apple.mpegurl')) {
       // iPhone/iPad use the screen's own by default (AirPlay needs it); elsewhere it is the fallback
       var iosDef = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-      var own = NS.store.get('engine', '') === 'native' || NS.iosNative(this.video);
+      var own = NS.store.get('engine', '') === 'native' || this.iosOwn();
       srcs.push({ label: own ? 'Använd Norrskens spelare' : 'Använd skärmens egen spelare', note: own ? 'skärmens egen används nu' + (iosDef ? ' (behövs för AirPlay)' : '') : 'om inget annat hjälper', act: function () {
         NS.store.set('engine', own ? (iosDef ? 'hlsjs' : '') : (iosDef ? '' : 'native'));
         self.closePanel();
@@ -2392,6 +2400,8 @@
     // Always shown in Safari (the picker says itself when no Apple TV is found); dimmed while none is seen.
     if (window.WebKitPlaybackTargetAvailabilityEvent) {
       var air = btn('tair', 'airplay', function () { self.airplay(); }, 'AirPlay');
+      // a film on the phone plays in Norrsken's player: this button is the way to the TV, so say so
+      if (NS.touch && !this.live) { air.classList.add('tv'); air.appendChild(h('span', { text: 'Spela på tv' })); }
       this.osd.appendChild(air);
       this.video.addEventListener('webkitplaybacktargetavailabilitychanged', function (e) { air.classList.toggle('dim', e.availability !== 'available'); });
       this.video.addEventListener('webkitcurrentplaybacktargetiswirelesschanged', function () {
