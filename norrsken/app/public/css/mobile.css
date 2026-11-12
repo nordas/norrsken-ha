@@ -491,3 +491,36 @@ html.m .player.touch .osd .bar:not(.tsbar) { bottom: calc(90px + env(safe-area-i
   /* channels in two columns */
   .m-chlist { display: grid; grid-template-columns: 1fr 1fr; column-gap: 8px; padding-left: 8px; padding-right: 8px; }
 }
+
+/* match card: the two teams as badges in their colours */
+.m-vs { margin-top: 12px; display: flex; align-items: center; gap: 14px; }
+.m-vs-t { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.m-vs-t b { font-size: 24px; font-weight: 900; letter-spacing: -0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.m-vs-b { flex: none; width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; font-size: 13px; font-weight: 900; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.6); }
+.m-vs-x { font-size: 22px; font-weight: 800; color: var(--text-2); }
+@media (max-width: 420px) { .m-vs { gap: 8px; } .m-vs-t b { font-size: 18px; } .m-vs-b { width: 38px; height: 38px; font-size: 11px; } }
+
+/* channel list: bigger logo, a progress bar that is easy to read */
+.m-ch { gap: 16px; padding: 12px 16px; }
+.m-ch-logo { width: 96px; height: 60px; border-radius: 10px; }
+.m-ch-info b { font-size: 16px; }
+.m-ch-now { font-size: 14px; }
+.m-ch-info .prog { height: 4px; max-width: 240px; border-radius: 2px; margin: 2px 0; }
+
+/* a title's page: real buttons instead of small icons with grey text */
+.m-d-actions { gap: 10px; padding-left: 0; flex-wrap: wrap; }
+html.m .m-d-actions .m-act { flex-direction: row; gap: 8px; padding: 0 14px; height: 40px; border-radius: 8px; background: rgba(255,255,255,.1); font-size: 14px; font-weight: 600; color: var(--white) !important; }
+.m-act svg { font-size: 20px; }
+
+/* titles without a picture: one quiet look instead of a different loud colour each */
+.m-poster .m-frame { background-blend-mode: multiply; }
+.m-poster .m-fb { background: linear-gradient(180deg, rgba(18,19,24,.55) 0%, rgba(18,19,24,.9) 100%); font-size: 13px; font-weight: 700; color: #e9e9ee; }
+
+/* iPad: the tab bar sits at the top right like a menu (it floated over the content), no second search button */
+@media (min-width: 700px) and (min-height: 600px) {
+  .m-tabbar { top: calc(8px + env(safe-area-inset-top)); bottom: auto; left: auto; right: 16px; margin: 0; height: 48px; border-radius: 24px; max-width: none; width: auto; padding: 0 4px; box-shadow: 0 4px 16px rgba(0,0,0,.35); }
+  html.m .m-tab { flex: none; flex-direction: row; gap: 8px; height: 40px; border-radius: 20px; padding: 0 16px; font-size: 14px; }
+  html.m .m-tab svg { font-size: 20px; }
+  .m-head .m-icon[aria-label="Sök"] { display: none; }
+  .m-chlist, .m-recent { padding-bottom: 40px; }
+}

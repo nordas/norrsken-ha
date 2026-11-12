@@ -646,7 +646,9 @@ function sportNow(prof, st, base = '') {
   const rec = r ? recInfo(r, base) : null;
   // not recorded yet because something else plays (the provider gives one connection): say so instead of nothing
   const waits = !rec && Date.now() - (matchWait.get(m.team.id + '|' + m.s) || 0) < 90e3;
-  return Object.assign({}, m, { rec, recWait: waits ? 'Spelas in när det som spelas nu stängs' : '' });
+  // both teams' colours and short names, for the match card (no crests: those are the clubs' own)
+  const side = (n) => { const t = n && sport.TEAMS.find(x => x.re.test(n)); return t ? { n: t.short, col: t.col } : n ? { n, col: null } : null; };
+  return Object.assign({}, m, { rec, recWait: waits ? 'Spelas in när det som spelas nu stängs' : '', sides: m.home && m.away ? [side(m.home), side(m.away)] : null });
 }
 const sportCache = new Map();
 

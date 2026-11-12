@@ -393,10 +393,19 @@
       var on = NS.toggleReminder(m.ch, { s: m.s, t: m.title });
       second.innerHTML = ''; second.appendChild(NS.icon(on ? 'check' : 'bell')); second.appendChild(document.createTextNode(on ? 'Påminnelse satt' : 'Påminn mig'));
     } }, [NS.icon(rem ? 'check' : 'bell'), rem ? 'Påminnelse satt' : 'Påminn mig']));
+    // each team: a round badge in its colours with its initials, and its name
+    var badge = function (t) {
+      var c1 = (t.col && t.col[0]) || '#444', c2 = (t.col && t.col[1]) || '#fff';
+      var ini = t.n.replace(/[^A-Za-zÅÄÖåäö0-9 ]/g, '').split(/\s+/).map(function (w) { return w.charAt(0); }).join('').slice(0, 3).toUpperCase() || t.n.slice(0, 2).toUpperCase();
+      if (/^[A-ZÅÄÖ]{2,4}\d*$/.test(t.n)) ini = t.n.slice(0, 4);
+      else if (ini.length < 2) ini = t.n.slice(0, 3).toUpperCase();
+      return h('div', { class: 'm-vs-t' }, [h('span', { class: 'm-vs-b', style: 'background:' + c1 + ';box-shadow:inset 0 0 0 3px ' + c2, text: ini }), h('b', { text: t.n })]);
+    };
     var stopB = rec && m.rec.recording ? h('button', { class: 'm-btn ghost', onclick: function (e) { e.stopPropagation(); NS.stopMatchRec(null, function () { stopB.remove(); }); } }, [NS.icon('x'), 'Avbryt inspelning']) : null;
-    var el = h('section', { class: 'm-sport' + (live ? ' live' : ''), style: 'background:radial-gradient(90% 140% at 100% 0%, ' + c + 'bb 0%, ' + c + '22 55%, transparent 80%), #121318' }, [
+    var oc = m.sides && m.sides.map(function (x) { return x.col && x.col[0]; }).filter(function (x) { return x && x.toLowerCase() !== c.toLowerCase(); })[0];
+    var el = h('section', { class: 'm-sport' + (live ? ' live' : ''), style: 'background:radial-gradient(90% 140% at 100% 0%, ' + c + 'bb 0%, ' + c + '22 55%, transparent 80%)' + (oc ? ', radial-gradient(80% 130% at 0% 100%, ' + oc + '88 0%, ' + oc + '18 55%, transparent 80%)' : '') + ', #121318' }, [
       h('div', { class: 'm-sport-top' }, [live ? h('span', { class: 'live-pill', text: 'Live nu' }) : h('span', { class: 'soon-pill', text: m.state === 'ended' ? 'Slut' : 'Börjar ' + NS.fmtClock(m.s) }), h('span', { text: m.label || m.team.name })]),
-      h('h2', { text: m.title }),
+      m.sides ? h('div', { class: 'm-vs' }, [badge(m.sides[0]), h('span', { class: 'm-vs-x', text: '–' }), badge(m.sides[1])]) : h('h2', { text: m.title }),
       h('div', { class: 'm-sport-meta' }, [logo, h('span', { text: (m.chName || m.ch.n) + '  ·  ' + NS.fmtClock(m.s) + '–' + NS.fmtClock(m.e) })]),
       m.recWait ? h('div', { class: 'm-sport-wait', text: m.recWait }) : null,
       live ? NS.progEl(NS.livePct(m)) : null,
