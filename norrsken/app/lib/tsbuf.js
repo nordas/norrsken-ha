@@ -74,10 +74,19 @@ async function wakeTC(tries = 4, gap = 5000) {
   }
 }
 
-/** Remove every folder on the Time Capsule that no running recording owns (left behind, or older than 24 h). */
+/*
+ * Match recordings outlive a restart (an update in the middle of a match): their playlist, first piece (init.mp4)
+ * and meta.json are copied to the Time Capsule with the pieces, and the folders of the match recordings the server
+ * still lists (/data/matchrecs.json) are never removed by tidying; recoverTC() brings them back after a restart.
+ */
+const protectedIds = new Set();
+function protect(ids) { for (const id of ids || []) if (/^[a-z0-9]{4,12}$/.test(id)) protectedIds.add(id); }
+let recovering = false;
+
+/** Remove every folder on the Time Capsule that no recording owns (left behind, or older than 24 h). */
 function sweepRemote() {
-  if (!mirrorOn()) return Promise.resolve();
-  return smb.check(true).then((r) => { if (r.ok) return smb.cleanSubdirs(smb.dir + '/pause', (n) => sessions.has(n)); }).catch(() => {});
+  if (!mirrorOn() || recovering) return Promise.resolve();
+  return smb.check(true).then((r) => { if (r.ok) return smb.cleanSubdirs(smb.dir + '/pause', (n) => sessions.has(n) || protectedIds.has(n)); }).catch(() => {});
 }
 
 /** Whatever an earlier run left behind (called when the server starts, not when the module is loaded). */
@@ -95,9 +104,82 @@ function cleanStart() {
       fs.rmSync(path.join(root, id), { recursive: true, force: true });
     }
   } catch (_) { /* nothing there */ }
-  // decided per folder when it is about to go (the Time Capsule is slow to answer: a recording may have started since)
-  if (mirrorOn()) smb.check(true).then((r) => { if (r.ok) return smb.cleanSubdirs(smb.dir + '/pause', (n) => keep.has(n) || sessions.has(n)); }).catch(() => {});
+  // nothing on the Time Capsule is removed at start: a match recording there may be brought back (recoverTC); what is
+  // really left behind goes with the hourly tidying, which keeps the recordings the server still lists
   return [...keep];
+}
+
+/** A finished match recording from before a restart, played from its folder (and the Time Capsule). */
+function restoredSession(id, dir, meta, have) {
+  const over = !!meta.maxMin && Date.now() > meta.started + meta.maxMin * 60e3;
+  const s = { id, url: '', dir, ch: meta.ch || '', proc: null, started: meta.started || Date.now(), last: Date.now(), dead: false, done: true, err: '', maxMin: meta.maxMin || 0, full: over, match: true, restored: true };
+  if (mirrorOn()) {
+    let idxM = 0;
+    try { idxM = fs.statSync(path.join(dir, 'index.m3u8')).mtimeMs; } catch (_) { /* none */ }
+    s.mirror = { dir: smb.dir + '/pause/' + id, ready: true, up: new Set(have || []), upx: new Set(['meta.json', 'init.mp4']), idxM, busy: false, err: '', fetching: new Map(), fetchedAt: new Map(), bytes: 0 };
+    if (!have) smb.listFiles(s.mirror.dir).then((names) => { for (const n of names) if (/^p\d{5}\.m4s$/.test(n)) s.mirror.up.add(n); }).catch(() => {});
+    s.mirrorT = setInterval(() => mirrorTick(s), 5000);
+    if (s.mirrorT.unref) s.mirrorT.unref();
+  }
+  sessions.set(id, s);
+  return s;
+}
+
+/** Keep only the pieces that are there; a gap (a piece that never reached the Time Capsule) is marked as one. */
+function trimIndex(dir, have) {
+  const f = path.join(dir, 'index.m3u8');
+  const lines = fs.readFileSync(f, 'utf8').split('\n');
+  const out = [];
+  let pend = null; let gap = false; let any = false;
+  for (const l of lines) {
+    if (l.startsWith('#EXTINF')) { pend = l; continue; }
+    if (pend && l && l[0] !== '#') {
+      if (have.has(path.basename(l.trim()))) { if (gap && any) out.push('#EXT-X-DISCONTINUITY'); out.push(pend, l); any = true; gap = false; } else gap = true;
+      pend = null; continue;
+    }
+    if (l === '#EXT-X-ENDLIST') continue;
+    out.push(l);
+  }
+  fs.writeFileSync(f, out.join('\n'));
+  return any;
+}
+
+/**
+ * After a restart: bring back the match recordings the server still lists, from the Time Capsule (the memory buffer
+ * is empty after a restart). Their playlist, init.mp4 and meta.json are fetched; the pieces stay on the disk and are
+ * fetched when played, as always.
+ */
+async function recoverTC(ids) {
+  const out = [];
+  ids = [...new Set(ids || [])].filter(id => /^[a-z0-9]{4,12}$/.test(id) && !sessions.has(id));
+  if (!mirrorOn() || !ids.length) return out;
+  protect(ids);
+  recovering = true;
+  try {
+    await wakeTC(6, 10000);
+    if (!smb.info().ok) { console.log('[match] Time Capsule svarar inte – inspelningarna kan inte hämtas tillbaka nu'); return out; }
+    for (const id of ids) {
+      const rdir = smb.dir + '/pause/' + id;
+      const names = await smb.listFiles(rdir);
+      const have = new Set(names.filter(n => /^p\d{5}\.m4s$/.test(n)));
+      if (!names.includes('index.m3u8') || !names.includes('init.mp4') || !have.size) {
+        if (names.length) console.log('[match] inspelningen ' + id + ' saknar spellista på Time Capsule (gjord före 1.14.9) – kan inte spelas igen');
+        continue;
+      }
+      const dir = path.join(rootDir(), id);
+      fs.mkdirSync(dir, { recursive: true });
+      const want = ['index.m3u8', 'init.mp4'].concat(names.includes('meta.json') ? ['meta.json'] : []);
+      const g = await smb.getMany(dir, rdir, want);
+      if (!g.ok) { console.log('[match] kunde inte hämta inspelningen ' + id + ':', g.err); continue; }
+      let meta = {};
+      try { meta = JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8')); } catch (_) { /* older: no meta */ }
+      if (meta.started && Date.now() - meta.started > KEEP_MATCH_DIR_MS) continue;
+      if (!trimIndex(dir, have)) continue;
+      out.push(restoredSession(id, dir, meta, have));
+    }
+    if (out.length) console.log('[match]', out.length, 'matchinspelning(ar) hämtade tillbaka från Time Capsule efter omstarten');
+  } catch (e) { console.error('[match] återställning:', e.message); } finally { recovering = false; }
+  return out;
 }
 
 /** Bring back the match recordings cleanStart kept: finished (nothing records into them now), playable, 24 h. */
@@ -107,18 +189,9 @@ function restore(ids) {
     const dir = path.join(rootDir(), id);
     let meta = null;
     try { meta = JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8')); } catch (_) { continue; }
-    // over by now (its planned length has passed): finished; otherwise it goes on in a new part after the restart
-    const over = !!meta.maxMin && Date.now() > meta.started + meta.maxMin * 60e3;
-    const s = { id, url: '', dir, ch: meta.ch || '', proc: null, started: meta.started, last: Date.now(), dead: false, done: true, err: '', maxMin: meta.maxMin || 0, full: over, match: true, restored: true };
+    // over by now (its planned length has passed): finished; otherwise it goes on in a new part after the restart.
     // ffmpeg stopped in the middle: the playlist has no end mark yet, the pieces it lists are whole
-    if (mirrorOn()) {
-      s.mirror = { dir: smb.dir + '/pause/' + id, ready: true, up: new Set(), busy: false, err: '', fetching: new Map(), fetchedAt: new Map(), bytes: 0 };
-      smb.listFiles(s.mirror.dir).then((names) => { for (const n of names) if (/^p\d{5}\.m4s$/.test(n)) s.mirror.up.add(n); }).catch(() => {});
-      s.mirrorT = setInterval(() => mirrorTick(s), 5000);
-      if (s.mirrorT.unref) s.mirrorT.unref();
-    }
-    sessions.set(id, s);
-    out.push(s);
+    out.push(restoredSession(id, dir, meta, null));
   }
   if (out.length) console.log('[match]', out.length, 'matchinspelning(ar) finns kvar efter omstarten');
   return out;
@@ -289,10 +362,23 @@ async function mirrorTick(s) {
     // ffmpeg writes a piece under a temporary name and renames it when it is whole, so every p*.m4s is complete
     const segs = fs.readdirSync(s.dir).filter(n => /^p\d{5}\.m4s$/.test(n)).sort();
     const todo = segs.filter(n => !m.up.has(n)).slice(0, 6);
-    if (todo.length) {
-      const r = await smb.put(s.dir, todo, m.dir);
+    // a match recording also keeps its playlist, first piece and meta on the Time Capsule: after a restart it is
+    // brought back from there (the buffer in memory is empty then). In the same go as the pieces: one login.
+    const extra = [];
+    if (s.match) {
+      m.upx = m.upx || new Set();
+      for (const n of ['meta.json', 'init.mp4']) if (!m.upx.has(n) && fs.existsSync(path.join(s.dir, n))) extra.push(n);
+      let idxM = 0;
+      try { idxM = fs.statSync(path.join(s.dir, 'index.m3u8')).mtimeMs; } catch (_) { /* not yet */ }
+      if (idxM && idxM !== m.idxM && (todo.length || s.done || Date.now() - (m.idxAt || 0) > 20000)) extra.push('index.m3u8');
+    }
+    if (todo.length || extra.length) {
+      let idxNow = 0;
+      try { idxNow = fs.statSync(path.join(s.dir, 'index.m3u8')).mtimeMs; } catch (_) { /* none */ }
+      const r = await smb.put(s.dir, todo.concat(extra), m.dir);
       if (!r.ok) throw new Error(r.err);
       for (const n of todo) { m.up.add(n); try { m.bytes += fs.statSync(path.join(s.dir, n)).size; } catch (_) { /* gone */ } }
+      for (const n of extra) { if (n === 'index.m3u8') { m.idxM = idxNow; m.idxAt = Date.now(); } else m.upx.add(n); }
     }
     evict(s);
     if (m.err) console.log('[paus] Time Capsule är tillbaka');
@@ -395,6 +481,50 @@ async function playlist(s, prefix, { wait = 30000, edge = false } = {}) {
   }
 }
 
+/**
+ * Live for a TV over AirPlay: an ordinary sliding live playlist of the newest pieces (as TV4 Play and every live
+ * service send), not the growing recording with a "start 12 s before the end" line. A Philips TV (Titan OS) spun on
+ * that and gave up; Apple's rules for AirPlay TVs: at least six pieces, MEDIA-SEQUENCE and DISCONTINUITY-SEQUENCE
+ * counted, the first piece of each part with its own init (EXT-X-MAP), the clock time of the pieces. With a long
+ * window the TV's own remote can pause and rewind while it plays over AirPlay.
+ * list: the parts of the recording in order (one for a pause, several for a match the provider dropped).
+ */
+// window: how many pieces back the TV's own remote can rewind (an ordinary live playlist with a long window, as live
+// services with "rewind" send it); 225 pieces ≈ 15 minutes
+const AIR_WINDOW = +process.env.NSK_AIR_WINDOW || 225;
+function livePlaylist(list, prefix, { window = AIR_WINDOW } = {}) {
+  const parts = (list || []).filter(Boolean);
+  const all = [];
+  parts.forEach((s, pi) => {
+    let text = '';
+    try { text = fs.readFileSync(path.join(s.dir, 'index.m3u8'), 'utf8'); } catch (_) { return; }
+    let dur = 0; let t = s.started || Date.now(); let first = true;
+    for (const l of text.split('\n')) {
+      if (l.startsWith('#EXTINF:')) { dur = parseFloat(l.slice(8)) || 0; continue; }
+      if (!l || l[0] === '#' || !dur) continue;
+      all.push({ s, uri: prefix + '/' + s.id + '/' + path.basename(l.trim()), dur, at: t, disc: first && pi > 0 && all.length > 0 });
+      t += dur * 1000; dur = 0; first = false;
+    }
+  });
+  if (!all.length) return null;
+  const from = Math.max(0, all.length - window);
+  const win = all.slice(from);
+  const target = Math.max(4, Math.ceil(Math.max(...win.map(e => e.dur))));
+  const discBefore = all.slice(0, from + 1).filter(e => e.disc).length - (win[0].disc ? 1 : 0);
+  const out = ['#EXTM3U', '#EXT-X-VERSION:7', '#EXT-X-TARGETDURATION:' + target, '#EXT-X-MEDIA-SEQUENCE:' + from, '#EXT-X-DISCONTINUITY-SEQUENCE:' + discBefore, '#EXT-X-INDEPENDENT-SEGMENTS'];
+  let map = '';
+  win.forEach((e, i) => {
+    if (e.disc && i > 0) out.push('#EXT-X-DISCONTINUITY');
+    const m = prefix + '/' + e.s.id + '/init.mp4';
+    if (m !== map) { out.push('#EXT-X-MAP:URI="' + m + '"'); map = m; }
+    if (i === 0 || e.disc) out.push('#EXT-X-PROGRAM-DATE-TIME:' + new Date(e.at).toISOString());
+    out.push('#EXTINF:' + e.dur.toFixed(6) + ',', e.uri);
+  });
+  const last = parts[parts.length - 1];
+  if (last.done && (last.full || pastEnd(last) || !last.match)) out.push('#EXT-X-ENDLIST');
+  return out.join('\n') + '\n';
+}
+
 /** The planned end of the recording has passed (a match: its end plus the tail): nothing more will come. */
 function pastEnd(s) { return !!s.maxMin && Date.now() > s.started + s.maxMin * 60e3; }
 
@@ -476,4 +606,16 @@ function pauseActive() { let n = 0; for (const s of sessions.values()) if (!s.ma
 /** Every recording that runs (for the AirPlay test page). */
 function list() { return [...sessions.values()].filter(s => !s.dead).map(s => ({ id: s.id, ch: s.ch, match: s.match })); }
 
-module.exports = { wakeTC, sweepRemote, recording, preflight, list, restore, playlistMulti, _hideLinks: hideLinks, start, get, stop, stopAll, stopPauses, matchSession, playlist, file, fileReady, length, active, pauseActive, cleanStart, rootDir };
+/** For tests: what a restart does to a recording – the process is gone and so is the memory buffer, nothing else. */
+function _forget(id) {
+  const s = sessions.get(id);
+  if (!s) return;
+  s.dead = true;
+  sessions.delete(id);
+  try { if (s.proc) s.proc.kill('SIGKILL'); } catch (_) { /* gone */ }
+  if (s.mirrorT) clearInterval(s.mirrorT);
+  if (s.diskT) clearInterval(s.diskT);
+  fs.rmSync(s.dir, { recursive: true, force: true });
+}
+
+module.exports = { livePlaylist, _forget, wakeTC, sweepRemote, recoverTC, protect, recording, preflight, list, restore, playlistMulti, _hideLinks: hideLinks, start, get, stop, stopAll, stopPauses, matchSession, playlist, file, fileReady, length, active, pauseActive, cleanStart, rootDir };

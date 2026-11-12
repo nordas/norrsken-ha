@@ -384,6 +384,29 @@
     okLong = false;
   }, true);
 
+  /*
+   * The mouse wheel / trackpad on a computer (the iMac): moves through the menus as the arrow keys do – up and down
+   * between rows, sideways along a row. Not in the player (it has its own) and not on phones (they scroll natively).
+   */
+  var wheelAt = 0, wheelY = 0, wheelX = 0;
+  document.addEventListener('wheel', function (e) {
+    if (NS.touch) return;
+    var top = NS.router.top();
+    if (!top || top.video) return;
+    var t = e.target;
+    if (t && t.closest && t.closest('textarea, select, .scrollable')) return; // a list that scrolls by itself
+    e.preventDefault();
+    wheelY += e.deltaY; wheelX += e.deltaX;
+    var now = Date.now();
+    if (now - wheelAt < 130) return; // one step per notch, not a flood from a trackpad
+    var a = null;
+    if (Math.abs(wheelX) > 30 && Math.abs(wheelX) > Math.abs(wheelY)) a = wheelX > 0 ? 'right' : 'left';
+    else if (Math.abs(wheelY) > 30) a = wheelY > 0 ? 'down' : 'up';
+    if (!a) return;
+    wheelAt = now; wheelY = 0; wheelX = 0;
+    dispatch(a, e);
+  }, { passive: false });
+
   /* ---------------------------------------------------------------- router */
   NS.router = {
     stack: [],

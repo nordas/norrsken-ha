@@ -56,6 +56,22 @@
     }).catch(go);
   };
 
+  /**
+   * "Avbryt inspelning": stop the running match recording (asks first; what is recorded is removed). bb: the start
+   * page's billboard, shown again without the recording; done: called when it is stopped.
+   */
+  NS.stopMatchRec = function (bb, done) {
+    NS.confirm({ title: 'Avbryta inspelningen?', text: 'Matchen slutar spelas in och det som redan spelats in tas bort. Den spelas inte in igen.',
+      buttons: [{ label: 'Fortsätt spela in', value: false }, { label: 'Avbryt inspelning', value: true }], focus: 0, cancel: false }).then(function (yes) {
+      if (!yes) return;
+      NS.api.post('api/matchrec/stop' + NS.pq(), {}).then(function () {
+        NS.toast('Inspelningen är avbruten', 'info');
+        if (done) done();
+        if (bb) NS.api.get('api/sport' + NS.pq()).then(function (r) { if (r && r.match) { bb.showSport(r.match); bb.sel = 0; bb.paintBtns(); } }).catch(function () {});
+      }, function (e) { NS.toast((e && e.message) || 'Inspelningen kunde inte avbrytas', 'info'); });
+    });
+  };
+
   /** The match recording of a favourite's match: from its start, or at its live edge. */
   NS.watchRec = function (m, edge) {
     NS.router.push(new NS.Player({ item: m.ch, list: m.chans || [m.ch], cat: m.ch.cat, rec: { id: m.rec.id, url: m.rec.url, edge: !!edge, recording: m.rec.recording, sec: m.rec.sec } }));

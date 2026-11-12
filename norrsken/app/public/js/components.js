@@ -209,6 +209,7 @@
     this.hint.innerHTML = '';
     this.btnEls = [h('div', { class: 'btn' }, [NS.icon('play'), it.t === 'series' ? 'Spela upp serie' : 'Spela']), h('div', { class: 'btn' }, [NS.icon('info'), 'Mer info'])];
     this.btnEls.forEach(function (b) { this.hint.appendChild(b); }, this);
+    this.clickBtns();
     t.appendChild(this.hint);
     this.paintBtns();
     this.setArt(it.bd || it.img, !it.bd);
@@ -252,7 +253,10 @@
     var second = live ? (rec ? [NS.icon('live'), 'Titta live'] : [NS.icon('episodes'), 'Tv-guide'])
       : m.state === 'ended' ? (rec ? [NS.icon('episodes'), 'Tv-guide'] : null) : [NS.icon(rem ? 'check' : 'bell'), rem ? 'Påminnelse satt' : 'Påminn mig'];
     if (second) this.btnEls.push(h('div', { class: 'btn' }, second));
+    // a running match recording can be stopped from here (third button)
+    if (rec && m.rec.recording) this.btnEls.push(h('div', { class: 'btn', 'data-act': 'stoprec' }, [NS.icon('x'), 'Avbryt inspelning']));
     this.btnEls.forEach(function (b) { this.hint.appendChild(b); }, this);
+    this.clickBtns();
     t.appendChild(this.hint);
     this.paintBtns();
   };
@@ -272,6 +276,13 @@
       b.classList.remove('on');
     };
     im.src = NS.imgSrc(u);
+  };
+  /** With a mouse (the iMac): every button can be clicked; the page decides what it does (onBtn). */
+  Billboard.prototype.clickBtns = function () {
+    var self = this;
+    (this.btnEls || []).forEach(function (b, i) {
+      b.addEventListener('click', function (e) { e.stopPropagation(); self.sel = i; self.paintBtns(); if (self.onBtn) self.onBtn(i, b); });
+    });
   };
   Billboard.prototype.focus = function (on) { this.el.classList.toggle('focus', on); if (!on) this.sel = 0; this.paintBtns(); };
   Billboard.prototype.paintBtns = function () {
@@ -412,6 +423,8 @@
   function RowsView(opts) {
     this.o = opts;
     this.bb = opts.billboard || null;
+    var rv = this;
+    if (this.bb) this.bb.onBtn = function (i) { if (rv.r !== -1) { rv.r = -1; rv.layout(); rv.emitFocus(); } rv.bb.focus(true); rv.bb.sel = i; rv.bb.paintBtns(); rv.onKey('ok'); };
     this.el = h('div', { class: opts.className || 'page' });
     this.inner = h('div', { class: 'page-inner' });
     this.el.appendChild(this.inner);
@@ -613,8 +626,9 @@
         if (R.def.kind === 'pill') { c.style.width = R.pos[i].w + 'rem'; }
         (function (idx, ri) {
           c.addEventListener('click', function () {
+            // one click: there and open (with a mouse a first click that only moved the focus felt like nothing)
             var at = self.rows.indexOf(ri);
-            if (self.r !== at || ri.col !== idx) { self.r = at; ri.col = idx; self.layout(); self.emitFocus(); return; }
+            if (self.r !== at || ri.col !== idx) { self.r = at; ri.col = idx; self.layout(); self.emitFocus(); }
             if (self.o.onSelect) self.o.onSelect(ri.items[idx], ri.def, self.r);
           });
         })(i, R);
@@ -702,8 +716,10 @@
     if (this.r < 0) {
       if (a === 'down' && this.rows.length) { this.r = 0; this.layout(); this.emitFocus(); return true; }
       if (a === 'up') { if (this.o.onUp) this.o.onUp(); return true; }
-      if (a === 'left' || a === 'right') { this.bb.sel = a === 'right' ? 1 : 0; this.bb.paintBtns(); return true; }
+      if (a === 'left' || a === 'right') { var nb = (this.bb.btnEls || []).length || 2; this.bb.sel = Math.max(0, Math.min(nb - 1, this.bb.sel + (a === 'right' ? 1 : -1))); this.bb.paintBtns(); return true; }
       if (a === 'ok') {
+        var be = (this.bb.btnEls || [])[this.bb.sel];
+        if (be && be.getAttribute('data-act') === 'stoprec') { NS.stopMatchRec(this.bb); return true; }
         if (this.bb.sel === 0 && this.o.onPlay) this.o.onPlay(this.bb.item, { id: 'billboard' });
         else if (this.o.onSelect) this.o.onSelect(this.bb.item, { id: 'billboard' }, -1);
         return true;

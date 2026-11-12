@@ -393,13 +393,14 @@
       var on = NS.toggleReminder(m.ch, { s: m.s, t: m.title });
       second.innerHTML = ''; second.appendChild(NS.icon(on ? 'check' : 'bell')); second.appendChild(document.createTextNode(on ? 'Påminnelse satt' : 'Påminn mig'));
     } }, [NS.icon(rem ? 'check' : 'bell'), rem ? 'Påminnelse satt' : 'Påminn mig']));
+    var stopB = rec && m.rec.recording ? h('button', { class: 'm-btn ghost', onclick: function (e) { e.stopPropagation(); NS.stopMatchRec(null, function () { stopB.remove(); }); } }, [NS.icon('x'), 'Avbryt inspelning']) : null;
     var el = h('section', { class: 'm-sport' + (live ? ' live' : ''), style: 'background:radial-gradient(90% 140% at 100% 0%, ' + c + 'bb 0%, ' + c + '22 55%, transparent 80%), #121318' }, [
       h('div', { class: 'm-sport-top' }, [live ? h('span', { class: 'live-pill', text: 'Live nu' }) : h('span', { class: 'soon-pill', text: m.state === 'ended' ? 'Slut' : 'Börjar ' + NS.fmtClock(m.s) }), h('span', { text: m.label || m.team.name })]),
       h('h2', { text: m.title }),
       h('div', { class: 'm-sport-meta' }, [logo, h('span', { text: (m.chName || m.ch.n) + '  ·  ' + NS.fmtClock(m.s) + '–' + NS.fmtClock(m.e) })]),
       m.recWait ? h('div', { class: 'm-sport-wait', text: m.recWait }) : null,
       live ? NS.progEl(NS.livePct(m)) : null,
-      h('div', { class: 'm-sport-btns' }, [h('button', { class: 'm-btn', onclick: function (e) { e.stopPropagation(); go(); } }, [NS.icon('play'), live ? (rec ? 'Från start' : 'Titta nu') : m.state === 'ended' ? (rec ? 'Från start' : 'Tv-guide') : 'Från start']), second])
+      h('div', { class: 'm-sport-btns' }, [h('button', { class: 'm-btn', onclick: function (e) { e.stopPropagation(); go(); } }, [NS.icon('play'), live ? (rec ? 'Från start' : 'Titta nu') : m.state === 'ended' ? (rec ? 'Från start' : 'Tv-guide') : 'Från start']), second, stopB])
     ]);
     el.addEventListener('click', go);
     return el;

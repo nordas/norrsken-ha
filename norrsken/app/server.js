@@ -1175,6 +1175,19 @@ const MATCH_FILE = path.join(DATA_DIR, 'matchrecs.json');
 function saveMatchRecs() {
   try { fs.writeFileSync(MATCH_FILE, JSON.stringify({ recs: [...matchRecs.values()], stopped: [...matchStopped] })); } catch (e) { console.error('[match] kunde inte spara listan:', e.message); }
 }
+/** The recordings (all parts) of the match recordings the server lists, younger than a day: never tidied away. */
+function matchRecIdsOnFile() {
+  try {
+    const j = JSON.parse(fs.readFileSync(MATCH_FILE, 'utf8'));
+    const list = Array.isArray(j) ? j : (j.recs || []);
+    const ids = [];
+    for (const r of list) if (r && Date.now() - r.s < KEEP_MATCH_MS) ids.push(...(r.parts || []), r.sessId);
+    return ids.filter(Boolean);
+  } catch (_) { return []; }
+}
+// match recordings start only once the earlier ones are back (or it is clear they cannot be): otherwise a restart in
+// the middle of a match would start a new recording and forget the one with the start of the match
+let matchRecReady = true; // start() holds it back until the earlier recordings are back
 function loadMatchRecs(keptIds) {
   let list = [];
   try {
@@ -1256,9 +1269,18 @@ route('GET', '/mrec/:mid/index.m3u8', async (req, res, q, p) => {
   try { send(res, 200, await tsbuf.playlistMulti(recParts(r), ingressBase(req) + '/pause', { edge: q.get('edge') === '1' }), 'application/vnd.apple.mpegurl', { 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' }); } catch (e) { bad(res, e.message, 502); }
 });
 
+route('GET', '/mrec/:mid/live.m3u8', (req, res, q, p) => {
+  const r = [...matchRecs.values()].find(x => x.mid === p.mid);
+  if (!r) return bad(res, 'Inspelningen finns inte längre', 404);
+  const w = Math.max(6, Math.min(100000, parseInt(q.get('w'), 10) || 0)) || undefined;
+  const t = tsbuf.livePlaylist(recParts(r), ingressBase(req) + '/pause', w ? { window: w } : {});
+  if (!t) return bad(res, 'Inspelningen kom inte igång', 503);
+  send(res, 200, t, 'application/vnd.apple.mpegurl', { 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' });
+});
+
 /** Records every match of the favourite team (Luleå Hockey) from just before it starts until the end, if it's on a channel we have. */
 function matchRecTick() {
-  if (!catalog.ready()) return;
+  if (!catalog.ready() || !matchRecReady) return;
   const now = Date.now();
   for (const [k, t] of matchStopped) if (now - t > KEEP_MATCH_MS) matchStopped.delete(k);
   for (const [k, r] of matchRecs) {
@@ -1454,6 +1476,15 @@ route('GET', '/pause/:id/index.m3u8', async (req, res, q, p) => {
   if (!s) return bad(res, 'Inspelningen finns inte längre', 404);
   try { send(res, 200, await tsbuf.playlist(s, ingressBase(req) + '/pause', { edge: q.get('edge') === '1' }), 'application/vnd.apple.mpegurl', { 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' }); } catch (e) { bad(res, e.message, 502); }
 });
+// AirPlay of live: an ordinary sliding live playlist of the newest pieces (see tsbuf.livePlaylist)
+route('GET', '/pause/:id/live.m3u8', (req, res, q, p) => {
+  const s = tsbuf.get(p.id);
+  if (!s) return bad(res, 'Inspelningen finns inte längre', 404);
+  const w = Math.max(6, Math.min(100000, parseInt(q.get('w'), 10) || 0)) || undefined;
+  const t = tsbuf.livePlaylist([s], ingressBase(req) + '/pause', w ? { window: w } : {});
+  if (!t) return bad(res, 'Inspelningen kom inte igång', 503);
+  send(res, 200, t, 'application/vnd.apple.mpegurl', { 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' });
+});
 route('GET', '/pause/:id/:name', async (req, res, q, p) => {
   const f = await tsbuf.fileReady(p.id, p.name);
   if (!f) return bad(res, 'slut', 404);
@@ -1573,7 +1604,17 @@ route('GET', '/airtest', async (req, res, q) => {
   const lan = process.env.PUBLIC_URL ? process.env.PUBLIC_URL.replace(/\/$/, '') : (lanUrls()[0] || '');
   // the match being recorded (or the last one): the real thing, next to the test clips
   // what Norrsken records right now (a match, a paused channel, live on the iPhone): the real channel, as the TV gets it
-  const extra = tsbuf.list().slice(0, 3).map(x => ({ name: (x.match ? 'Matchinspelning: ' : 'Kanal just nu: ') + x.ch, url: '/pause/' + x.id + '/index.m3u8' }));
+  // each in three forms, so the TV shows which one it takes: the recording from its start, the recording "12 s before
+  // its end" (what live sent the TV up to 1.14.8), and the sliding live playlist live sends it now
+  const extra = [];
+  for (const x of tsbuf.list().slice(0, 1)) {
+    const who = (x.match ? 'Matchinspelning: ' : 'Kanal just nu: ') + x.ch;
+    extra.push({ name: who + ' – från början', url: '/pause/' + x.id + '/index.m3u8' });
+    extra.push({ name: who + ' – nära slutet (som live gjorde förut)', url: '/pause/' + x.id + '/index.m3u8?edge=1' });
+    extra.push({ name: who + ' – live, 40 s bakåt', url: '/pause/' + x.id + '/live.m3u8?w=10' });
+    extra.push({ name: who + ' – live, 15 min bakåt (som live gör nu)', url: '/pause/' + x.id + '/live.m3u8' });
+    extra.push({ name: who + ' – live, allt bakåt', url: '/pause/' + x.id + '/live.m3u8?w=100000' });
+  }
   send(res, 200, airtest.page(lan, extra), 'text/html; charset=utf-8', { 'Cache-Control': 'no-store' });
 });
 route('GET', '/airtest/:v/:name', (req, res, q, p) => {
@@ -1949,7 +1990,15 @@ function start() {
   ff.cleanStart();
   const keptRecs = tsbuf.cleanStart();
   tsbuf.restore(keptRecs);
-  loadMatchRecs(keptRecs);
+  // after a restart the memory buffer is empty: the match recordings come back from the Time Capsule
+  const onFile = matchRecIdsOnFile();
+  tsbuf.protect(onFile);
+  matchRecReady = false;
+  let loaded = false;
+  const finish = (ids) => { if (loaded) return; loaded = true; loadMatchRecs([...new Set([...keptRecs, ...ids])]); matchRecReady = true; };
+  tsbuf.recoverTC(onFile.filter(id => !keptRecs.includes(id))).then(ss => finish(ss.map(x => x.id)), () => finish([]));
+  // never wait forever: the Time Capsule may be off (then the old ones cannot be played, a running match still records)
+  setTimeout(() => finish([]), 120e3).unref();
   server.listen(PORT, HOST, () => {
     const urls = process.env.PUBLIC_URL ? [process.env.PUBLIC_URL.replace(/\/$/, '')] : lanUrls();
     console.log(`\n  ${store.config.options.appName || 'Norrsken'} ${pkg.version} kör på port ${PORT}`);

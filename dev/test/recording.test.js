@@ -138,3 +138,37 @@ test('a match whose last part the provider dropped is marked finished once its p
   assert.match(r.after, /#EXT-X-ENDLIST/, 'after it: finished');
   assert.match(r.multi, /#EXT-X-ENDLIST/);
 });
+
+test('AirPlay of live gets an ordinary sliding live playlist: newest pieces, counted, every part with its own init', () => {
+  const tsbuf = require('../lib/tsbuf');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nsk-live-'));
+  const part = (id, n, started, extra = {}) => {
+    const dir = path.join(root, id);
+    fs.mkdirSync(dir);
+    const lines = ['#EXTM3U', '#EXT-X-VERSION:7', '#EXT-X-TARGETDURATION:8', '#EXT-X-MEDIA-SEQUENCE:0', '#EXT-X-PLAYLIST-TYPE:EVENT', '#EXT-X-MAP:URI="init.mp4"'];
+    for (let i = 0; i < n; i++) lines.push('#EXTINF:' + (i % 3 ? '3.840000' : '7.680000') + ',', 'p' + String(i).padStart(5, '0') + '.m4s');
+    fs.writeFileSync(path.join(dir, 'index.m3u8'), lines.join('\n') + '\n');
+    return Object.assign({ id, dir, started, done: false, match: true, maxMin: 170 }, extra);
+  };
+  const a = part('aaaa1111', 30, Date.now() - 3600e3, { done: true });
+  const b = part('bbbb2222', 4, Date.now() - 60e3);
+  const pl = tsbuf.livePlaylist([a, b], '/pause', { window: 10 });
+  const lines = pl.split('\n');
+  const segs = lines.filter(l => l.startsWith('/pause/'));
+  assert.equal(segs.length, 10, 'the newest ten pieces');
+  assert.ok(!/PLAYLIST-TYPE|EXT-X-START|ENDLIST/.test(pl), 'an ordinary live playlist: no type, no start line, no end while it records');
+  assert.match(pl, /#EXT-X-MEDIA-SEQUENCE:24\n/, 'counted from the whole recording (34 pieces, the last 10)');
+  assert.match(pl, /#EXT-X-DISCONTINUITY-SEQUENCE:0\n/);
+  assert.equal(lines.filter(l => l === '#EXT-X-DISCONTINUITY').length, 1, 'the provider dropped it once: one break');
+  assert.ok(pl.indexOf('/pause/aaaa1111/init.mp4') < pl.indexOf('/pause/aaaa1111/p00024.m4s'), 'the first part with its own init');
+  assert.ok(pl.indexOf('/pause/bbbb2222/init.mp4') > pl.indexOf('#EXT-X-DISCONTINUITY'), 'after the break the second part with its own init');
+  assert.match(pl, /#EXT-X-PROGRAM-DATE-TIME:\d{4}-/);
+  assert.match(pl, /#EXT-X-TARGETDURATION:8\n/);
+  // further on, the window has left the first part: the break is counted, not shown
+  const b2 = part('cccc3333', 12, Date.now() - 60e3);
+  const pl2 = tsbuf.livePlaylist([a, b2], '/pause', { window: 10 });
+  assert.match(pl2, /#EXT-X-DISCONTINUITY-SEQUENCE:1\n/);
+  assert.ok(!/aaaa1111/.test(pl2) && !/^#EXT-X-DISCONTINUITY$/m.test(pl2));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+

@@ -693,8 +693,19 @@
     // the recording from its first piece and being told to seek
     var nearEnd = false;
     try { nearEnd = this.live && v.seekable.length > 0 && v.seekable.end(v.seekable.length - 1) - v.currentTime < 45; } catch (e) { /* ignore */ }
-    if (nearEnd && src && /\/(mrec|pause)\//.test(src) && !/[?&]edge=1/.test(src)) src += (src.indexOf('?') < 0 ? '?' : '&') + 'edge=1';
+    // live: the TV gets an ordinary sliding live playlist (live.m3u8), as live services send. The growing recording
+    // with "start 12 s before the end" made a Philips TV spin and give up.
+    if (nearEnd && src && /\/(mrec|pause)\/[^/]+\/index\.m3u8/.test(src)) src = src.replace(/index\.m3u8(\?[^#]*)?/, 'live.m3u8');
     if (!src) { NS.toast('AirPlay: öppna Norrsken på tv-adressen (http://…:8787), inte från Home Assistant-menyn', 'info'); return false; }
+    // Safari already plays the recording itself (live on iPhone/iPad): give it the live playlist before the TV is picked
+    if (this.live && !this.hls && !this.airNative && /\/live\.m3u8/.test(src) && v.currentSrc !== src) {
+      this.airNative = true;
+      v.src = src;
+      this.playPromise();
+      clearTimeout(this.airT);
+      this.airT = setTimeout(function () { if (self.airNative && !v.webkitCurrentPlaybackTargetIsWireless) self.airBack(); }, 30000);
+      return true;
+    }
     if ((this.hls || (this.airBase && !this.live)) && !this.airNative) {
       var rel = this.airBase ? 0 : v.currentTime || 0; // the film's own address already starts at the spot
       if (this.airBase && this.tok) { try { var su = 'rx/stop?t=' + encodeURIComponent(this.tok); if (navigator.sendBeacon) navigator.sendBeacon(su); } catch (e) { /* ignore */ } }
@@ -807,6 +818,7 @@
   Player.prototype.airBack = function () {
     if (!this.airNative || this.suspended) return;
     this.airNative = false;
+    if (this.live && this.tshift) this.tshift.edge = true; // the TV had the sliding live playlist: back to live here
     if (this.airPause) { NS.api.post('api/pause/' + this.airPause + '/stop', {}).catch(function () {}); this.airPause = ''; }
     this.airWatching = false;
     clearInterval(this.airWT);

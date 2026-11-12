@@ -183,6 +183,37 @@ test('nothing on the Time Capsule outlives its recording: left-behind folders go
   } finally { srv.close(); if (s) tsbuf.stop(s, 'test'); }
 });
 
+test('a match recording survives a restart in the middle of the match: its start is still there and plays, nothing is tidied away', async () => {
+  await smb.check(true);
+  const srv = serveSlow(path.join(tmp, 'live-aac.ts'));
+  let s;
+  try {
+    s = tsbuf.start('http://127.0.0.1:' + srv.address().port + '/live.ts', { maxMin: 5, ch: 'Match', match: true });
+    const id = s.id;
+    // playlist, first piece and meta reach the Time Capsule with the pieces
+    await waitFor(() => fs.existsSync(path.join(remoteDir(s), 'index.m3u8')) && fs.existsSync(path.join(remoteDir(s), 'init.mp4')) && fs.existsSync(path.join(remoteDir(s), 'meta.json')) && s.mirror.up.size >= 3, 30000);
+    const before = s.mirror.up.size;
+    // the restart: process and memory buffer gone
+    tsbuf._forget(id);
+    assert.equal(tsbuf.get(id), null, 'gone after the restart');
+    // tidying while it is gone must not take the folder of a recording the server still lists
+    tsbuf.protect([id]);
+    await tsbuf.sweepRemote();
+    assert.equal(fs.existsSync(path.join(share, 'Norrsken', 'pause', id, 'p00000.m4s')), true, 'the start of the match is still on the Time Capsule');
+    const back = await tsbuf.recoverTC([id]);
+    assert.equal(back.length, 1, 'brought back');
+    const r = tsbuf.get(id);
+    assert.ok(r && r.done && r.match, 'a finished match recording again');
+    const pl = await tsbuf.playlist(r, '/pause');
+    const listed = pl.split('\n').filter(l => l.startsWith('/pause/' + id + '/p'));
+    assert.ok(listed.length >= before - 1, 'its pieces are listed again (' + listed.length + ' of ' + before + ')');
+    assert.match(pl, /init\.mp4/);
+    // the very first piece plays: fetched back from the Time Capsule
+    const f = await tsbuf.fileReady(id, 'p00000.m4s');
+    assert.ok(f && fs.statSync(f).size > 1000, 'the first piece is there to play');
+  } finally { srv.close(); if (s) { const x = tsbuf.get(s.id); if (x) tsbuf.stop(x, 'test'); } }
+});
+
 test('a Time Capsule that only takes the old login (NTLMv1) is reached anyway, and a wrong password still says so', () => {
   const run = (env) => require('child_process').execFileSync(process.execPath, ['-e', `
     require(${JSON.stringify(path.join(__dirname, '..', 'lib', 'smb.js'))}).check(true).then(r => { process.stdout.write(JSON.stringify(r)); });
