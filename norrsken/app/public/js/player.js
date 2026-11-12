@@ -461,8 +461,10 @@
     // iPhone/iPad and a live channel sent as MPEG-TS: play the server's HLS of it in Safari's own player from the
     // start, so AirPlay to a TV gets the picture without switching source (which ends AirPlay on those TVs)
     if (this.live && !this.tshift && this.item.t !== 'catchup' && !this.iosLiveOff && NS.iosNative(this.video)) {
+      // every live channel, also one the provider sends as HLS: handed the provider's own address over AirPlay the
+      // Philips TV went on and straight off again (log 12 Nov); the server's recording is the form it plays
       var c0 = this.sources && this.sources[this.si];
-      if (c0 && c0.kind !== 'hls') { this.iosLive(); return; }
+      if (c0) { this.iosLive(); return; }
     }
     if (this.live && this.tshift && this.tshift.url) {
       var ts = this.tshift;
@@ -706,7 +708,7 @@
       if (!nearEnd && at0 > 1) { var sk0 = function () { v.removeEventListener('loadedmetadata', sk0); try { v.currentTime = at0; } catch (e) { /* ignore */ } }; v.addEventListener('loadedmetadata', sk0); }
       this.playPromise();
       clearTimeout(this.airT);
-      this.airT = setTimeout(function () { if (self.airNative && !v.webkitCurrentPlaybackTargetIsWireless) self.airBack(); }, 30000);
+      this.airT = setTimeout(function () { if (self.airNative && !v.webkitCurrentPlaybackTargetIsWireless) self.airBack(); }, 120000);
       return true;
     }
     if ((this.hls || (this.airBase && !this.live)) && !this.airNative) {
@@ -725,7 +727,7 @@
       v.addEventListener('loadedmetadata', seek);
       this.playPromise();
       clearTimeout(this.airT);
-      this.airT = setTimeout(function () { if (self.airNative && !v.webkitCurrentPlaybackTargetIsWireless) self.airBack(); }, 30000);
+      this.airT = setTimeout(function () { if (self.airNative && !v.webkitCurrentPlaybackTargetIsWireless) self.airBack(); }, 120000);
     }
     return true;
   };
@@ -762,7 +764,7 @@
       self.playPromise();
       NS.diag('AirPlay: live som HLS från servern (' + (r.max || '?') + ' min)');
       clearTimeout(self.airT);
-      self.airT = setTimeout(function () { if (self.airNative && !v.webkitCurrentPlaybackTargetIsWireless) self.airBack(); }, 30000);
+      self.airT = setTimeout(function () { if (self.airNative && !v.webkitCurrentPlaybackTargetIsWireless) self.airBack(); }, 120000);
     }).catch(function (e) { self._airLiveBusy = false; NS.diag('AirPlay: kunde inte göra HLS av kanalen: ' + (e && e.message)); NS.toast('AirPlay: ' + ((e && e.message) || 'kanalen gick inte att skicka'), 'info'); });
   };
 
