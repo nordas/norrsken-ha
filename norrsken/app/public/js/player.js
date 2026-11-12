@@ -2479,6 +2479,18 @@
   };
 
   /* ------------------------------------------------------------ touch controls (phones/tablets) */
+  /** A short "−10 s" / "+10 s" on the side that was double tapped. */
+  Player.prototype.flashSeek = function (side) {
+    var self = this;
+    if (!this.seekFx) { this.seekFx = h('div', { class: 'seekfx' }); this.el.appendChild(this.seekFx); }
+    var fx = this.seekFx;
+    fx.textContent = (side < 0 ? '−' : '+') + '10 s';
+    fx.className = 'seekfx ' + (side < 0 ? 'l' : 'r');
+    void fx.offsetWidth;
+    fx.classList.add('on');
+    clearTimeout(this.seekFxT);
+    this.seekFxT = setTimeout(function () { fx.classList.remove('on'); }, 600);
+  };
   Player.prototype.touchUi = function () {
     var self = this;
     var el = this.el;
@@ -2541,9 +2553,22 @@
     var sync = function () { self.tPlay.innerHTML = ''; self.tPlay.appendChild(NS.icon(self.video.paused ? 'play' : 'pause')); };
     this.video.addEventListener('play', sync);
     this.video.addEventListener('pause', sync);
-    // tap anywhere: show/hide controls
+    // tap anywhere: show/hide controls; double tap on the left or right third: 10 s back or on (as in the big apps)
+    var lastTap = 0, lastSide = 0;
     el.addEventListener('click', function (e) {
       if (e.target.closest && e.target.closest('button, .btn, .bar, .panel-side, .nextup, .perror, .ci, .ti')) return;
+      var w = el.clientWidth || 1, x = e.clientX;
+      var side = x < w / 3 ? -1 : x > w * 2 / 3 ? 1 : 0;
+      var now = Date.now();
+      var canSeek = !self.live || (self.tshift && self.tshift.mode === 'rec' && self.tshift.url);
+      if (side && canSeek && side === lastSide && now - lastTap < 350) {
+        lastTap = 0;
+        if (self.live) self.seekRec(self.recPos() + side * 10); else self.seekTo(self.cur() + side * 10);
+        self.flashSeek(side);
+        self.showOsd();
+        return;
+      }
+      lastTap = now; lastSide = side;
       if (self.osdOn) self.hideOsd(); else self.showOsd();
     });
     // drag on the progress bar
