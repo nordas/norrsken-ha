@@ -52,7 +52,12 @@
     this.item = opts.item;
     this.live = this.item.t === 'live';
     // a match recording (the whole match, on the server): play it from its start or at its live edge
-    if (opts.rec && this.live) this.tshift = { mode: 'rec', match: true, chId: this.item.id, id: opts.rec.id, url: opts.rec.url, at: Date.now(), playing: true, pos: 0, edge: !!opts.rec.edge, done: opts.rec.recording === false };
+    // (sec/at: how long it is and when it started, so the seek bar spans the whole recording and the clock is right)
+    if (opts.rec && this.live) {
+      var rsec = +opts.rec.sec || 0;
+      this.tshift = { mode: 'rec', match: true, chId: this.item.id, id: opts.rec.id, url: opts.rec.url, at: Date.now() - rsec * 1000, sec: rsec, playing: true, pos: 0, edge: !!opts.rec.edge, done: opts.rec.recording === false };
+      this.matchPoll(this.tshift);
+    }
     this.list = opts.list && opts.list.length ? opts.list.slice() : [this.item];
     this.cat = opts.cat || this.item.cat || null;
     this.series = opts.series || null;
@@ -1673,7 +1678,29 @@
       // an EVENT playlist: start where the recording starts (or near its end, above) and never jump ahead by itself
       var hls = this.hls = new window.Hls({ enableWorker: true, startPosition: edge ? -1 : (at || 0), liveSyncDurationCount: edge ? 3 : 99999, liveMaxLatencyDurationCount: Infinity,
         maxBufferLength: 40, backBufferLength: 60, manifestLoadingTimeOut: 40000, manifestLoadingMaxRetry: 2, levelLoadingMaxRetry: 6, fragLoadingMaxRetry: 6 });
-      hls.on(window.Hls.Events.ERROR, function (ev, d) { if (d && d.fatal) { NS.diag('pausinspelning: ' + d.details); self.goLive(); } });
+      // a stall or a bad piece in a recording must not throw the viewer back to live (that made rewinding look broken):
+      // stuck with picture buffered ahead → step over the spot; a media error → let hls.js rebuild the decoder; a
+      // fatal error → start again a little further on; only after that go live
+      var tries = 0;
+      hls.on(window.Hls.Events.ERROR, function (ev, d) {
+        if (!d || self.hls !== hls) return;
+        if (!d.fatal) {
+          if (d.details === 'bufferStalledError' || d.details === 'bufferNudgeOnStall') {
+            var ahead = 0;
+            try { var bb = v.buffered; for (var i = 0; i < bb.length; i++) if (v.currentTime >= bb.start(i) - 0.5 && v.currentTime < bb.end(i)) ahead = bb.end(i) - v.currentTime; } catch (e) { /* ignore */ }
+            if (ahead > 2) { NS.diag('inspelning: hoppar över stopp vid ' + Math.round(v.currentTime) + ' s'); try { v.currentTime = v.currentTime + 1; } catch (e) { /* ignore */ } }
+          }
+          return;
+        }
+        NS.diag('pausinspelning: ' + d.details + ' (försök ' + (tries + 1) + ')');
+        tries++;
+        if (d.type === window.Hls.ErrorTypes.MEDIA_ERROR && tries <= 2) { try { hls.recoverMediaError(); return; } catch (e) { /* below */ } }
+        // restarts are counted on the recording (a new hls.js starts its own count); a minute of calm resets them
+        if (Date.now() - (ts.errAt || 0) > 60000) ts.errN = 0;
+        ts.errAt = Date.now();
+        if (ts.match && (ts.errN = (ts.errN || 0) + 1) <= 4) { var at2 = (v.currentTime || at || 0) + 2; self.startRec(at2); return; }
+        self.goLive();
+      });
       hls.on(window.Hls.Events.MANIFEST_PARSED, function () { self.playPromise(); });
       hls.on(window.Hls.Events.MEDIA_ATTACHED, function () { if (self.hls === hls) self.addAirSource(); });
       hls.loadSource(url);
@@ -1693,6 +1720,28 @@
     var off = function () { v.removeEventListener('playing', off); self.freezeEl.classList.remove('on'); };
     v.addEventListener('playing', off);
   };
+  /**
+   * A match recording keeps growing: ask the server every 10 s how long it is, so the seek bar covers all of it (rewind
+   * to any point, also the start) and "behind live" and the clock are right. Without this the bar ended where the
+   * picture was, so it could not be used to go back.
+   */
+  Player.prototype.matchPoll = function (ts) {
+    var self = this;
+    var tick = function () {
+      if (self.tshift !== ts) { clearInterval(ts.aliveT); return; }
+      NS.api.get('api/matchrec' + NS.pq()).then(function (r) {
+        var a = (r.recs || []).find(function (x) { return x.id === ts.id; });
+        if (!a || self.tshift !== ts) return;
+        ts.sec = a.sec;
+        ts.at = Date.now() - a.sec * 1000;
+        if (a.recording === false) ts.done = true;
+        self.paintTshift();
+      }).catch(function () { /* next time */ });
+    };
+    clearInterval(ts.aliveT);
+    ts.aliveT = setInterval(tick, 10000);
+    tick();
+  };
   /** A match recording: where its live edge is right now, then play from there. */
   Player.prototype.matchEdge = function (ts) {
     var self = this;
@@ -1703,6 +1752,7 @@
       if (a && !a.recording) { ts.done = true; self.endTshift(); self.startSource(0); return; }
       // a few seconds back from the newest piece: the playlist may be a little behind what the server has written
       ts.pos = a ? Math.max(0, a.sec - 6) : 0;
+      if (a) { ts.sec = a.sec; ts.at = Date.now() - a.sec * 1000; }
       ts.playing = true;
       ts.atEdge = true; // Safari's own player: an edge playlist instead of a seek (see startRec)
       self.startRec(ts.pos);

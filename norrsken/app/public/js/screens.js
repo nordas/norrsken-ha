@@ -40,7 +40,7 @@
         // the channel being recorded: watch the recording at its live edge (one connection, and it can be paused)
         var rec = (r.recs || []).find(function (x) { return x.id === a.id; });
         if (rec && rec.url) {
-          var pl = new NS.Player({ item: item, rec: { id: rec.id, url: rec.url, edge: true } });
+          var pl = new NS.Player({ item: item, rec: { id: rec.id, url: rec.url, edge: true, sec: rec.sec, recording: rec.recording } });
           if (NS.router.top() instanceof NS.Player) NS.router.replace(pl); else NS.router.push(pl); // no player under a player
           return;
         }
@@ -58,7 +58,7 @@
 
   /** The match recording of a favourite's match: from its start, or at its live edge. */
   NS.watchRec = function (m, edge) {
-    NS.router.push(new NS.Player({ item: m.ch, list: m.chans || [m.ch], cat: m.ch.cat, rec: { id: m.rec.id, url: m.rec.url, edge: !!edge, recording: m.rec.recording } }));
+    NS.router.push(new NS.Player({ item: m.ch, list: m.chans || [m.ch], cat: m.ch.cat, rec: { id: m.rec.id, url: m.rec.url, edge: !!edge, recording: m.rec.recording, sec: m.rec.sec } }));
   };
 
   /** A favourite's match: the recording when there is one, the channel when it is on, a countdown when it is not started yet. */
