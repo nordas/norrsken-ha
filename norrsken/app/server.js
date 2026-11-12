@@ -1612,8 +1612,8 @@ route('GET', '/airtest', async (req, res, q) => {
     extra.push({ name: who + ' – från början', url: '/pause/' + x.id + '/index.m3u8' });
     extra.push({ name: who + ' – nära slutet (som live gjorde förut)', url: '/pause/' + x.id + '/index.m3u8?edge=1' });
     extra.push({ name: who + ' – live, 40 s bakåt', url: '/pause/' + x.id + '/live.m3u8?w=10' });
-    extra.push({ name: who + ' – live, 15 min bakåt (som live gör nu)', url: '/pause/' + x.id + '/live.m3u8' });
-    extra.push({ name: who + ' – live, allt bakåt', url: '/pause/' + x.id + '/live.m3u8?w=100000' });
+    extra.push({ name: who + ' – live, 15 min bakåt', url: '/pause/' + x.id + '/live.m3u8?w=225' });
+    extra.push({ name: who + ' – live, allt bakåt (det tv:n får nu)', url: '/pause/' + x.id + '/live.m3u8' });
   }
   send(res, 200, airtest.page(lan, extra), 'text/html; charset=utf-8', { 'Cache-Control': 'no-store' });
 });

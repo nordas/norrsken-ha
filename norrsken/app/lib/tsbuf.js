@@ -489,9 +489,10 @@ async function playlist(s, prefix, { wait = 30000, edge = false } = {}) {
  * window the TV's own remote can pause and rewind while it plays over AirPlay.
  * list: the parts of the recording in order (one for a pause, several for a match the provider dropped).
  */
-// window: how many pieces back the TV's own remote can rewind (an ordinary live playlist with a long window, as live
-// services with "rewind" send it); 225 pieces ≈ 15 minutes
-const AIR_WINDOW = +process.env.NSK_AIR_WINDOW || 225;
+// window: how many pieces back the TV's own remote can rewind. The whole recording: the Philips TV (Titan OS) played
+// every live form on /airtest (40 s, 15 min, all), but not the growing recording from its start – so a TV always gets
+// this one, the whole match in it, and "from the start" is a jump the phone makes once the TV plays
+const AIR_WINDOW = +process.env.NSK_AIR_WINDOW || 100000;
 function livePlaylist(list, prefix, { window = AIR_WINDOW } = {}) {
   const parts = (list || []).filter(Boolean);
   const all = [];

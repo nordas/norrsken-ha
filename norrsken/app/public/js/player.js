@@ -693,14 +693,17 @@
     // the recording from its first piece and being told to seek
     var nearEnd = false;
     try { nearEnd = this.live && v.seekable.length > 0 && v.seekable.end(v.seekable.length - 1) - v.currentTime < 45; } catch (e) { /* ignore */ }
-    // live: the TV gets an ordinary sliding live playlist (live.m3u8), as live services send. The growing recording
-    // with "start 12 s before the end" made a Philips TV spin and give up.
-    if (nearEnd && src && /\/(mrec|pause)\/[^/]+\/index\.m3u8/.test(src)) src = src.replace(/index\.m3u8(\?[^#]*)?/, 'live.m3u8');
+    // a recording (live, a paused channel, a match from its start): the TV always gets it as an ordinary live playlist
+    // with the whole recording in it (live.m3u8) – the only form the Philips TV played (/airtest, 12 Nov). Behind
+    // live, the TV is moved to our spot once it plays; its own remote can rewind all the way back.
+    if (this.live && src && /\/(mrec|pause)\/[^/]+\/index\.m3u8/.test(src)) src = src.replace(/index\.m3u8(\?[^#]*)?/, 'live.m3u8');
     if (!src) { NS.toast('AirPlay: öppna Norrsken på tv-adressen (http://…:8787), inte från Home Assistant-menyn', 'info'); return false; }
     // Safari already plays the recording itself (live on iPhone/iPad): give it the live playlist before the TV is picked
     if (this.live && !this.hls && !this.airNative && /\/live\.m3u8/.test(src) && v.currentSrc !== src) {
+      var at0 = v.currentTime || 0;
       this.airNative = true;
       v.src = src;
+      if (!nearEnd && at0 > 1) { var sk0 = function () { v.removeEventListener('loadedmetadata', sk0); try { v.currentTime = at0; } catch (e) { /* ignore */ } }; v.addEventListener('loadedmetadata', sk0); }
       this.playPromise();
       clearTimeout(this.airT);
       this.airT = setTimeout(function () { if (self.airNative && !v.webkitCurrentPlaybackTargetIsWireless) self.airBack(); }, 30000);
