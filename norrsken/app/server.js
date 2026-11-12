@@ -54,7 +54,13 @@ function ingressBase(req) {
 const JSON_REPLACER = (k, v) => (k && k[0] === '_' ? undefined : v);
 
 function send(res, status, body, type = 'application/json; charset=utf-8', extra = {}) {
-  const data = typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body, JSON_REPLACER);
+  let data = typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body, JSON_REPLACER);
+  // JSON answers (the start page is 150 kB) go compressed to browsers that ask for it: a quicker start over Wi-Fi.
+  // Never playlists or media: TVs fetch those.
+  if (res._gz && status === 200 && /^application\/json/.test(type) && data.length > 2000 && !extra['Content-Encoding']) {
+    data = require('zlib').gzipSync(data, { level: 4 });
+    extra = { ...extra, 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' };
+  }
   res.writeHead(status, { 'Content-Type': type, 'Cache-Control': 'no-store', ...extra });
   res.end(data);
 }
@@ -1923,6 +1929,7 @@ const TYPES = {
   '.json': 'application/json', '.txt': 'text/plain; charset=utf-8', '.webmanifest': 'application/manifest+json',
 };
 
+const gzCache = new Map();
 function serveStatic(req, res, pathname) {
   let p = pathname;
   if (p === '/' || p === '') p = '/index.html';
@@ -1938,6 +1945,16 @@ function serveStatic(req, res, pathname) {
       'Cache-Control': /\/(vendor|fonts)\//.test(file) ? 'public, max-age=604800' : 'no-cache',
     };
     if (req.headers['if-modified-since'] === mtime) { res.writeHead(304, headers); return res.end(); }
+    // scripts and styles compressed (1.2 MB of them → about a quarter), kept in memory per file version
+    if (res._gz && /\.(js|css|html|svg)$/.test(file) && st.size < 5e6) {
+      const key = file + '|' + st.mtimeMs;
+      let z = gzCache.get(key);
+      if (!z) { try { z = require('zlib').gzipSync(fs.readFileSync(file), { level: 6 }); } catch (_) { z = null; } if (z) { if (gzCache.size > 60) gzCache.clear(); gzCache.set(key, z); } }
+      if (z) {
+        res.writeHead(200, { ...headers, 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding', 'Content-Length': z.length });
+        return res.end(req.method === 'HEAD' ? undefined : z);
+      }
+    }
     headers['Content-Length'] = st.size;
     res.writeHead(200, headers);
     if (req.method === 'HEAD') return res.end();
@@ -1948,6 +1965,7 @@ function serveStatic(req, res, pathname) {
 /* ------------------------------------------------------------------ server */
 
 const server = http.createServer(async (req, res) => {
+  res._gz = /\bgzip\b/.test(String(req.headers['accept-encoding'] || ''));
   const url = new URL(req.url, 'http://x');
   const pathname = url.pathname;
   try {
