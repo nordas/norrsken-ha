@@ -386,8 +386,15 @@
       if (req !== self.reqId) return;
       self.downloaded = !!res.downloaded;
       if (res.rec && self.live) {
-        // the server says this channel's match is being recorded: watch the recording at its live edge (one connection)
-        self.tshift = { mode: 'rec', match: true, chId: item.id, id: res.rec.id, url: res.rec.url, at: Date.now(), playing: true, pos: 0, edge: true };
+        // the server says this channel's match is being recorded. Already on that recording ("Börja från start", or a
+        // reload after a stall): stay where we are – replacing it sent "from the start" and every rewind to live.
+        var had = self.tshift;
+        var mid = function (u) { var m = /\/mrec\/([^/?]+)/.exec(u || ''); return m ? m[1] : ''; }; // the same match even after a new part
+        if (had && had.match && had.url && (had.id === res.rec.id || (mid(had.url) && mid(had.url) === mid(res.rec.url)))) { self.startSource(had.pos || 0); return; }
+        // otherwise: watch the recording at its live edge (one connection)
+        var rs = +res.rec.sec || 0;
+        self.tshift = { mode: 'rec', match: true, chId: item.id, id: res.rec.id, url: res.rec.url, at: Date.now() - rs * 1000, sec: rs, playing: true, pos: 0, edge: true };
+        self.matchPoll(self.tshift);
         self.startSource(0);
         return;
       }
@@ -1751,7 +1758,8 @@
       // the match is over and the recording finished: live is the channel itself again
       if (a && !a.recording) { ts.done = true; self.endTshift(); self.startSource(0); return; }
       // a few seconds back from the newest piece: the playlist may be a little behind what the server has written
-      ts.pos = a ? Math.max(0, a.sec - 6) : 0;
+      // 20 s back from the newest piece: closer than that the picture waits for every new piece (it stopped every ~12 s)
+      ts.pos = a ? Math.max(0, a.sec - 20) : 0;
       if (a) { ts.sec = a.sec; ts.at = Date.now() - a.sec * 1000; }
       ts.playing = true;
       ts.atEdge = true; // Safari's own player: an edge playlist instead of a seek (see startRec)
