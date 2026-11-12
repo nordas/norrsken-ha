@@ -1729,6 +1729,24 @@
       hls.on(window.Hls.Events.MEDIA_ATTACHED, function () { if (self.hls === hls) self.addAirSource(); });
       hls.loadSource(url);
       hls.attachMedia(v);
+      // A recording of a live channel has small holes (the provider drops a few frames now and then). hls.js notices
+      // one only after the picture has stood still for a second or two – a stop every minute or so on the Mac. Step
+      // over a hole just before the picture reaches it instead: no stop at all.
+      clearInterval(this.gapT);
+      this.gapT = setInterval(function () {
+        if (self.hls !== hls) { clearInterval(self.gapT); return; }
+        if (v.paused || v.seeking) return;
+        try {
+          var bb = v.buffered, ct = v.currentTime;
+          for (var i = 0; i < bb.length - 1; i++) {
+            if (ct >= bb.start(i) - 0.1 && ct <= bb.end(i) + 0.05 && bb.end(i) - ct < 0.3) {
+              var gap = bb.start(i + 1) - bb.end(i);
+              if (gap > 0 && gap < 3) v.currentTime = bb.start(i + 1) + 0.05;
+              break;
+            }
+          }
+        } catch (e) { /* ignore */ }
+      }, 200);
     } else {
       this.kind = 'native';
       // live: the playlist itself says "start near the end", so Safari (and a TV it hands the stream to with AirPlay)
