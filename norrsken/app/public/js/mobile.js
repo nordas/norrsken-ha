@@ -396,10 +396,11 @@
     // each team: a round badge in its colours with its initials, and its name
     var badge = function (t) {
       var c1 = (t.col && t.col[0]) || '#444', c2 = (t.col && t.col[1]) || '#fff';
-      var ini = t.n.replace(/[^A-Za-zÅÄÖåäö0-9 ]/g, '').split(/\s+/).map(function (w) { return w.charAt(0); }).join('').slice(0, 3).toUpperCase() || t.n.slice(0, 2).toUpperCase();
-      if (/^[A-ZÅÄÖ]{2,4}\d*$/.test(t.n)) ini = t.n.slice(0, 4);
-      else if (ini.length < 2) ini = t.n.slice(0, 3).toUpperCase();
-      return h('div', { class: 'm-vs-t' }, [h('span', { class: 'm-vs-b', style: 'background:' + c1 + ';box-shadow:inset 0 0 0 3px ' + c2, text: ini }), h('b', { text: t.n })]);
+      // the club's own abbreviation (LHF, FBK…); the user's crest picture when one is there
+      var ini = t.ab || t.n.slice(0, 3).toUpperCase();
+      var b = t.img ? h('span', { class: 'm-vs-b img' }, NS.pic(t.img, '', function () { b.className = 'm-vs-b'; b.textContent = ini; b.style.cssText = 'background:' + c1 + ';box-shadow:inset 0 0 0 3px ' + c2; }))
+        : h('span', { class: 'm-vs-b' + (ini.length > 3 ? ' sm' : ''), style: 'background:' + c1 + ';box-shadow:inset 0 0 0 3px ' + c2, text: ini });
+      return h('div', { class: 'm-vs-t' }, [b, h('b', { text: t.n })]);
     };
     var stopB = rec && m.rec.recording ? h('button', { class: 'm-btn ghost', onclick: function (e) { e.stopPropagation(); NS.stopMatchRec(null, function () { stopB.remove(); }); } }, [NS.icon('x'), 'Avbryt inspelning']) : null;
     var oc = m.sides && m.sides.map(function (x) { return x.col && x.col[0]; }).filter(function (x) { return x && x.toLowerCase() !== c.toLowerCase(); })[0];

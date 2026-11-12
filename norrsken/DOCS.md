@@ -81,3 +81,7 @@ Nedladdningar ligger kvar på tilläggets egen disk (eller på `storage_dir`).
 - Avbryts inspelningen (leverantören tappar den) startar den om, och "från start" spelar alla delar i ordning.
 - En omstart av tillägget (t.ex. en uppdatering mitt i matchen) tar inte bort inspelningen.
 - Inspelningen sparas bara på Time Capsule (se ovan) och tas bort efter 24 timmar. Svarar Time Capsule inte blir det ingen inspelning, men du kan fortfarande titta live.
+
+## Klubbmärken på matchkortet
+
+Matchkortet visar lagens förkortningar (LHF, FBK …) i lagens färger. Vill du ha klubbmärken: lägg egna bildfiler i Home Assistants config-mapp under `norrsken/crests/`, döpta efter laget: `lulea.png`, `farjestad.png`, `hv71.png`, `skelleftea.png`, `frolunda.png`, `brynas.png`, `djurgarden.png`, `linkoping.png`, `malmo.png`, `rogle.png`, `timra.png`, `vaxjo.png`, `orebro.png`, `leksand.png`, `modo.png`, `aik.png`, `bjorkloven.png`, `tre-kronor.png` (även .svg, .webp, .jpg). Inga märken följer med Norrsken.

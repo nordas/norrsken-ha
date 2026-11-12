@@ -624,6 +624,27 @@ route('GET', '/api/page/:page', (req, res, q, p) => {
   ok(res, { rows, featured: featured(p.page, prof), sport: p.page === 'home' || p.page === 'live' ? sportNow(prof, st, ingressBase(req)) : null });
 });
 
+// the clubs' own abbreviations, as on the scoreboard
+const ABBR = { lulea: 'LHF', bjorkloven: 'IFB', brynas: 'BIF', djurgarden: 'DIF', frolunda: 'FHC', farjestad: 'FBK', hv71: 'HV71', linkoping: 'LHC', malmo: 'MIF', rogle: 'RBK', skelleftea: 'SAIK', timra: 'TIK', vaxjo: 'VLH', orebro: 'ÖRE', leksand: 'LIF', modo: 'MODO', aik: 'AIK', 'tre-kronor': 'SWE' };
+/*
+ * Club crests are the clubs' own: none ship with Norrsken. The user's own picture files are shown when they are put in
+ * Home Assistant's config folder: /config/norrsken/crests/<team>.png (or .svg, .webp, .jpg), e.g. lulea.png, hv71.png.
+ */
+const CREST_DIRS = [process.env.NSK_CREST_DIR, '/homeassistant/norrsken/crests', path.join(DATA_DIR, 'crests')].filter(Boolean);
+const CREST_TYPES = { '.png': 'image/png', '.svg': 'image/svg+xml', '.webp': 'image/webp', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg' };
+function crestFile(id) {
+  if (!/^[a-z0-9-]{2,20}$/.test(id)) return '';
+  for (const d of CREST_DIRS) for (const e of Object.keys(CREST_TYPES)) { const f = path.join(d, id + e); try { if (fs.statSync(f).isFile()) return f; } catch (_) { /* not there */ } }
+  return '';
+}
+route('GET', '/crest/:id', (req, res, q, p) => {
+  const f = crestFile(p.id);
+  if (!f) return bad(res, 'finns inte', 404);
+  // an SVG is shown as a picture only (never as a page): no scripts run from it
+  res.writeHead(200, { 'Content-Type': CREST_TYPES[path.extname(f)], 'Cache-Control': 'max-age=3600', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'", 'X-Content-Type-Options': 'nosniff' });
+  fs.createReadStream(f).pipe(res);
+});
+
 /** The profile's favourite team playing now or soon (start page billboard). */
 function sportNow(prof, st, base = '') {
   const tid = (st.prefs && st.prefs.team) || 'lulea'; // 'none': no team, but Sweden and the skiing world cups still show
@@ -647,7 +668,7 @@ function sportNow(prof, st, base = '') {
   // not recorded yet because something else plays (the provider gives one connection): say so instead of nothing
   const waits = !rec && Date.now() - (matchWait.get(m.team.id + '|' + m.s) || 0) < 90e3;
   // both teams' colours and short names, for the match card (no crests: those are the clubs' own)
-  const side = (n) => { const t = n && sport.TEAMS.find(x => x.re.test(n)); return t ? { n: t.short, col: t.col } : n ? { n, col: null } : null; };
+  const side = (n) => { const t = n && sport.TEAMS.find(x => x.re.test(n)); return t ? { n: t.short, col: t.col, ab: ABBR[t.id] || '', img: crestFile(t.id) ? base + '/crest/' + t.id : '' } : n ? { n, col: null, ab: '', img: '' } : null; };
   return Object.assign({}, m, { rec, recWait: waits ? 'Spelas in när det som spelas nu stängs' : '', sides: m.home && m.away ? [side(m.home), side(m.away)] : null });
 }
 const sportCache = new Map();
