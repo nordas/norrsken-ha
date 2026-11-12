@@ -482,4 +482,12 @@ html.m .player.touch .osd .bar:not(.tsbar) { bottom: calc(90px + env(safe-area-i
   .m-sport { margin-left: 24px; margin-right: 24px; }
   .m-sport-btns .m-btn { flex: 0 1 260px; }
   .m-poster { width: 168px; }
+  /* a title's page: the picture takes half the screen at most, the text has a readable width, the button its own */
+  .m-d-art { aspect-ratio: auto; height: min(52vh, 480px); }
+  .m-d-body { padding: 4px 28px 0; max-width: 820px; }
+  .m-d-body h1 { font-size: 38px; }
+  .m-d-body .m-btn { max-width: 380px; }
+  .m-d-desc { font-size: 16px; }
+  /* channels in two columns */
+  .m-chlist { display: grid; grid-template-columns: 1fr 1fr; column-gap: 8px; padding-left: 8px; padding-right: 8px; }
 }
