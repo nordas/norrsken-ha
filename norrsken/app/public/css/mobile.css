@@ -468,3 +468,18 @@ html.m .player.touch .osd .bar:not(.tsbar) { bottom: calc(90px + env(safe-area-i
 .player .seekfx { position: absolute; top: 50%; transform: translateY(-50%); padding: 14px 20px; border-radius: 40px; background: rgba(0,0,0,.55); color: #fff; font-size: 18px; font-weight: 700; opacity: 0; pointer-events: none; transition: opacity .25s; z-index: 6; }
 .player .seekfx.l { left: 10%; } .player .seekfx.r { right: 10%; }
 .player .seekfx.on { opacity: 1; transition: none; }
+
+/* iPad and other wide touch screens: the hero is a wide banner (the phone's tall poster left most of the screen empty),
+   text and buttons to the left as on a TV, bigger posters, the match card no wider than it needs */
+@media (min-width: 700px) and (min-height: 600px) {
+  .m-hero { aspect-ratio: auto; height: min(52vh, 460px); max-height: none; margin: 8px 24px 14px; }
+  .m-hero-art::after { background: linear-gradient(90deg, rgba(0,0,0,.88) 0%, rgba(0,0,0,.55) 38%, rgba(0,0,0,0) 70%), linear-gradient(0deg, rgba(0,0,0,.7) 0%, rgba(0,0,0,0) 45%); }
+  .m-hero-txt { left: 32px; right: auto; bottom: 30px; width: min(520px, 60%); text-align: left; align-items: flex-start; }
+  .m-hero-txt h1 { font-size: 52px; }
+  .m-hero-txt h1.long { font-size: 38px; }
+  .m-hero-meta { justify-content: flex-start; }
+  .m-hero-btns { width: 100%; max-width: 420px; }
+  .m-sport { margin-left: 24px; margin-right: 24px; }
+  .m-sport-btns .m-btn { flex: 0 1 260px; }
+  .m-poster { width: 168px; }
+}
