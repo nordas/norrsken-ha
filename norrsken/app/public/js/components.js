@@ -233,7 +233,18 @@
     t.innerHTML = '';
     var live = m.state === 'live';
     t.appendChild(h('div', { class: 'kind' }, [live ? h('span', { class: 'live-pill', text: 'Live nu' }) : h('span', { class: 'soon-pill', text: m.state === 'ended' ? 'Slut' : 'Börjar ' + NS.fmtClock(m.s) }), m.label || m.team.name]));
-    t.appendChild(h('h1', { class: m.title.length > 22 ? 'long' : null, text: m.title }));
+    // the two teams with their badge (the club's abbreviation in its colours, or the user's own crest picture)
+    if (m.sides) {
+      var badge = function (s) {
+        var c1 = (s.col && s.col[0]) || '#444', c2 = (s.col && s.col[1]) || '#fff';
+        var ini = s.ab || s.n.slice(0, 3).toUpperCase();
+        var st = 'background:' + c1 + ';box-shadow:inset 0 0 0 .35rem ' + c2;
+        var b = s.img ? h('span', { class: 'bvs-b img' }, NS.pic(s.img, '', function () { b.className = 'bvs-b'; b.textContent = ini; b.style.cssText = st; }))
+          : h('span', { class: 'bvs-b' + (ini.length > 3 ? ' sm' : ''), style: st, text: ini });
+        return h('div', { class: 'bvs-t' }, [b, h('b', { text: s.n })]);
+      };
+      t.appendChild(h('div', { class: 'bvs' + ((m.sides[0].n + m.sides[1].n).length > 18 ? ' long' : '') }, [badge(m.sides[0]), h('i', { text: '–' }), badge(m.sides[1])]));
+    } else t.appendChild(h('h1', { class: m.title.length > 22 ? 'long' : null, text: m.title }));
     var meta = h('div', { class: 'meta' });
     var logo = h('span', { class: 'chlogo' });
     if (m.ch.img) logo.appendChild(NS.pic(m.ch.img, '', function () { logo.remove(); }));

@@ -694,3 +694,14 @@ html.m .player .tap-play { width: 84px; height: 84px; margin: -42px 0 0 -42px; f
 /* side panels scroll when the list is longer than the screen, with a fade that shows there is more */
 .panel-side .tracks { bottom: 0; overflow-y: auto; padding-bottom: 11rem; scroll-padding: 4rem 0 11rem; scrollbar-width: none; -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 6rem), transparent); mask-image: linear-gradient(180deg, #000 calc(100% - 6rem), transparent); } /* the last row stops above the fade */
 .panel-side .tracks::-webkit-scrollbar { display: none; }
+
+/* match on the start page: the two teams with their badges */
+.billboard .bvs { margin-top: 1.6rem; display: flex; align-items: center; gap: 2.4rem; }
+.billboard .bvs-t { display: flex; align-items: center; gap: 1.6rem; min-width: 0; }
+.billboard .bvs-t b { font-size: 7.4rem; line-height: 1; font-weight: 900; letter-spacing: -0.035em; white-space: nowrap; text-shadow: 0 .4rem 3rem rgba(0,0,0,.35); }
+.billboard .bvs.long .bvs-t b { font-size: 5.6rem; }
+.billboard .bvs i { font-style: normal; font-size: 5rem; font-weight: 800; opacity: .6; }
+.billboard .bvs-b { flex: none; width: 9rem; height: 9rem; border-radius: 50%; display: grid; place-items: center; font-size: 2.6rem; font-weight: 900; color: #fff; text-shadow: 0 .1rem .3rem rgba(0,0,0,.6); }
+.billboard .bvs-b.sm { font-size: 2rem; }
+.billboard .bvs-b.img { background: none; border-radius: 0; box-shadow: none; }
+.billboard .bvs-b.img img { width: 100%; height: 100%; object-fit: contain; }
