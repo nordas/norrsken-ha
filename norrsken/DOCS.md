@@ -37,7 +37,7 @@ Obs: en gammal AirPort Extreme pratar äldre SMB-versioner. Om Home Assistant in
 
 Tryck på **Ladda ner** på en film eller ett avsnitt (eller **Ladda ner säsongen**). Servern sparar filen som MP4 på lagringsdisken: bilden kopieras orörd, ljud som iPhone/tv:n inte kan spela (DTS, TrueHD) görs om till E-AC-3. Nedladdade titlar spelas från servern och använder inte leverantörens anslutning.
 
-**Film och serier på iPhone/iPad** spelas i Norrskens egen spelare, som buffrar långt framåt. Vill du se på tv:n: tryck **Spela på tv** (AirPlay-knappen uppe till höger) – då byter filmen till Safaris spelare innan du väljer tv, så tv:n får bilden. Live-tv spelas i Safaris spelare från början; trycker du **AirPlay** på live får tv:n en vanlig live-ström med hela inspelningen (som TV4 Play skickar), så tv:ns egen fjärrkontroll kan pausa och spola ända till början; tittar du från början hoppar tv:n dit när den spelar. Vilken form tv:n klarar syns på testsidan `/airtest`, där det som spelas in just nu finns i tre former. Under **Min sida → Nedladdningar** kan du spela, spara filen på telefonen eller datorn, eller ta bort den.
+**Film och serier på iPhone/iPad** spelas i Norrskens egen spelare, som buffrar långt framåt. Vill du se på tv:n: tryck **Spela på tv** (AirPlay-knappen uppe till höger) – då byter filmen till Safaris spelare innan du väljer tv, så tv:n får bilden. Live-tv spelas i Safaris spelare från början och går via serverns minne (ungefär den senaste minuten) – **kanalen spelas inte in** och inget skrivs på Time Capsule. Trycker du **AirPlay** på live får tv:n samma live-ström. Pausar du längre än några sekunder börjar en pausinspelning, precis som på tv:n. En matchinspelning (Luleå) skickas till tv:n med hela inspelningen, så tv:ns egen fjärrkontroll kan pausa och spola ända till början. Vilken form tv:n klarar syns på testsidan `/airtest`, där det som spelas in just nu finns i tre former. Under **Min sida → Nedladdningar** kan du spela, spara filen på telefonen eller datorn, eller ta bort den.
 
 Leverantören ger bara en eller ett par anslutningar. Därför väntar en nedladdning tills ingen tittar, och den pausas (och börjar om från början) när du startar något annat eller en matchinspelning ska börja.
 
@@ -85,3 +85,16 @@ Nedladdningar ligger kvar på tilläggets egen disk (eller på `storage_dir`).
 ## Klubbmärken på matchkortet
 
 Matchkortet visar lagens förkortningar (LHF, FBK …) i lagens färger. Vill du ha klubbmärken: lägg egna bildfiler i Home Assistants config-mapp under `norrsken/crests/`, döpta efter laget: `lulea.png`, `farjestad.png`, `hv71.png`, `skelleftea.png`, `frolunda.png`, `brynas.png`, `djurgarden.png`, `linkoping.png`, `malmo.png`, `rogle.png`, `timra.png`, `vaxjo.png`, `orebro.png`, `leksand.png`, `modo.png`, `aik.png`, `bjorkloven.png`, `tre-kronor.png` (även .svg, .webp, .jpg). Inga märken följer med Norrsken.
+
+
+## Vad som spelas in
+
+Bara det här spelas in av sig självt: **Luleå Hockeys matcher** (alltid) och, om du slår på det under *Inställningar → Paus*, **världscupen i längdskidor och skidskytte**. Skidorna bryter aldrig det någon tittar på; de spelas in när anslutningen är ledig. Att titta på en kanal spelar inte in den. En paus spelar in från att du pausar tills du går till live, och tas sedan bort.
+
+## Favoritlag
+
+Under **Favoritlag** väljer du ett eller flera lag: SHL-lagen, Tre Kronor och alla 20 lag i Premier League 2026/27. Lagens matcher de närmaste dagarna visas i raden **Dina lags matcher** på startsidan och under Live-tv – alla matcher tv-guiden har, oavsett liga eller cup (Premier League, FA-cupen, Ligacupen, Champions League …). Matcher utan tv-guide hos leverantören syns inte. När en match med ett favoritlag börjar säger Norrsken till av sig självt (**Titta** byter dit); mitt i en film blir det bara en kort rad.
+
+## AirPlay-loggen
+
+`/airlog` (samma PIN som inställningarna) visar vilka enheter som hämtar bild från Norrsken just nu. En tv som spelar via AirPlay hämtar bilden själv och syns då som en egen rad med ”Spelar nu”, antal hämtade bitar och eventuella fel. Samma sak skrivs i tilläggets logg (rader som börjar med `[airplay]`), så ett misslyckat försök går att läsa i efterhand.

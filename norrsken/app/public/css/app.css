@@ -705,3 +705,22 @@ html.m .player .tap-play { width: 84px; height: 84px; margin: -42px 0 0 -42px; f
 .billboard .bvs-b.sm { font-size: 2rem; }
 .billboard .bvs-b.img { background: none; border-radius: 0; box-shadow: none; }
 .billboard .bvs-b.img img { width: 100%; height: 100%; object-fit: contain; }
+
+/* team picker: group headings and the chosen teams */
+.menu-list .mi-head { font-size: 1.8rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 1.4rem 0 0 .4rem; }
+.menu-list .btn.sel { background: rgba(255,255,255,.2); }
+.menu-list .btn.unsel svg { opacity: 0; }
+.k-live .card .ltag.when { background: rgba(0,0,0,.6); color: #fff; }
+
+/* a favourite team's match as a card (the row "Dina lags matcher") */
+.k-live .card.matchcard .mvs { position: absolute; left: 0; right: 0; top: 5.6rem; display: flex; align-items: center; justify-content: center; gap: 2rem; }
+.k-live .card.matchcard .mvs i { font-style: normal; font-size: 3.4rem; font-weight: 800; opacity: .6; }
+.mvs-b { flex: none; width: 8.6rem; height: 8.6rem; border-radius: 50%; display: grid; place-items: center; font-size: 2.4rem; font-weight: 900; color: #fff; text-shadow: 0 .1rem .3rem rgba(0,0,0,.6); }
+.mvs-b.sm { font-size: 1.9rem; }
+.mvs-b.img { background: none; border-radius: 0; box-shadow: none; }
+.mvs-b.img img { width: 100%; height: 100%; object-fit: contain; }
+.k-live .card.matchcard .lnow { bottom: 5rem; font-size: 2.4rem; font-weight: 800; text-align: center; }
+.k-live .card.matchcard .lch { position: absolute; left: 2rem; right: 2rem; bottom: 1.8rem; text-align: center; font-size: 1.7rem; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; z-index: 1; }
+.k-live .card.matchcard .lcomp { position: absolute; right: 1.6rem; top: 1.6rem; padding: .3rem .9rem; border-radius: .5rem; background: rgba(0,0,0,.45); font-size: 1.5rem; font-weight: 700; z-index: 1; }
+.k-live .card.matchcard .mvs { z-index: 1; }
+.menu-list .btn, .menu-list .mi-head { flex: none; }

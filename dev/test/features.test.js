@@ -147,7 +147,7 @@ test('profile choices: subtitles default to Swedish (unset), are saved per profi
   assert.deepEqual(s.prefs, {});
   await post('/api/state/p1/prefs', { sub: 'en', audio: 'sv', team: 'Färjestad BK' });
   s = (await get('/api/state/p1')).json;
-  assert.deepEqual(s.prefs, { sub: 'en', audio: 'sv', team: 'farjestad' });
+  assert.deepEqual(s.prefs, { sub: 'en', audio: 'sv', team: 'farjestad', teams: ['farjestad'] });
   await post('/api/state/p1/prefs', { sub: '' }); // "Av" is a choice too
   assert.equal((await get('/api/state/p1')).json.prefs.sub, '');
   assert.deepEqual((await get('/api/state/p2')).json.prefs, {}, 'other profile untouched');
@@ -691,4 +691,40 @@ test('an error nobody caught is logged once a minute with a count, masked', () =
   assert.equal(lines.length, 1, 'the same error in a loop: one line');
   assert.match(lines[0], /^\[fel\]/);
   assert.ok(!lines[0].includes('hemligt'), 'the link is masked');
+});
+
+test('sport: several favourite teams, Premier League clubs in every competition, the list of coming matches', async () => {
+  const sport = require('../lib/sport');
+  const A = sport.TEAMS.find(t => t.id === 'arsenal');
+  assert.equal(sport.TEAMS.filter(t => t.group === 'Premier League').length, 20);
+  assert.deepEqual(sport.matchup('Fotboll: Premier League: Arsenal - Chelsea', A), { home: 'Arsenal', away: 'Chelsea' });
+  assert.deepEqual(sport.matchup('FA Cup: Manchester United vs Arsenal FC', A), { home: 'Man United', away: 'Arsenal' });
+  assert.equal(sport.matchup('Arsenal: historien', A), null);
+  assert.deepEqual(sport.teamIds(['lulea', 'Arsenal', 'none', 'x', 'lulea']), ['lulea', 'arsenal']);
+  const now = Date.UTC(2026, 10, 14, 10);
+  const ch = [{ id: 1, n: 'V Sport Premium HD', epg: 'a' }, { id: 2, n: 'SVT1', epg: 'b' }];
+  const h = 3600e3, d = 86400e3;
+  const epg = { map: new Map([
+    ['a', [[now + h, now + 3 * h, 'Premier League: Arsenal - Chelsea', ''], [now + d, now + d + 2 * h, 'NBA: Arsenal - X', 'basket'], [now + 3 * d, now + 3 * d + 2 * h, 'Carabao Cup: Hull City - Arsenal', ''], [now + 4 * d, now + 4 * d + 2 * h, 'Champions League: Liverpool - Arsenal (repris)', '']]],
+    ['b', [[now + 2 * h, now + 4 * h, 'Vinterstudion: Längdskidor: Världscupen', ''], [now + 5 * h, now + 7 * h, 'SHL: Luleå Hockey - Brynäs', '']]],
+  ]) };
+  const up = sport.upcoming(['arsenal', 'lulea'], ch, epg, { now });
+  assert.deepEqual(up.map(m => m.title), ['Arsenal – Chelsea', 'Luleå – Brynäs', 'Hull – Arsenal']);
+  assert.equal(up[2].label, 'Fotboll · Ligacupen');
+  // recorded by itself: Luleå only; the skiing world cup when switched on; never a football club
+  assert.deepEqual(sport.recToday('lulea', false, ch, epg, { now }).map(m => m.team.id), ['lulea']);
+  assert.deepEqual(sport.recToday('lulea', true, ch, epg, { now }).map(m => m.team.id).sort(), ['langd', 'lulea']);
+  // the profile keeps a list; the old single value follows along
+  await post('/api/state/p1/prefs', { teams: ['lulea', 'arsenal', 'nonsense'] });
+  let s = (await get('/api/state/p1')).json;
+  assert.deepEqual(s.prefs.teams, ['lulea', 'arsenal']);
+  assert.equal(s.prefs.team, 'lulea');
+  const r = (await get('/api/sport?profile=p1')).json;
+  assert.ok(Array.isArray(r.upcoming));
+  assert.ok(r.teams.some(t => t.id === 'man-utd' && t.group === 'Premier League'));
+  await post('/api/state/p1/prefs', { teams: [] });
+  s = (await get('/api/state/p1')).json;
+  assert.deepEqual(s.prefs.teams, []);
+  assert.equal(s.prefs.team, 'none');
+  await post('/api/state/p1/prefs', { team: 'lulea', sub: 'sv' });
 });

@@ -418,6 +418,7 @@
     var f = card.querySelector('.frame');
     var kind = R.def.kind;
     if (kind === 'poster') NS.preview.start(it.t === 'episode' ? Object.assign({}, it, { bd: it.bd }) : it, f, { delay: 2400, before: f.querySelector('.xshade') });
+    else if (kind === 'live' && it.mt) NS.preview.stop(); // a match card: no preview of whatever the channel shows now
     else if (kind === 'live') NS.preview.start(it, f, { delay: 1800, before: f.querySelector('.ltag') });
     else if (kind === 'continue') NS.preview.start(it, f, { delay: 2200, before: f.querySelector('.shade') });
   };
@@ -454,6 +455,7 @@
       return;
     }
     if (it.t === 'cat') { NS.router.push(new NS.Grid(it.type, it.id, it.label)); return; }
+    if (it.mt) { NS.openMatchCard(it); return; }
     if (it.t === 'live') {
       var R = this.rows.currentRow();
       NS.playItem(it, { list: R ? R.items : [it], cat: row.cat || null });
@@ -497,6 +499,17 @@
     });
   };
 
+  /** A card in "Dina lags matcher": the channel when the match is on, a countdown (with the channel) before it. */
+  NS.openMatchCard = function (it) {
+    var ch = Object.assign({}, it, { k: String(it.k).split('@')[0] });
+    delete ch.mt;
+    if (it.mt.s - Date.now() > 30 * 60e3) { // far off: no hours-long countdown; Norrsken says when it starts
+      NS.confirm({ title: it.mt.t, text: [it.mt.label, NS.matchWhen(it.mt.s) + ' på ' + ch.n].filter(Boolean).join(' · ') + '. Norrsken säger till när matchen börjar.', buttons: [{ label: 'Okej', value: '' }, { label: 'Öppna kanalen nu', icon: 'play', value: 'go' }], cancel: '' })
+        .then(function (v) { if (v === 'go') NS.playItem(ch, { list: [ch], cat: ch.cat }); });
+      return;
+    }
+    NS.watchMatch({ state: Date.now() >= it.mt.s ? 'live' : 'soon', title: it.mt.t, s: it.mt.s, e: it.mt.e, ch: ch, chName: ch.n, chans: [ch] }, [ch], ch.cat);
+  };
   Browse.prototype.activate = function (first) {
     var self = this;
     this._clk = NS.clock(this.nav.clockEl);
@@ -1105,7 +1118,7 @@
       p.appendChild(h('h2', { text: 'Profil: ' + (NS.profile ? NS.profile.name : '') }));
       p.appendChild(h('p', { text: 'Varje profil har en egen lista, egen historik och egen ”Fortsätt titta”. Barnprofiler visar bara barnkategorier.' }));
     } else if (it.id === 'team') {
-      var tm = NS.teamName(NS.pref('team'));
+      var tm = NS.teamNames();
       p.appendChild(h('h2', { text: 'Favoritlag: ' + tm }));
       p.appendChild(h('p', { text: 'När tv-guiden visar en match med laget, som pågår eller börjar inom en timme, syns den högst upp på startsidan. Tryck OK där för att byta till kanalen.' }));
       p.appendChild(h('p', { class: 'soft', text: 'Tryck OK för att välja lag. Gäller profilen ' + (NS.profile ? NS.profile.name : '') + '.' }));

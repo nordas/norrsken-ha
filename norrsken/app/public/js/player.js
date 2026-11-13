@@ -454,6 +454,12 @@
    * film to Safari's own player before the TV is picked.
    */
   Player.prototype.iosOwn = function () { return this.live && NS.iosNative(this.video); };
+  /**
+   * Live on iPhone/iPad passes through the server (so AirPlay to the TV gets the picture), but only through its memory:
+   * nothing is recorded. To the viewer it is plain live TV – no "spelas in", no timeline. A pause starts a real pause
+   * recording, as on every other screen.
+   */
+  Player.prototype.relay = function () { var ts = this.tshift; return !!(ts && ts.ios && !ts.match); };
 
   Player.prototype.startSource = function (at) {
     var self = this;
@@ -526,7 +532,7 @@
     }
     if (src.kind === 'ts') {
       if (window.mpegts && window.mpegts.isSupported()) {
-        var mp = this.mp = window.mpegts.createPlayer({ type: 'mpegts', isLive: true, url: src.url }, {
+        var mp = this.mp = window.mpegts.createPlayer({ type: 'mpegts', isLive: true, url: new URL(src.url, location.href).href }, { // absolute: the worker that fetches it has no page address to resolve "/px/…" against
           enableWorker: true, lazyLoad: false, enableStashBuffer: true, stashInitialSize: 1024 * 1024,
           liveBufferLatencyChasing: false, autoCleanupSourceBuffer: true, autoCleanupMaxBackwardDuration: 60, autoCleanupMinBackwardDuration: 30
         });
@@ -745,7 +751,7 @@
     if (this._airLiveBusy || Date.now() - (this._airLiveAt || 0) < 60000) return; // once a minute: never a loop
     this._airLiveBusy = true;
     this._airLiveAt = Date.now();
-    NS.api.post('api/pause/start' + NS.pq(), { id: item.id }).then(function (r) {
+    NS.api.post('api/pause/start' + NS.pq(), { id: item.id, live: true }).then(function (r) { // through memory only: nothing is recorded
       self._airLiveBusy = false;
       if (self.item !== item || self.airNative) { if (!r.match) NS.api.post('api/pause/' + r.id + '/stop', {}).catch(function () {}); return; }
       var src = self.lanify(r.url);
@@ -1582,7 +1588,7 @@
   };
   Player.prototype.livePause = function () {
     var self = this, v = this.video;
-    if (this.tshift && this.tshift.playing) { v.pause(); this.showOsd(true); this.paintTshift(); return; } // pausing the recording: it keeps recording
+    if (this.tshift && this.tshift.playing && !this.relay()) { v.pause(); this.showOsd(true); this.paintTshift(); return; } // pausing the recording: it keeps recording
     if (this.livePausedAt) return;
     v.pause();
     this.livePausedAt = Date.now();
@@ -1595,6 +1601,12 @@
     var self = this, v = this.video;
     clearTimeout(this.lpT);
     var ts = this.tshift;
+    if (this.relay()) { // a short pause of live through the server: on again (Safari goes to live by itself after a long one)
+      var longP = this.livePausedAt && Date.now() - this.livePausedAt > 20000;
+      this.livePausedAt = 0;
+      if (longP) { this.goLive(); return; }
+      this.playPromise(); this.showOsd(); this.paintTshift(); return;
+    }
     if (ts && ts.playing) { this.playPromise(); this.showOsd(); this.paintTshift(); return; }
     if (ts && ts.mode === 'arc') {
       // on with the archive from the paused second (a few seconds back: what the screen showed was behind live)
@@ -1624,7 +1636,7 @@
   /** Still paused after a few seconds: keep the picture on screen, stop the stream, get ready to continue. */
   Player.prototype.freezeLive = function () {
     var self = this, v = this.video;
-    if (!this.live || !this.livePausedAt || !this.video.paused || this.tshift) return;
+    if (!this.live || !this.livePausedAt || !this.video.paused || (this.tshift && !this.relay()) || this.airNative) return;
     var st = (NS.status && NS.status.pause) || { mode: 'auto', rec: true, max: 60 };
     if (st.mode === 'off') return;
     var e = NS.epgFor(this.item.id);
@@ -1632,6 +1644,12 @@
     var arc = this.item.arc && e && e.now && e.now.s <= at;
     if (!arc && !(st.mode === 'auto' && st.rec)) return;
     this.snapFrame();
+    if (this.relay()) { // live through the server ends here: the pause recording takes over the connection
+      var old = this.tshift;
+      this.tshift = null;
+      clearInterval(old.aliveT);
+      if (old.id) NS.api.post('api/pause/' + old.id + '/stop', {}).catch(function () {});
+    }
     this.teardown();
     if (arc) { this.tshift = { mode: 'arc', at: at, prog: e.now }; this.paintTshift(); return; }
     var ts = this.tshift = { mode: 'rec', at: at, max: st.max };
@@ -1858,7 +1876,7 @@
   /** Paint the seek bar of the recording (hidden unless we are behind live or paused on a recording). */
   Player.prototype.paintLBar = function () {
     if (!this.live) return;
-    var ts = this.tshift;
+    var ts = this.relay() ? null : this.tshift;
     var rec = !!(ts && ts.mode === 'rec' && ts.url);
     // on live TV the bar and the controls are always there, as on TV4 Play
     this.el.classList.add('lshift');
@@ -1885,7 +1903,7 @@
   /** Go to a point in the recording: while playing the picture jumps there, while paused the next play starts there. */
   Player.prototype.seekRec = function (t) {
     var ts = this.tshift;
-    if (!ts || ts.mode !== 'rec' || !ts.url) return;
+    if (!ts || ts.mode !== 'rec' || !ts.url || this.relay()) return;
     t = Math.max(0, Math.min(t, this.recLen() - 2));
     if (!ts.playing) { ts.pos = t; this.paintLBar(); this.paintTshift(); return; }
     try { this.video.currentTime = t; } catch (e) { /* ignore: the picture stays where it was */ }
@@ -1902,7 +1920,7 @@
   Player.prototype.paintTshift = function () {
     var el = this.tsEl;
     if (!el) return;
-    var ts = this.tshift, v = this.video;
+    var ts = this.relay() ? null : this.tshift, v = this.video;
     el.innerHTML = '';
     var on = !!(ts || this.livePausedAt);
     el.classList.toggle('on', on);
@@ -2172,7 +2190,7 @@
     var buf = 0;
     try { buf = v.buffered.length ? v.buffered.end(v.buffered.length - 1) - v.currentTime : 0; } catch (e) { /* ignore */ }
     var q = v.getVideoPlaybackQuality ? v.getVideoPlaybackQuality() : null;
-    rows.push(['Källa', this.live && this.tshift && this.tshift.url ? (this.tshift.match ? 'Matchinspelning' : 'Pausinspelning') + ' (servern)' : src ? srcLabel(src) : '–']);
+    rows.push(['Källa', this.live && this.tshift && this.tshift.url ? (this.tshift.match ? 'Matchinspelning (servern)' : this.relay() ? 'Live via servern (spelas inte in)' : 'Pausinspelning (servern)') : src ? srcLabel(src) : '–']);
     rows.push(['Spelare', engine]);
     rows.push(['Bild', (v.videoWidth ? v.videoWidth + '×' + v.videoHeight + ' (' + resLabel(v.videoWidth, v.videoHeight) + ')' : '–') + ((pr.video || m.v) ? ' · ' + String(pr.video || m.v).toUpperCase() : '') + ((pr.hdr || m.hdr) ? ' · ' + (pr.hdr || m.hdr) : '') + ((pr.sar || m.sar) && (pr.sar || m.sar) !== '1:1' ? ' · bildpunkter ' + (pr.sar || m.sar) + ', visas ' + (pr.dar || m.dar) : '')]);
     if (lvl && (lvl.codecSet || lvl.videoCodec)) rows.push(['Kodek', [lvl.videoCodec, lvl.audioCodec].filter(Boolean).join(' / ')]);
@@ -2335,7 +2353,7 @@
       return;
     }
     if (this.live) {
-      if (this.tshift && this.tshift.mode === 'rec' && (a === 'left' || a === 'right')) { this.seekRec(this.recPos() + (a === 'left' ? -10 : 10)); this.showOsd(); return; }
+      if (this.tshift && this.tshift.mode === 'rec' && !this.relay() && (a === 'left' || a === 'right')) { this.seekRec(this.recPos() + (a === 'left' ? -10 : 10)); this.showOsd(); return; }
       if (a === 'up' || a === 'chup') this.zap(1);
       else if (a === 'down' || a === 'chdn') this.zap(-1);
       else if (a === 'ok' && !this.osdOn) this.showOsd();
@@ -2562,7 +2580,7 @@
       var w = el.clientWidth || 1, x = e.clientX;
       var side = x < w / 3 ? -1 : x > w * 2 / 3 ? 1 : 0;
       var now = Date.now();
-      var canSeek = !self.live || (self.tshift && self.tshift.mode === 'rec' && self.tshift.url);
+      var canSeek = !self.live || (self.tshift && self.tshift.mode === 'rec' && self.tshift.url && !self.relay());
       if (side && canSeek && side === lastSide && now - lastTap < 350) {
         lastTap = 0;
         if (self.live) self.seekRec(self.recPos() + side * 10); else self.seekTo(self.cur() + side * 10);

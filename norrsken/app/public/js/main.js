@@ -51,7 +51,7 @@
       var top = NS.router.top();
       if (top && top.rows && top.rows.refreshLive) top.rows.refreshLive();
     }, 60000);
-    setInterval(function () { NS.checkReminders(); }, 20000);
+    setInterval(function () { NS.checkReminders(); NS.checkMatches(); }, 20000);
     // pick up reminders set on other devices
     setInterval(function () { if (NS.profile) NS.api.state().then(function (st) { NS.state.reminders = st.reminders || []; }).catch(function () {}); }, 120000);
   };

@@ -25,6 +25,31 @@ const TEAMS = [
   { id: 'aik', name: 'AIK', short: 'AIK', re: /\baik\b(?! fotboll)/i, col: ['#0a2240', '#f5c400'] },
   { id: 'tre-kronor', name: 'Tre Kronor', short: 'Sverige', re: /tre kronor|sverige|sweden/i, col: ['#005293', '#fecb00'] },
 ];
+// Premier League 2026/27. Every match the club plays counts (league, the cups, Europe): its name in a "A – B" title.
+const PL = [
+  { id: 'arsenal', name: 'Arsenal', short: 'Arsenal', re: /\barsenal\b/i, col: ['#ef0107', '#ffffff'] },
+  { id: 'aston-villa', name: 'Aston Villa', short: 'Aston Villa', re: /aston villa/i, col: ['#670e36', '#95bfe5'] },
+  { id: 'bournemouth', name: 'Bournemouth', short: 'Bournemouth', re: /bournemouth/i, col: ['#da291c', '#111111'] },
+  { id: 'brentford', name: 'Brentford', short: 'Brentford', re: /brentford/i, col: ['#e30613', '#ffffff'] },
+  { id: 'brighton', name: 'Brighton', short: 'Brighton', re: /brighton/i, col: ['#0057b8', '#ffffff'] },
+  { id: 'chelsea', name: 'Chelsea', short: 'Chelsea', re: /\bchelsea\b/i, col: ['#034694', '#ffffff'] },
+  { id: 'coventry', name: 'Coventry City', short: 'Coventry', re: /coventry/i, col: ['#59cbe8', '#ffffff'] },
+  { id: 'crystal-palace', name: 'Crystal Palace', short: 'Crystal Palace', re: /crystal palace/i, col: ['#1b458f', '#c4122e'] },
+  { id: 'everton', name: 'Everton', short: 'Everton', re: /\beverton\b/i, col: ['#003399', '#ffffff'] },
+  { id: 'fulham', name: 'Fulham', short: 'Fulham', re: /\bfulham\b/i, col: ['#111111', '#ffffff'] },
+  { id: 'hull', name: 'Hull City', short: 'Hull', re: /\bhull\b/i, col: ['#f5971d', '#111111'] },
+  { id: 'ipswich', name: 'Ipswich Town', short: 'Ipswich', re: /ipswich/i, col: ['#0e4c92', '#ffffff'] },
+  { id: 'leeds', name: 'Leeds United', short: 'Leeds', re: /\bleeds\b/i, col: ['#ffcd00', '#1d428a'] },
+  { id: 'liverpool', name: 'Liverpool', short: 'Liverpool', re: /\bliverpool\b/i, col: ['#c8102e', '#00b2a9'] },
+  { id: 'man-city', name: 'Manchester City', short: 'Man City', re: /manchester city|man\.? city/i, col: ['#6cabdd', '#1c2c5b'] },
+  { id: 'man-utd', name: 'Manchester United', short: 'Man United', re: /manchester (united|utd)|man\.? (united|utd)/i, col: ['#da291c', '#fbe122'] },
+  { id: 'newcastle', name: 'Newcastle United', short: 'Newcastle', re: /newcastle(?! jets)/i, col: ['#111111', '#ffffff'] },
+  { id: 'nottingham', name: 'Nottingham Forest', short: 'Nottingham', re: /nottingham|nott'?m forest/i, col: ['#dd0000', '#ffffff'] },
+  { id: 'sunderland', name: 'Sunderland', short: 'Sunderland', re: /sunderland/i, col: ['#eb172b', '#ffffff'] },
+  { id: 'tottenham', name: 'Tottenham Hotspur', short: 'Tottenham', re: /tottenham/i, col: ['#132257', '#ffffff'] },
+];
+for (const t of TEAMS) { t.sport = 'hockey'; t.group = t.id === 'tre-kronor' ? 'Landslag' : 'Ishockey'; }
+for (const t of PL) { t.sport = 'football'; t.group = 'Premier League'; TEAMS.push(t); }
 const BY_ID = new Map(TEAMS.map(t => [t.id, t]));
 
 /** Hockey, not football or news: something hockey-ish in the title, description or channel name. */
@@ -39,16 +64,30 @@ function teamId(v) {
   return t ? t.id : 'lulea';
 }
 function team(id) { return BY_ID.get(id) || null; }
-function list() { return TEAMS.map(t => ({ id: t.id, name: t.name })); }
+function list() { return TEAMS.map(t => ({ id: t.id, name: t.name, group: t.group })); }
+/** The profile's favourite teams as ids: a list, one id, or 'none'. Unknown ones are left out; at most 12. */
+function teamIds(v) {
+  const out = [];
+  for (const x of Array.isArray(v) ? v : [v]) {
+    const s = String(x || '').toLowerCase().trim();
+    const id = BY_ID.has(s) ? s : (s && s !== 'none' && s !== 'inget' ? (TEAMS.find(t => t.name.toLowerCase() === s) || {}).id : '');
+    if (id && !out.includes(id)) out.push(id);
+  }
+  return out.slice(0, 12);
+}
 
 /** "SHL: Luleå Hockey - Färjestad BK" → { home: 'Luleå', away: 'Färjestad' } (short names when known). */
 function matchup(title, fav) {
-  const clean = String(title || '').replace(/^(live|direkt|sport|ishockey|hockey|shl|chl|hockeyallsvenskan)\s*[:|.\-–]\s*/gi, '').replace(/^(live|direkt|sport|ishockey|hockey|shl|chl|hockeyallsvenskan)\s*[:|.\-–]\s*/gi, '');
+  let clean = String(title || '').replace(/^(live|direkt|sport|ishockey|hockey|shl|chl|hockeyallsvenskan)\s*[:|.\-–]\s*/gi, '').replace(/^(live|direkt|sport|ishockey|hockey|shl|chl|hockeyallsvenskan)\s*[:|.\-–]\s*/gi, '');
+  // "Fotboll: Premier League: Arsenal - Chelsea": whatever stands before a colon is the sport or the competition
+  for (let i = 0; i < 3; i++) { const c = /^[^:|–—]{2,40}?[:|]\s+(?=\S.*\s(?:[-–—]|vs\.?|mot)\s)/i.exec(clean); if (!c || /\s[-–—]\s/.test(c[0])) break; clean = clean.slice(c[0].length); }
   const m = /^(.+?)\s+(?:[-–—]|vs\.?|mot)\s+(.+?)(?:\s*[,(|].*)?$/i.exec(clean);
   if (!m) return null;
+  // a football club's name is read as football clubs', a hockey club's as hockey clubs' ("Malmö", "AIK" are both)
+  const pool = fav && fav.sport ? TEAMS.filter(x => x.sport === fav.sport) : TEAMS;
   const name = (s) => {
-    const t = TEAMS.find(x => x.re.test(s));
-    return t ? t.short : s.replace(/\s+(hockey|hc|if|bk|ik|aik)$/i, '').trim();
+    const t = pool.find(x => x.re.test(s));
+    return t ? t.short : s.replace(/\s+(hockey|hc|if|bk|ik|aik|fc|afc|ff)$/i, '').replace(/^(fc|afc)\s+/i, '').trim();
   };
   const home = name(m[1]), away = name(m[2]);
   if (!home || !away || home === away) return null;
@@ -143,7 +182,8 @@ const GENDER_HERR = /\b(herr|herrar|herrarna|herrlandslag(et)?|men'?s|m[äa]n)\b
 const AGE_RE = /\b(?:j-?(?:18|20)|u-?(?:15|16|17|18|19|20|21|23))\b|\bjunior(?:er|landslag(?:et)?)?\b|\bpojklandslag(?:et)?\b|\bflicklandslag(?:et)?\b/i;
 const COMPS = [
   [/\bshl\b/i, 'SHL'], [/hockeyallsvenskan/i, 'Hockeyallsvenskan'], [/\bchl\b|champions hockey/i, 'CHL'],
-  [/nations league/i, 'Nations League'], [/vm-kval/i, 'VM-kval'], [/em-kval/i, 'EM-kval'], [/landskamp/i, 'Landskamp'],
+  [/premier league/i, 'Premier League'], [/fa[- ]?cup/i, 'FA-cupen'], [/carabao|efl cup|league cup|ligacupen/i, 'Ligacupen'], [/community shield/i, 'Community Shield'],
+  [/conference league/i, 'Conference League'], [/nations league/i, 'Nations League'], [/vm-kval/i, 'VM-kval'], [/em-kval/i, 'EM-kval'], [/landskamp/i, 'Landskamp'],
   [/vänskapsmatch|v[äa]nskaps/i, 'Vänskapsmatch'], [/damallsvenskan/i, 'Damallsvenskan'], [/allsvenskan/i, 'Allsvenskan'],
   [/superettan/i, 'Superettan'], [/champions league/i, 'Champions League'], [/europa league/i, 'Europa League'],
   [/euro hockey tour|\beht\b|karjala|beijer|channel one|german cup/i, 'Euro Hockey Tour'],
@@ -172,12 +212,19 @@ function classify(title, desc, chName, fallbackSport) {
 
 /** The favourite team as something to follow: its name in the title, and hockey. */
 function teamFollow(fav) {
+  if (fav.sport === 'football') {
+    return {
+      id: fav.id, name: fav.name, short: fav.short, col: fav.col, maxLen: 4 * 3600e3, vs: fav, sport: 'Fotboll',
+      // every match the club plays, whatever the league or cup: its name on one side of "A – B", and not another sport
+      ok: (t, d, chn) => fav.re.test(t) && !!matchup(t, fav) && !HOCKEY.test(t + ' ' + chn) && !OTHER_SPORT.test(t + ' ' + d) && !/\bnba\b|\bnhl\b|\bnfl\b/i.test(t + ' ' + chn),
+    };
+  }
   return {
-    id: fav.id, name: fav.name, short: fav.short, col: fav.col, maxLen: 5 * 3600e3, vs: fav,
+    id: fav.id, name: fav.name, short: fav.short, col: fav.col, maxLen: 5 * 3600e3, vs: fav, sport: 'Ishockey',
     ok: (t, d, chn) => {
       if (!fav.re.test(t)) return false;
       // "Luleå HF - Färjestad BK" has no hockey word in it: two known hockey clubs in the title is hockey enough
-      const other = TEAMS.some(x => x !== fav && x.re.test(t));
+      const other = TEAMS.some(x => x !== fav && x.sport === 'hockey' && x.re.test(t));
       return other || HOCKEY.test(t + ' ' + d + ' ' + chn);
     },
   };
@@ -187,9 +234,10 @@ function teamFollow(fav) {
  * Everything followed (see FOLLOW) in the calendar day (Stockholm), best first: live, then the next to start,
  * then what already ran; within that the earliest. Programmes from the TV guide and event channels (name only).
  */
-function collect(follows, channels, epg, now) {
+function collect(follows, channels, epg, now, days = 1) {
   if (!epg || !epg.map) epg = { map: new Map() };
   const day = stockholmDay(now);
+  if (days > 1) day.end = stockholmDay(day.start + (days - 1) * 86400e3 + 6 * 3600e3).end; // the days ahead too (the list of matches)
   const hits = new Map(); // follow + start + teams → { f, prog, chans: [] }
   const add = (ch, s, e, t, d, label, ev) => {
     if (s >= day.end) return;
@@ -224,7 +272,7 @@ function collect(follows, channels, epg, now) {
   return [...hits.values()].sort((a, b) => (rank(a) - rank(b)) || a.s - b.s || b.chans.length - a.chans.length).map((best) => {
     const chans = best.chans.slice().sort((a, b) => channelScore(b.n) - channelScore(a.n));
     const f = best.f;
-    const kind = classify(best.t, best.d, chans[0].n || '', f.id === 'langd' ? 'Längdskidor' : f.id === 'skidskytte' ? 'Skidskytte' : (f.vs && f.id !== 'sverige') ? 'Ishockey' : '');
+    const kind = classify(best.t, best.d, chans[0].n || '', f.id === 'langd' ? 'Längdskidor' : f.id === 'skidskytte' ? 'Skidskytte' : (f.vs && f.id !== 'sverige') ? (f.sport || 'Ishockey') : '');
     return {
       team: { id: f.id, name: f.name, short: f.short, col: f.col },
       kind, label: kind.label || f.name,
@@ -249,8 +297,16 @@ function matchesToday(teamIdValue, channels, epg, { now = Date.now() } = {}) {
 
 /** What the start page shows today: the favourite team, Sweden (hockey/football), the skiing world cups. */
 function followsFor(teamIdValue) {
+  return teamIds(teamIdValue).map(id => teamFollow(team(id))).concat([FOLLOW.sverige, FOLLOW.langd, FOLLOW.skidskytte]);
+}
+/** The favourites' matches from now and `days` days ahead, in the order they are played (what is on now first). */
+function upcoming(teamIdValue, channels, epg, { now = Date.now(), days = 7 } = {}) {
+  return collect(teamIds(teamIdValue).map(id => teamFollow(team(id))), channels, epg, now, days).filter(m => m.state !== 'ended').sort((a, b) => a.s - b.s);
+}
+/** What is recorded by itself today: the team's matches and, when asked for, the skiing world cups. */
+function recToday(teamIdValue, ski, channels, epg, { now = Date.now() } = {}) {
   const fav = team(teamIdValue);
-  return (fav ? [teamFollow(fav)] : []).concat([FOLLOW.sverige, FOLLOW.langd, FOLLOW.skidskytte]);
+  return collect((fav ? [teamFollow(fav)] : []).concat(ski ? [FOLLOW.langd, FOLLOW.skidskytte] : []), channels, epg, now);
 }
 function todayAll(teamIdValue, channels, epg, { now = Date.now() } = {}) {
   return collect(followsFor(teamIdValue), channels, epg, now);
@@ -261,4 +317,4 @@ function findMatch(teamIdValue, channels, epg, opts = {}) {
   return todayAll(teamIdValue, channels, epg, opts)[0] || null;
 }
 
-module.exports = { classify, TEAMS, teamId, team, list, matchup, findMatch, matchesToday, todayAll, channelScore, stockholmDay, stockholmTime, eventOf };
+module.exports = { classify, TEAMS, teamId, teamIds, upcoming, recToday, team, list, matchup, findMatch, matchesToday, todayAll, channelScore, stockholmDay, stockholmTime, eventOf };

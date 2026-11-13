@@ -540,3 +540,27 @@ html.m .m-ep-play svg { display: block; width: 16px; height: 16px; margin: 0 0 0
   .m-ep-img { width: 100%; height: auto; aspect-ratio: 16 / 9; }
   .m-ep-txt { flex: 1 1 0; }
 }
+
+html.m .menu-list .mi-head { font-size: 12px; margin: 12px 0 2px 4px; }
+html.m .menu-list .btn.sel { background: rgba(255,255,255,.2); }
+/* the favourite teams' coming matches */
+.m-matches { margin: 2px 20px 16px; }
+.m-matches h3 { font-size: 17px; font-weight: 800; margin-bottom: 8px; }
+.m-match { display: flex; align-items: center; gap: 12px; width: 100%; padding: 11px 12px; margin-bottom: 6px; border-radius: 12px; background: rgba(255,255,255,.06); border: 0; color: #fff; text-align: left; }
+.m-match .when { flex: 0 0 62px; font-size: 12px; font-weight: 700; color: var(--text-2); line-height: 1.25; }
+.m-match .when b { display: block; font-size: 15px; color: #fff; }
+.m-match .what { flex: 1; min-width: 0; }
+.m-match .what b { display: block; font-size: 15px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.m-match .what span { display: block; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.m-match .live-pill { font-size: 11px; padding: 2px 7px; border-radius: 5px; }
+.m-match-more { background: none; border: 0; color: var(--text-2); font-size: 14px; font-weight: 700; padding: 6px 2px; }
+
+.m-mcard .m-mvs { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 10px; padding-top: 10px; }
+.m-mcard .m-mvs i { font-style: normal; font-size: 18px; font-weight: 800; opacity: .6; }
+.m-mcard .m-vs-b { width: 50px; height: 50px; }
+.m-livetag.when { background: rgba(0,0,0,.6); }
+.m-match-b { display: flex; flex: none; }
+.m-match-b .m-vs-b { width: 30px; height: 30px; font-size: 9px; }
+.m-match-b .m-vs-b + .m-vs-b { margin-left: -8px; }
+html.m .menu-list .btn, html.m .menu-list .mi-head { flex: none; }
+html.m .menu-list { overflow-y: auto; -webkit-overflow-scrolling: touch; }

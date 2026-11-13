@@ -18,6 +18,7 @@ const tsbuf = require('./lib/tsbuf');
 const storage = require('./lib/storage');
 const downloads = require('./lib/downloads');
 const airtest = require('./lib/airtest');
+const airlog = require('./lib/airlog');
 const { Services, serviceInfo } = require('./lib/services');
 const { redact, fetchText, pool } = require('./lib/util');
 const pkg = require('./package.json');
@@ -621,11 +622,13 @@ route('GET', '/api/page/:page', (req, res, q, p) => {
   else if (p.page === 'mylist') rows = myListPage(st);
   else if (['live', 'movie', 'series'].includes(p.page)) rows = typePage(p.page, prof, st);
   else return bad(res, 'okänd sida', 404);
+  if (p.page === 'home' || p.page === 'live') { const mr = matchRow(prof, st, ingressBase(req)); if (mr) rows.unshift(mr); }
   ok(res, { rows, featured: featured(p.page, prof), sport: p.page === 'home' || p.page === 'live' ? sportNow(prof, st, ingressBase(req)) : null });
 });
 
 // the clubs' own abbreviations, as on the scoreboard
-const ABBR = { lulea: 'LHF', bjorkloven: 'IFB', brynas: 'BIF', djurgarden: 'DIF', frolunda: 'FHC', farjestad: 'FBK', hv71: 'HV71', linkoping: 'LHC', malmo: 'MIF', rogle: 'RBK', skelleftea: 'SAIK', timra: 'TIK', vaxjo: 'VLH', orebro: 'ÖRE', leksand: 'LIF', modo: 'MODO', aik: 'AIK', 'tre-kronor': 'SWE' };
+const ABBR = { lulea: 'LHF', bjorkloven: 'IFB', brynas: 'BIF', djurgarden: 'DIF', frolunda: 'FHC', farjestad: 'FBK', hv71: 'HV71', linkoping: 'LHC', malmo: 'MIF', rogle: 'RBK', skelleftea: 'SAIK', timra: 'TIK', vaxjo: 'VLH', orebro: 'ÖRE', leksand: 'LIF', modo: 'MODO', aik: 'AIK', 'tre-kronor': 'SWE',
+  arsenal: 'ARS', 'aston-villa': 'AVL', bournemouth: 'BOU', brentford: 'BRE', brighton: 'BHA', chelsea: 'CHE', coventry: 'COV', 'crystal-palace': 'CRY', everton: 'EVE', fulham: 'FUL', hull: 'HUL', ipswich: 'IPS', leeds: 'LEE', liverpool: 'LIV', 'man-city': 'MCI', 'man-utd': 'MUN', newcastle: 'NEW', nottingham: 'NFO', sunderland: 'SUN', tottenham: 'TOT' };
 /*
  * Club crests are the clubs' own: none ship with Norrsken. The user's own picture files are shown when they are put in
  * Home Assistant's config folder: /config/norrsken/crests/<team>.png (or .svg, .webp, .jpg), e.g. lulea.png, hv71.png.
@@ -647,8 +650,8 @@ route('GET', '/crest/:id', (req, res, q, p) => {
 
 /** The profile's favourite team playing now or soon (start page billboard). */
 function sportNow(prof, st, base = '') {
-  const tid = (st.prefs && st.prefs.team) || 'lulea'; // 'none': no team, but Sweden and the skiing world cups still show
-  const key = prof.id + '|' + tid + '|' + catalog.epg.at;
+  const tid = teamsOf(st); // none: no team, but Sweden and the skiing world cups still show
+  const key = prof.id + '|' + tid.join(',') + '|' + catalog.epg.at;
   let hit = sportCache.get(key);
   if (!hit || Date.now() - hit.at >= 60e3) {
     let m = null;
@@ -668,15 +671,53 @@ function sportNow(prof, st, base = '') {
   // not recorded yet because something else plays (the provider gives one connection): say so instead of nothing
   const waits = !rec && Date.now() - (matchWait.get(m.team.id + '|' + m.s) || 0) < 90e3;
   // both teams' colours and short names, for the match card (no crests: those are the clubs' own)
-  const side = (n) => { const t = n && sport.TEAMS.find(x => x.re.test(n)); return t ? { n: t.short, col: t.col, ab: ABBR[t.id] || '', img: crestFile(t.id) ? base + '/crest/' + t.id : '' } : n ? { n, col: null, ab: '', img: '' } : null; };
+  const side = (n) => matchSide(n, m, base);
   return Object.assign({}, m, { rec, recWait: waits ? 'Spelas in när det som spelas nu stängs' : '', sides: m.home && m.away ? [side(m.home), side(m.away)] : null });
 }
+/** The profile's favourite teams (ids). Old profiles have one team; no choice at all means Luleå. */
+function teamsOf(st) {
+  const p = (st && st.prefs) || {};
+  if (Array.isArray(p.teams)) return sport.teamIds(p.teams);
+  return sport.teamIds(p.team === undefined ? 'lulea' : p.team);
+}
+/** One side of a match for the card: short name, colours, abbreviation, the user's crest picture. */
+function matchSide(n, m, base) {
+  const foot = m.kind && m.kind.sport === 'Fotboll';
+  const pool = sport.TEAMS.filter(x => (x.sport === 'football') === foot);
+  { const t = n && pool.find(x => x.re.test(n)); return t ? { n: t.short, col: t.col, ab: ABBR[t.id] || '', img: crestFile(t.id) ? base + '/crest/' + t.id : '' } : n ? { n, col: null, ab: '', img: '' } : null; }
+}
 const sportCache = new Map();
+/** The favourite teams' matches the days ahead (whatever league or cup), for the list on the start page. */
+function upcomingMatches(prof, st, base = '') {
+  const ids = teamsOf(st);
+  if (!ids.length) return [];
+  const key = 'up|' + prof.id + '|' + ids.join(',') + '|' + catalog.epg.at;
+  let hit = sportCache.get(key);
+  if (!hit || Date.now() - hit.at >= 60e3) {
+    let list = [];
+    try { list = sport.upcoming(ids, catalog.list('live', 'all', prof), catalog.epg, { days: 8 }).slice(0, 40); } catch (e) { console.error('[sport]', e.message); }
+    hit = { at: Date.now(), list };
+    sportCache.set(key, hit);
+    if (sportCache.size > 50) sportCache.clear();
+  }
+  return hit.list.map(m => ({
+    team: m.team, label: m.label, state: Date.now() >= m.s ? 'live' : 'soon', title: m.title, s: m.s, e: m.e, ch: m.ch, chName: m.chName, chans: m.chans.slice(0, 6),
+    sides: m.home && m.away ? [matchSide(m.home, m, base), matchSide(m.away, m, base)] : null,
+  }));
+}
+/** The same as a row of channel cards (TV and phone start page): each card says which match and when. */
+function matchRow(prof, st, base) {
+  const list = upcomingMatches(prof, st, base);
+  if (!list.length) return null;
+  const items = list.map(m => Object.assign({}, m.ch, { k: m.ch.k + '@' + m.s, mt: { t: m.title, s: m.s, e: m.e, label: m.label, comp: (m.label || '').split(' · ').pop(), sides: m.sides, col: m.team.col } }));
+  return row('matches', 'Dina lags matcher', 'live', items, { limit: 40 });
+}
 
 route('GET', '/api/sport', (req, res, q) => {
   if (!catalog.ready()) return bad(res, 'inte redo', 503);
   const prof = profileOf(q);
-  ok(res, { match: sportNow(prof, store.profileState(prof.id), ingressBase(req)), teams: sport.list() });
+  const st = store.profileState(prof.id);
+  ok(res, { match: sportNow(prof, st, ingressBase(req)), teams: sport.list(), upcoming: upcomingMatches(prof, st, ingressBase(req)) });
 });
 
 route('GET', '/api/list', (req, res, q) => {
@@ -750,7 +791,9 @@ route('POST', '/api/state/:profile/prefs', async (req, res, q, p) => {
   const st = store.profileState(store.profile(p.profile).id);
   const pr = st.prefs || (st.prefs = {});
   for (const k of ['sub', 'audio']) if (typeof b[k] === 'string') pr[k] = b[k].toLowerCase().replace(/[^a-z-]/g, '').slice(0, 12);
-  if (typeof b.team === 'string') pr.team = sport.teamId(b.team);
+  // several favourite teams; `team` (the first, or 'none') stays for a screen still running the older app
+  if (Array.isArray(b.teams)) { pr.teams = sport.teamIds(b.teams); pr.team = pr.teams[0] || 'none'; }
+  else if (typeof b.team === 'string') { pr.team = sport.teamId(b.team); pr.teams = sport.teamIds(pr.team); }
   store.saveState();
   ok(res, { ok: true, prefs: pr });
 });
@@ -1308,6 +1351,10 @@ route('GET', '/mrec/:mid/live.m3u8', (req, res, q, p) => {
 });
 
 /** Records every match of the favourite team (Luleå Hockey) from just before it starts until the end, if it's on a channel we have. */
+/** What records by itself today: Luleå's matches, and the skiing world cups when that is switched on. Nothing else. */
+function recList(now) {
+  return sport.recToday(MATCH_TEAM, (store.config.options || {}).skiRec === true, catalog.list('live', 'all', store.profile('')), catalog.epg, { now });
+}
 function matchRecTick() {
   if (!catalog.ready() || !matchRecReady) return;
   const now = Date.now();
@@ -1317,9 +1364,9 @@ function matchRecTick() {
   }
   if ((store.config.options || {}).matchRec === false) return;
   let list = [];
-  try { list = sport.matchesToday(MATCH_TEAM, catalog.list('live', 'all', store.profile('')), catalog.epg, { now }); } catch (e) { return; }
+  try { list = recList(now); } catch (e) { return; }
   for (const m of list) {
-    const key = MATCH_TEAM + '|' + m.s;
+    const key = m.team.id + '|' + m.s;
     if (now < m.s - MATCH_LEAD_MS || now > m.e + MATCH_TAIL_MS) continue;
     if (matchStopped.has(key)) continue; // the viewer said stop
     const had = matchRecs.get(key);
@@ -1342,6 +1389,8 @@ function matchRecTick() {
     if (pre) { matchFailAt.set(key, now); if (now - (matchWaitLog || 0) > 5 * 60e3) { matchWaitLog = now; console.error('[match]', m.title, '– kan inte spela in:', pre); } continue; }
     const maxConn = (catalog.data && catalog.data.maxConn) || 1;
     if (maxConn <= 2 && (ff.activeSessions() > 0 || tsbuf.pauseActive() > 0 || proxy.activeCount() > 0 || Date.now() - lastStreamAt < 3 * 60e3)) {
+      // skiing never cuts off what someone is watching: it is recorded when the connection is free (or when they watch it)
+      if (m.team.id !== MATCH_TEAM) { matchWait.set(key, now); continue; }
       if (now - (matchWaitLog || 0) > 5 * 60e3) { matchWaitLog = now; console.log('[match]', m.title, 'börjar – matchinspelningen tar leverantörens anslutning före annat tittande'); }
       matchWait.set(key, now);
       takeConnection('matchinspelning');
@@ -1376,11 +1425,11 @@ function startMatchRec(m, key, had, ch, now = Date.now()) {
 function dueMatch(chId, now = Date.now(), aheadMs = 0) {
   if (!chId || !catalog.ready() || (store.config.options || {}).matchRec === false) return null;
   let list = [];
-  try { list = sport.matchesToday(MATCH_TEAM, catalog.list('live', 'all', store.profile('')), catalog.epg, { now }); } catch (e) { return null; }
+  try { list = recList(now); } catch (e) { return null; }
   for (const m of list) {
     const ch = (m.chans || [m.ch]).find(c => String(c.id) === String(chId));
     if (!ch) continue;
-    const key = MATCH_TEAM + '|' + m.s;
+    const key = m.team.id + '|' + m.s;
     if (matchStopped.has(key)) continue;
     if (now < m.s - MATCH_LEAD_MS - aheadMs || now > m.e + MATCH_TAIL_MS) continue;
     const had = matchRecs.get(key);
@@ -1408,9 +1457,10 @@ function matchTakeoverPause(id, aheadMs) {
 function dueAny(now = Date.now()) {
   if (!catalog.ready() || (store.config.options || {}).matchRec === false) return null;
   let list = [];
-  try { list = sport.matchesToday(MATCH_TEAM, catalog.list('live', 'all', store.profile('')), catalog.epg, { now }); } catch (e) { return null; }
+  try { list = recList(now); } catch (e) { return null; }
   for (const m of list) {
-    const key = MATCH_TEAM + '|' + m.s;
+    const key = m.team.id + '|' + m.s;
+    if (m.team.id !== MATCH_TEAM) continue; // only Luleå's match moves a viewer over to it
     if (matchStopped.has(key) || now < m.s - MATCH_LEAD_MS || now > m.e + MATCH_TAIL_MS) continue;
     return { m, key };
   }
@@ -1482,11 +1532,12 @@ route('POST', '/api/pause/start', async (req, res, q) => {
     const it = catalog.get('live', id) || {};
     // the Time Capsule's disk may be asleep: a pause waits for it rather than trust an old answer; live on an iPhone
     // never waits more than a moment (without the Time Capsule it plays from memory, it only cannot pause back)
-    if (b.live) await Promise.race([tsbuf.wakeTC(1, 0), new Promise(r => setTimeout(r, 2500))]);
-    else await tsbuf.wakeTC();
+    // live on an iPhone/iPad (and AirPlay of a live channel) only passes through the server's memory: nothing is
+    // recorded, the Time Capsule is not used. A real pause waits for its disk, which may be asleep.
+    if (!b.live) await tsbuf.wakeTC();
     // live on an iPhone goes through this recording the whole time it is watched: long enough for an evening
     const s = tsbuf.start(src.primary, { ua: catalog.ua(), maxMin: b.live ? 360 : (+o.pauseMax || 60), ch: it.n || id, live: !!b.live });
-    ok(res, { id: s.id, url: ingressBase(req) + '/pause/' + s.id + '/index.m3u8', max: s.maxMin });
+    ok(res, { id: s.id, url: ingressBase(req) + '/pause/' + s.id + '/index.m3u8', max: s.maxMin, relay: !!s.ring });
   } catch (e) { bad(res, e.message, 507); }
 });
 route('POST', '/api/pause/:id/alive', (req, res, q, p) => {
@@ -1645,6 +1696,29 @@ route('GET', '/airtest', async (req, res, q) => {
     extra.push({ name: who + ' – live, allt bakåt (det tv:n får nu)', url: '/pause/' + x.id + '/live.m3u8' });
   }
   send(res, 200, airtest.page(lan, extra), 'text/html; charset=utf-8', { 'Cache-Control': 'no-store' });
+});
+/* What fetched the recordings lately (a TV over AirPlay fetches them itself): the same PIN as /airtest. */
+route('GET', '/airlog', (req, res, q) => {
+  const pin = setupPin();
+  if (pin) {
+    const key = 'airtest:' + clientKey(req);
+    const wait = pinLocked(key);
+    const sent = q.get('pin') || '';
+    if (wait) return send(res, 429, airtest.pinPage('För många fel PIN-koder – vänta ' + wait + ' s'), 'text/html; charset=utf-8');
+    if (!sent || !sameText(sent, pin)) { if (sent) pinFailed(key); return send(res, 401, airtest.pinPage(sent ? 'Fel PIN-kod' : ''), 'text/html; charset=utf-8'); }
+    pinFails.delete(key);
+  }
+  const d = airlog.summary();
+  if (q.get('json')) return ok(res, d);
+  const esc = (x) => String(x).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const clock = (t) => new Date(t).toLocaleTimeString('sv-SE', { timeZone: 'Europe/Stockholm' });
+  const rows = d.clients.map(c => `<tr class="${c.playing ? 'on' : ''}"><td><b>${esc(c.kind)}</b><br><small>${esc(c.ip)}</small></td><td>${c.playing ? 'Spelar nu' : 'Slutade ' + clock(c.last)}<br><small>började ${clock(c.first)} · ${c.secs} s</small></td><td>${c.lists} spellistor<br>${c.pieces} bitar · ${c.mb} MB</td><td class="${c.errors ? 'bad' : ''}">${c.errors} fel${c.lastErr ? '<br><small>' + esc(c.lastErr) + '</small>' : ''}</td><td><small>${esc(c.ua)}</small></td></tr>`).join('');
+  const lines = d.log.map(e => `<tr class="${e.status >= 400 ? 'bad' : ''}"><td>${clock(e.t)}</td><td>${esc(e.kind)}</td><td>${esc(e.file)}</td><td>${e.status}</td><td>${e.ms} ms</td></tr>`).join('');
+  send(res, 200, `<!doctype html><html lang="sv"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="5"><title>AirPlay-logg</title>
+<style>body{font:15px -apple-system,system-ui,sans-serif;background:#0b0b0d;color:#eee;margin:20px}h1{font-size:22px}h2{font-size:16px;margin-top:26px;color:#aaa}table{border-collapse:collapse;width:100%}td{padding:7px 10px;border-bottom:1px solid #222;vertical-align:top}small{color:#999}tr.on td:first-child{box-shadow:inset 3px 0 #30d158}.bad,tr.bad td{color:#ff6961}p{color:#aaa;max-width:60em}</style>
+<h1>AirPlay-logg</h1><p>Vilka enheter som hämtar bild från Norrsken just nu. När du skickar till tv:n med AirPlay ska tv:n dyka upp här som en egen rad och stå som ”Spelar nu”. Sidan uppdateras var femte sekund.</p>
+<h2>Enheter</h2><table>${rows || '<tr><td>Ingen har hämtat något ännu. Starta en kanal på iPhonen.</td></tr>'}</table>
+<h2>Senaste hämtningarna</h2><table>${lines}</table>`, 'text/html; charset=utf-8', { 'Cache-Control': 'no-store' });
 });
 route('GET', '/airtest/:v/:name', (req, res, q, p) => {
   if (p.name === 'index.m3u8' && airtest.LIVE[p.v]) {
@@ -1887,7 +1961,7 @@ route('POST', '/api/setup', async (req, res) => {
     const o = b.options;
     const opt = c.options;
     if (typeof o.appName === 'string') opt.appName = o.appName.trim().slice(0, 24) || 'Norrsken';
-    for (const k of ['hideAdult', 'cleanNames']) if (k in o) opt[k] = !!o[k];
+    for (const k of ['hideAdult', 'cleanNames', 'skiRec']) if (k in o) opt[k] = !!o[k];
     if (['hls', 'ts'].includes(o.liveFormat)) opt.liveFormat = o.liveFormat;
     if (['auto', 'lossless', 'eac3', 'ac3', 'aac', 'copy'].includes(o.audioMode)) opt.audioMode = o.audioMode;
     if (['orig', '1080'].includes(o.maxRes)) opt.maxRes = o.maxRes;
@@ -1993,7 +2067,7 @@ const server = http.createServer(async (req, res) => {
   const pathname = url.pathname;
   // what a TV fetches over AirPlay (its receiver is hls.js in a web engine): every answer readable by it, errors too –
   // an error it may not read counts as a CORS failure and it gives up instead of trying again (TV log 12 Nov)
-  if (/^\/(pause|mrec)\//.test(pathname)) res.setHeader('Access-Control-Allow-Origin', '*');
+  if (/^\/(pause|mrec)\//.test(pathname)) { res.setHeader('Access-Control-Allow-Origin', '*'); airlog.watch(req, res, pathname); }
   try {
     if (req.method === 'OPTIONS') {
       res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Range, Content-Type, X-Pin', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' });

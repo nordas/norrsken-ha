@@ -194,7 +194,8 @@ summary { cursor: pointer; font-weight: 650; color: #c9d3df; padding: 10px 0; }
     <p class="help">Har kanalen arkiv fortsätter du därifrån. Annars spelar servern in kanalen från att du pausar tills du går tillbaka till live. Inspelningen tas bort direkt efteråt.</p>
     <label for="pauseMax">Spela in högst</label>
     <select id="pauseMax"><option value="30">30 minuter</option><option value="60">1 timme</option><option value="120">2 timmar</option><option value="180">3 timmar</option></select>
-    <p class="help">En timme i HD tar ungefär 2–4 GB på Home Assistants disk medan den spelas in. Inspelningen stannar om disken börjar bli full.</p>
+    <p class="help">En timme i HD tar ungefär 2–4 GB medan den spelas in. Inspelningen stannar om disken börjar bli full.</p>
+    <div class="toggle"><span>Spela in världscupen i skidor<small>Längdskidor och skidskytte spelas in när sändningen börjar, om ingen tittar på något annat just då. Luleå Hockeys matcher spelas alltid in. Inget annat spelas in av sig självt.</small></span><label class="sw"><input type="checkbox" id="skiRec"><i></i></label></div>
   </section>
 
   <section>
@@ -367,7 +368,7 @@ summary { cursor: pointer; font-weight: 650; color: #c9d3df; padding: 10px 0; }
         appName: $('appName').value.trim(), hideAdult: $('hideAdult').checked, cleanNames: $('cleanNames').checked,
         liveFormat: $('liveFormat').value, maxRes: $('maxRes').value, previews: $('previews').value, directPlay: $('directPlay').value, audioMode: $('audioMode').value, userAgent: $('ua').value.trim(),
         epgUrl: $('epgUrl').value.trim(), kidsPattern: $('kidsPattern').value.trim(),
-        pauseMode: $('pauseMode').value, pauseMax: +$('pauseMax').value,
+        pauseMode: $('pauseMode').value, pauseMax: +$('pauseMax').value, skiRec: $('skiRec').checked,
         services: [].slice.call(document.querySelectorAll('#svcList input')).filter(function (x) { return x.checked; }).map(function (x) { return x.value; }),
         tmdbKey: $('tmdbKey').value.trim() || ($('tmdbKey').dataset.saved ? '••••' : '')
       }
@@ -536,6 +537,7 @@ summary { cursor: pointer; font-weight: 650; color: #c9d3df; padding: 10px 0; }
     $('epgUrl').value = o.epgUrl || '';
     $('kidsPattern').value = o.kidsPattern || '';
     $('pauseMode').value = o.pauseMode || 'auto';
+    $('skiRec').checked = o.skiRec === true;
     $('pauseMax').value = String(o.pauseMax || 60);
     var sv = o.services || ['netflix', 'max', 'disney', 'prime'];
     [].forEach.call(document.querySelectorAll('#svcList input'), function (x) { x.checked = sv.indexOf(x.value) >= 0; });

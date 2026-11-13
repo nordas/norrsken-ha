@@ -483,6 +483,17 @@
     if (k === 'sub') return p.sub === undefined || p.sub === null ? 'sv' : p.sub;
     return p[k] === undefined ? (k === 'team' ? 'lulea' : '') : p[k];
   };
+  /** The profile's favourite teams (ids): several; an older profile has one. */
+  NS.prefTeams = function () {
+    var p = NS.state.prefs || {};
+    if (Array.isArray(p.teams)) return p.teams.slice();
+    var t = NS.pref('team');
+    return t && t !== 'none' ? [t] : [];
+  };
+  NS.teamNames = function () {
+    var n = NS.prefTeams().map(NS.teamName);
+    return !n.length ? 'Inga' : n.length <= 2 ? n.join(', ') : n[0] + ' + ' + (n.length - 1) + ' till';
+  };
   /* favourite team and subtitle language: shared pickers for the TV settings and the phone's "Jag" page */
   NS.teams = [];
   NS.loadTeams = function () {
@@ -494,16 +505,60 @@
     var t = NS.teams.find(function (x) { return x.id === id; });
     return t ? t.name : id === 'lulea' ? 'Luleå Hockey' : id;
   };
+  /**
+   * Favourite teams: pick as many as you like. The list stays open (a tick on the chosen ones) until "Klar".
+   * Resolves true when the choice changed.
+   */
   NS.pickTeam = function () {
+    var before = NS.prefTeams().join(',');
     return NS.loadTeams().then(function (teams) {
-      var cur = NS.pref('team');
-      var items = teams.map(function (t) { return { label: t.name, value: t.id, icon: t.id === cur ? 'check' : null, on: t.id === cur }; });
-      items.push({ label: 'Inget lag', value: 'none', icon: cur === 'none' ? 'check' : null, on: cur === 'none' });
-      return NS.menu('Favoritlag', items, 'Matcher med laget visas överst på startsidan när de pågår eller börjar snart.');
-    }).then(function (v) {
-      if (v === undefined || v === NS.pref('team')) return false;
-      return NS.setPref('team', v).then(function () { NS.toast(v === 'none' ? 'Inget favoritlag' : 'Favoritlag: ' + NS.teamName(v), 'check'); return true; });
+      var sel = NS.prefTeams();
+      var groups = [];
+      teams.forEach(function (t) { if (groups.indexOf(t.group) < 0) groups.push(t.group); });
+      var count = function (g) { return teams.filter(function (t) { return t.group === g && sel.indexOf(t.id) >= 0; }).length; };
+      // first the leagues (and what is chosen, a press removes it), then the teams of one league
+      var top = function (focus) {
+        var items = [{ label: 'Klar' + (sel.length ? ' – ' + sel.length + ' valda' : ''), value: '__done', icon: 'check', on: !focus }];
+        if (sel.length) items.push({ label: 'Dina lag', head: true });
+        sel.forEach(function (id) { items.push({ label: NS.teamName(id), value: 'x:' + id, icon: 'x', on: focus === 'x:' + id }); });
+        items.push({ label: 'Lägg till lag', head: true });
+        groups.forEach(function (g) { var n = count(g); items.push({ label: g + (n ? '  ·  ' + n + ' valda' : ''), value: 'g:' + g, icon: 'right', on: focus === 'g:' + g }); });
+        return NS.menu('Favoritlag', items, 'Välj ett eller flera. Lagens alla matcher visas på startsidan – liga, cuper och Europa.').then(function (v) {
+          if (v === undefined) return 'cancel'; // "Avbryt": nothing is changed
+          if (v === '__done') return;
+          if (v.indexOf('x:') === 0) { sel.splice(sel.indexOf(v.slice(2)), 1); return top(); }
+          return league(v.slice(2));
+        });
+      };
+      var league = function (g, last) {
+        var items = [{ label: 'Tillbaka', value: '__back', icon: 'left', on: !last }];
+        teams.filter(function (t) { return t.group === g; }).forEach(function (t) {
+          var on = sel.indexOf(t.id) >= 0;
+          items.push({ label: t.name, value: t.id, icon: 'check', on: t.id === last, sel: on });
+        });
+        return NS.menu(g, items, 'Tryck på ett lag för att välja eller ta bort det.').then(function (v) {
+          if (v === undefined || v === '__back') return top('g:' + g);
+          var i = sel.indexOf(v);
+          if (i >= 0) sel.splice(i, 1); else if (sel.length < 12) sel.push(v); else NS.toast('Högst 12 lag', 'info');
+          return league(g, v);
+        });
+      };
+      return top().then(function (how) {
+        if (how === 'cancel' || sel.join(',') === before) return false;
+        NS.state.prefs = NS.state.prefs || {};
+        NS.state.prefs.team = sel[0] || 'none';
+        return NS.setPref('teams', sel).then(function () { NS.toast(sel.length ? 'Favoritlag: ' + NS.teamNames() : 'Inga favoritlag', 'check'); return true; });
+      });
     });
+  };
+  /** A team's round badge: the club's abbreviation in its colours, or the user's own crest picture. */
+  NS.teamBadge = function (t, cls) {
+    var c1 = (t.col && t.col[0]) || '#444', c2 = (t.col && t.col[1]) || '#fff';
+    var ini = t.ab || String(t.n || '').slice(0, 3).toUpperCase();
+    var st = 'background:' + c1 + ';box-shadow:inset 0 0 0 .22em ' + c2;
+    var b = t.img ? NS.h('span', { class: cls + ' img' }, NS.pic(t.img, '', function () { b.className = cls; b.textContent = ini; b.style.cssText = st; }))
+      : NS.h('span', { class: cls + (ini.length > 3 ? ' sm' : ''), style: st, text: ini });
+    return b;
   };
   NS.pickSubLang = function () {
     var cur = NS.pref('sub');
@@ -530,6 +585,14 @@
       var i = (NS.svc.info && NS.svc.info[k]) || { name: k, color: '#555' };
       return NS.h('span', { class: 'svc svc-' + k, style: 'background:' + i.color, text: i.name });
     }));
+  };
+  /** "Idag 19:00", "Imorgon 16:00", "lör 14/11 13:30": when a match starts. */
+  NS.matchWhen = function (s) {
+    var d = new Date(s), n = new Date();
+    var day0 = function (x) { return new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime(); };
+    var diff = Math.round((day0(d) - day0(n)) / 86400e3);
+    var day = diff <= 0 ? 'Idag' : diff === 1 ? 'Imorgon' : ['sön', 'mån', 'tis', 'ons', 'tors', 'fre', 'lör'][d.getDay()] + ' ' + d.getDate() + '/' + (d.getMonth() + 1);
+    return day + ' ' + NS.fmtClock(s);
   };
   /** Identity of a favourite-team match as shown (a change means the billboard should be redrawn). */
   NS.sportKey = function (m) { return m && m.ch ? m.ch.id + '|' + m.s + '|' + m.state : ''; };
@@ -584,6 +647,33 @@
     if (top && top.item && top.item.t === 'live' && top.item.id === due.ch.id) return;
     NS.confirm({ title: due.t, text: (due.s > now ? 'Börjar ' + NS.fmtClock(due.s) : 'Har börjat') + ' på ' + due.ch.n + '.', buttons: [{ label: 'Byt kanal', icon: 'play', value: 'go' }, { label: 'Inte nu', value: '' }], cancel: '' })
       .then(function (v) { if (v === 'go') { if (top && top.item && top.item.t === 'live' && top.tune) top.tune(due.ch); else NS.playItem(due.ch, { list: [due.ch] }); } });
+  };
+  /**
+   * A favourite team's match is about to start: say so by itself, once per match and screen ("Titta" switches to it).
+   * No reminder has to be set. During a film or another channel it is only a short notice, never a question.
+   */
+  var matchList = [], matchAt = 0;
+  NS.checkMatches = function () {
+    if (!NS.profile || !NS.prefTeams().length) return;
+    var now = Date.now();
+    if (now - matchAt > 10 * 60e3) {
+      matchAt = now;
+      NS.api.get('api/sport').then(function (r) { matchList = r.upcoming || []; }).catch(function () {});
+    }
+    if (NS.dialog) return;
+    var seen = NS.store.get(NS.pkey('matchSeen'), {});
+    var due = matchList.filter(function (m) { return m.s <= now + 2 * 60e3 && m.s > now - 10 * 60e3 && !seen[m.ch.id + '|' + m.s] && !NS.hasReminder(m.ch.id, m.s); })[0];
+    if (!due) return;
+    Object.keys(seen).forEach(function (k) { if (+k.split('|')[1] < now - 86400e3) delete seen[k]; });
+    seen[due.ch.id + '|' + due.s] = 1;
+    NS.store.set(NS.pkey('matchSeen'), seen);
+    var top = NS.router.top();
+    var playing = top && top.item && top.video;
+    if (playing && top.item.t === 'live' && (due.chans || [due.ch]).some(function (c) { return c.id === top.item.id; })) return; // already there
+    var text = (due.s > now ? 'Börjar ' + NS.fmtClock(due.s) : 'Har börjat') + ' på ' + (due.chName || due.ch.n);
+    if (playing) { NS.toast(due.title + ' – ' + text.charAt(0).toLowerCase() + text.slice(1), 'live'); return; }
+    NS.confirm({ title: due.title, text: [due.label, text].filter(Boolean).join(' · ') + '.', buttons: [{ label: 'Titta', icon: 'play', value: 'go' }, { label: 'Inte nu', value: '' }], cancel: '' })
+      .then(function (v) { if (v === 'go') NS.playItem(due.ch, { list: due.chans || [due.ch], cat: due.ch.cat }); });
   };
   /** "I dag", "I går", "I morgon" or "lör 18 okt". */
   NS.dayLabel = function (t) {
@@ -645,7 +735,8 @@
     return new Promise(function (resolve) {
       var idx = 0;
       var els = items.map(function (it, i) {
-        return NS.h('div', { class: 'btn mi-row', onclick: function () { idx = i; close(it.value); } }, [it.icon ? NS.icon(it.icon) : null, it.label]);
+        if (it.head) return NS.h('div', { class: 'mi-head', text: it.label });
+        return NS.h('div', { class: 'btn mi-row' + (it.sel ? ' sel' : '') + (it.sel === false ? ' unsel' : ''), onclick: function () { idx = i; close(it.value); } }, [it.icon ? NS.icon(it.icon) : null, it.label]);
       });
       var el = NS.h('div', { class: 'dialog' }, NS.h('div', { class: 'box menu-box' }, [
         NS.h('div', { class: 'menu-head' }, [thumb ? NS.pic(thumb, 'menu-thumb') : null, NS.h('div', {}, [NS.h('h2', { text: title }), sub ? NS.h('p', { text: sub }) : null])]),
@@ -663,8 +754,9 @@
       function close(v) { el.remove(); NS.dialog = null; resolve(v); }
       NS.dialog = {
         onKey: function (a) {
-          if (a === 'up' && idx > 0) idx--;
-          else if (a === 'down' && idx < els.length - 1) idx++;
+          var step = function (d) { var j = idx + d; while (items[j] && items[j].head) j += d; if (items[j]) idx = j; };
+          if (a === 'up') step(-1);
+          else if (a === 'down') step(1);
           else if (a === 'ok') { close(items[idx].value); return true; }
           else if (a === 'back' || a === 'left') { close(undefined); return true; }
           paint();
@@ -673,6 +765,7 @@
       };
       paint();
       document.getElementById('app').appendChild(el);
+      paint(); // again once it is on the page: a long list scrolls to the chosen row
     });
   };
 

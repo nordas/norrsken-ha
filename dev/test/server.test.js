@@ -60,9 +60,11 @@ test('home page hides adult, cleans names, splits years', async () => {
   assert.ok(json.rows.length >= 4);
   const all = json.rows.flatMap(r => r.items);
   assert.ok(!all.some(i => /xxx/i.test(i.n)), 'adult hidden');
-  const live = json.rows.find(r => r.kind === 'live');
+  const live = json.rows.find(r => r.kind === 'live' && r.id !== 'matches');
   assert.ok(live, 'has a live row');
   assert.ok(live.items.some(i => i.n === 'SVT1 HD'), 'prefix stripped');
+  const mr = json.rows.find(r => r.id === 'matches');
+  assert.ok(mr && mr.items[0].mt && mr.items[0].mt.t && mr.items[0].k.includes('@'), 'the favourite teams\' matches as a row');
   const mv = all.find(i => i.t === 'movie');
   assert.ok(mv.y > 1990 && !/\(\d{4}\)/.test(mv.n), 'year split from title');
   assert.ok(!all.some(i => i._u || i._f), 'private fields stripped');

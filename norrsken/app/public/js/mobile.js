@@ -40,6 +40,17 @@
 
   var liveCards = {};
   function liveCard(it) {
+    if (it.mt && it.mt.sides) { // a favourite team's match: the teams, not the channel's logo
+      var mt = it.mt, onNow = Date.now() >= mt.s;
+      var c1 = (mt.sides[0].col || mt.col || ['#333'])[0], c2 = (mt.sides[1].col || ['#222'])[0];
+      var mf = h('div', { class: 'm-frame m-mcard', style: 'background: radial-gradient(90% 120% at 0% 0%, ' + NS.rgba(c1, 0.7) + ', transparent 62%), radial-gradient(90% 120% at 100% 100%, ' + NS.rgba(c2, 0.55) + ', transparent 62%), #18181a' }, [
+        h('span', { class: 'm-livetag' + (onNow ? '' : ' when'), text: onNow ? 'LIVE' : NS.matchWhen(mt.s) }),
+        h('div', { class: 'm-mvs' }, [NS.teamBadge(mt.sides[0], 'm-vs-b'), h('i', { text: '–' }), NS.teamBadge(mt.sides[1], 'm-vs-b')])
+      ]);
+      var mc = h('div', { class: 'm-card m-live' }, [mf, h('div', { class: 'm-now' }, [h('b', { text: mt.t }), h('span', { text: [mt.comp, it.n].filter(Boolean).join(' · ') })])]);
+      mc._it = it;
+      return mc;
+    }
     var f = h('div', { class: 'm-frame', style: 'background: radial-gradient(80% 90% at 50% 20%, ' + NS.rgba(NS.hueColor(it.n), 0.85) + ', #18181a 75%)' });
     var name = h('span', { class: 'm-lname', text: it.n });
     f.appendChild(name);
@@ -55,6 +66,11 @@
   function paintLive(c) {
     var e = NS.epgFor(c._it.id);
     c._now.innerHTML = '';
+    if (c._it.mt) { // a favourite team's match: which match and when, then the channel
+      c._now.appendChild(h('b', { text: c._it.mt.t }));
+      c._now.appendChild(h('span', { text: (Date.now() >= c._it.mt.s ? 'Live nu' : NS.matchWhen(c._it.mt.s)) + ' · ' + c._it.n }));
+      return;
+    }
     c._now.appendChild(h('b', { text: (c._it.num ? c._it.num + '  ' : '') + c._it.n }));
     if (e && e.now) {
       c._now.appendChild(h('span', { text: e.now.t }));
@@ -78,6 +94,7 @@
 
   function open(it, row) {
     if (it.t === 'ext') { NS.router.push(new MExtDetail(it)); return; }
+    if (it.mt) { NS.openMatchCard(it); return; }
     if (it.t === 'live') { NS.playItem(it, { list: (row && row.items) || [it], cat: (row && row.cat) || null }); return; }
     if (row && row.id === 'cw') { NS.playItem(it, { start: it.upnext ? 0 : it.pos || 0 }); return; }
     if (it.t === 'episode') { NS.playItem(it, { start: NS.resumePos(it) }); return; }
@@ -261,7 +278,12 @@
       var list = h('div', { class: 'm-chlist' });
       var spot = h('div');
       self.body.appendChild(spot);
-      NS.api.get('api/sport').then(function (r) { if (r.match && r.match.ch && tok === self._tok) spot.appendChild(sportCard(r.match)); }).catch(function () {});
+      NS.api.get('api/sport').then(function (r) {
+        if (tok !== self._tok) return;
+        if (r.match && r.match.ch) spot.appendChild(sportCard(r.match));
+        var ml = matchList((r.upcoming || []).filter(function (m) { return !(r.match && r.match.ch && m.s === r.match.s && m.title === r.match.title); })); // the one in the card above is not listed again
+        if (ml) spot.appendChild(ml);
+      }).catch(function () {});
       self.body.appendChild(chips);
       self.body.appendChild(list);
       var show = function (id) {
@@ -416,6 +438,27 @@
     return el;
   }
   NS.mSportCard = sportCard;
+  /** The favourite teams' coming matches (every league and cup the TV guide has): day, time, teams, channel. */
+  function matchList(list) {
+    if (!list.length) return null;
+    var el = h('section', { class: 'm-matches' }, h('h3', { text: 'Dina lags matcher' }));
+    var rowOf = function (m) {
+      var live = Date.now() >= m.s;
+      var w = NS.matchWhen(m.s).split(' ');
+      var clock = w.pop();
+      return h('button', { class: 'm-match', onclick: function () { NS.watchMatch(m, m.chans || [m.ch], m.ch.cat); } }, [
+        h('span', { class: 'when' }, live ? h('span', { class: 'live-pill', text: 'Live' }) : [w.join(' '), h('b', { text: clock })]),
+        m.sides ? h('span', { class: 'm-match-b' }, [NS.teamBadge(m.sides[0], 'm-vs-b'), NS.teamBadge(m.sides[1], 'm-vs-b')]) : null,
+        h('span', { class: 'what' }, [h('b', { text: m.title }), h('span', { text: [m.label, m.chName || m.ch.n].filter(Boolean).join(' · ') })])
+      ]);
+    };
+    list.slice(0, 5).forEach(function (m) { el.appendChild(rowOf(m)); });
+    if (list.length > 5) {
+      var more = h('button', { class: 'm-match-more', text: 'Visa alla ' + list.length, onclick: function () { more.remove(); list.slice(5).forEach(function (m) { el.appendChild(rowOf(m)); }); } });
+      el.appendChild(more);
+    }
+    return el;
+  }
 
   MBrowse.prototype.hero = function (it) {
     var art = h('div', { class: 'm-hero-art' });
@@ -822,7 +865,7 @@
     var paintDlV = function () { var n = NS.dl.items.filter(function (x) { return x.status === 'done'; }).length; dlV.textContent = n ? String(n) : ''; };
     this._unDl = NS.dl.onChange(paintDlV);
     NS.dl.refresh().then(paintDlV);
-    var paintSet = function () { teamV.textContent = NS.teamName(NS.pref('team')); subV.textContent = NS.pref('sub') ? NS.langName(NS.pref('sub')) : 'Av'; };
+    var paintSet = function () { teamV.textContent = NS.teamNames(); subV.textContent = NS.pref('sub') ? NS.langName(NS.pref('sub')) : 'Av'; };
     body.appendChild(h('div', { class: 'm-sets' }, [
       h('button', { class: 'm-set', onclick: function () { NS.pickTeam().then(function (ch) { if (ch) { NS.state.dirty = true; paintSet(); } }); } }, [NS.icon('live'), h('span', { text: 'Favoritlag' }), teamV, NS.icon('right')]),
       h('button', { class: 'm-set', onclick: function () { NS.pickSubLang().then(function (ch) { if (ch) paintSet(); }); } }, [NS.icon('sub'), h('span', { text: 'Undertexter' }), subV, NS.icon('right')]),

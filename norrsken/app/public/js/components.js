@@ -368,6 +368,19 @@
       if (item.dur && item.pos) f.appendChild(NS.progEl(item.pos / item.dur * 100));
       return c;
     }
+    if (kind === 'live' && item.mt && item.mt.sides) {
+      // a favourite team's match: both teams' badges, when it starts, which competition and channel
+      var mt = item.mt, onNow = Date.now() >= mt.s;
+      var c1 = (mt.sides[0].col || mt.col || ['#333'])[0], c2 = (mt.sides[1].col || ['#222'])[0];
+      c.classList.add('matchcard');
+      f.appendChild(h('div', { class: 'glow', style: 'opacity:.8;background: radial-gradient(90% 120% at 0% 0%, ' + NS.rgba(c1, 0.75) + ', transparent 62%), radial-gradient(90% 120% at 100% 100%, ' + NS.rgba(c2, 0.6) + ', transparent 62%)' }));
+      f.appendChild(h('div', { class: 'ltag' + (onNow ? '' : ' when'), text: onNow ? 'LIVE' : NS.matchWhen(mt.s) }));
+      if (mt.comp) f.appendChild(h('div', { class: 'lcomp', text: mt.comp }));
+      f.appendChild(h('div', { class: 'mvs' }, [NS.teamBadge(mt.sides[0], 'mvs-b'), h('i', { text: '–' }), NS.teamBadge(mt.sides[1], 'mvs-b')]));
+      f.appendChild(h('div', { class: 'lnow', text: mt.t }));
+      f.appendChild(h('div', { class: 'lch', text: item.n }));
+      return c;
+    }
     if (kind === 'live') {
       var col = NS.hueColor(item.n);
       var glow = h('div', { class: 'glow', style: 'background: radial-gradient(80% 90% at 50% 20%, ' + NS.rgba(col, 0.9) + ', rgba(24,24,26,0) 75%)' });
@@ -379,7 +392,8 @@
         name.style.display = 'none';
         f.appendChild(NS.pic(item.img, 'logo', function () { name.style.display = ''; }));
       }
-      f.appendChild(h('div', { class: 'ltag', text: 'LIVE' }));
+      var mtLive = item.mt && Date.now() >= item.mt.s;
+      f.appendChild(h('div', { class: 'ltag' + (item.mt && !mtLive ? ' when' : ''), text: item.mt && !mtLive ? NS.matchWhen(item.mt.s) : 'LIVE' }));
       var now = h('div', { class: 'lnow' });
       f.appendChild(now);
       var bar = NS.progEl(0);
@@ -415,6 +429,8 @@
     var L = c._live;
     var e = NS.epgFor(L.item.id);
     L.now.innerHTML = '';
+    // a favourite team's match on this channel: the card says which match (the row "Dina lags matcher")
+    if (L.item.mt) { L.now.appendChild(document.createTextNode(L.item.mt.t)); L.bar.style.display = 'none'; return; }
     if (L.item.num) L.now.appendChild(h('span', { class: 'num', text: String(L.item.num) }));
     if (e && e.now) {
       L.now.appendChild(document.createTextNode(e.now.t));
@@ -551,6 +567,13 @@
     var build = function () {
       el.innerHTML = '';
       if (!d) return;
+      if (d.t === 'live' && d.mt) { // a favourite team's match: when, what, where (not what the channel shows now)
+        var on = Date.now() >= d.mt.s;
+        el.appendChild(h('div', { class: 'meta' }, [on ? h('span', { class: 'live-pill', text: 'Live nu' }) : h('span', { text: NS.matchWhen(d.mt.s) })].concat([d.mt.label, d.n].filter(Boolean).map(function (x) { return h('span', { text: x }); }))));
+        el.appendChild(h('div', { class: 'big', text: d.mt.t }));
+        el.appendChild(h('div', { class: 'desc', style: 'color:var(--text-2)', text: on ? 'Tryck OK för att titta' : 'Norrsken säger till när matchen börjar' }));
+        return;
+      }
       if (d.t === 'live') {
         var e = NS.epgFor(d.id);
         el.appendChild(NS.metaEl(d));

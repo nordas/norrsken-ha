@@ -172,3 +172,56 @@ test('AirPlay of live gets an ordinary sliding live playlist: newest pieces, cou
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+
+test('watching live through the server is not a recording: memory only, nothing on the Time Capsule, a sliding list', () => {
+  const share = path.join(tmp, 'share-live');
+  fs.mkdirSync(share, { recursive: true });
+  const r = run(`
+    await require(${JSON.stringify(path.join(lib, 'smb.js'))}).check(true);
+    const srv = await serve();
+    const s = tsbuf.start('http://127.0.0.1:' + srv.address().port + '/x.ts', { maxMin: 360, ch: 'kanal', live: true });
+    await until(() => s.done);
+    await new Promise(r => setTimeout(r, 3000));
+    const remote = fs.existsSync(path.join(${JSON.stringify(share)}, 'Norrsken', 'pause', s.id));
+    const text = fs.readFileSync(path.join(s.dir, 'index.m3u8'), 'utf8');
+    const pl = await tsbuf.playlist(s, '/pause');
+    return { ring: s.ring, mirror: !!s.mirror, remote, event: /PLAYLIST-TYPE:EVENT/.test(text), start: /EXT-X-START/.test(pl) };
+  `, {
+    SMBCLIENT_PATH: path.join(__dirname, 'fake-smbclient.js'), FAKE_SMB_ROOT: share, FAKE_SMB_PASS: 'pw', NSK_SMB_SHARE: '//192.168.1.5/Data', NSK_SMB_USER: 'u', NSK_SMB_PASS: 'pw',
+    NSK_PAUSE_DIR: '', NSK_STORAGE_DIR: '', NSK_STAGE_DIR: path.join(tmp, 'stage-live'), TMPDIR: tmp,
+  });
+  assert.ok(!r.error, r.error);
+  assert.deepEqual(r, { ring: true, mirror: false, remote: false, event: false, start: false });
+});
+
+test('AirPlay of live through memory: the sliding list keeps counting its pieces', () => {
+  const tsbuf = require('../lib/tsbuf');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nsk-ring-'));
+  const dir = path.join(root, 'rrrr1111');
+  fs.mkdirSync(dir);
+  const lines = ['#EXTM3U', '#EXT-X-VERSION:7', '#EXT-X-TARGETDURATION:4', '#EXT-X-MEDIA-SEQUENCE:130', '#EXT-X-MAP:URI="init.mp4"'];
+  for (let i = 130; i < 150; i++) lines.push('#EXTINF:4.000000,', 'p' + String(i).padStart(5, '0') + '.m4s');
+  fs.writeFileSync(path.join(dir, 'index.m3u8'), lines.join('\n') + '\n');
+  const pl = tsbuf.livePlaylist([{ id: 'rrrr1111', dir, started: Date.now() - 600e3, done: false, ring: true, maxMin: 360 }], '/pause');
+  assert.match(pl, /#EXT-X-MEDIA-SEQUENCE:130\n/);
+  assert.equal(pl.split('\n').filter(l => l.startsWith('/pause/rrrr1111/p')).length, 20);
+  assert.ok(!/ENDLIST/.test(pl));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('the AirPlay log tells devices apart and counts what each fetched (a TV fetches the recording itself)', () => {
+  const airlog = require('../lib/airlog');
+  const { EventEmitter } = require('events');
+  airlog._reset();
+  const hit = (ip, ua, p, status) => { const res = new EventEmitter(); res.statusCode = status; res.getHeader = () => '1000'; airlog.watch({ socket: { remoteAddress: ip }, headers: { 'user-agent': ua } }, res, p); res.emit('finish'); };
+  hit('::ffff:192.168.85.30', 'AppleCoreMedia/1.0.0.22A (iPhone; U; CPU OS 18_0 like Mac OS X)', '/pause/abc/index.m3u8', 200);
+  hit('192.168.85.40', 'Mozilla/5.0 (Linux; Philips TitanOS) AirPlay', '/pause/abc/live.m3u8', 200);
+  hit('192.168.85.40', 'Mozilla/5.0 (Linux; Philips TitanOS) AirPlay', '/pause/abc/p00001.m4s', 200);
+  hit('192.168.85.40', 'Mozilla/5.0 (Linux; Philips TitanOS) AirPlay', '/pause/abc/p00002.m4s', 404);
+  const s = airlog.summary();
+  assert.equal(s.clients.length, 2);
+  const tv = s.clients.find(c => c.kind === 'TV');
+  assert.deepEqual([tv.ip, tv.lists, tv.pieces, tv.errors, tv.lastErr, tv.playing], ['192.168.85.40', 1, 2, 1, '404 p00002.m4s', true]);
+  assert.equal(s.clients.find(c => c.ip === '192.168.85.30').kind, 'iPhone/iPad');
+  assert.equal(s.log[0].status, 404);
+});

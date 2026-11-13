@@ -273,9 +273,9 @@ function start(url, { ua, maxMin = 60, ch = '', match = false, live = false } = 
   const why = tcProblem();
   // plain live viewing (an iPhone watches live through this) still works without the Time Capsule: only the newest
   // pieces, in memory, ffmpeg removes the older ones itself; no pausing back, nothing kept anywhere
-  const ring = !!why && live && !match && tcMode() && !!stageRoot();
+  // (since 1.16 always so: watching a channel is not recording it. Only a pause and a match recording are kept.)
+  const ring = live && !match;
   if (why && !ring) { console.log('[paus] ingen inspelning:', why); throw new Error(why); }
-  if (ring) console.log('[paus]', why, '– live går bara via minnet (ingen paus bakåt)');
   const useMirror = tcMode() && !ring;
   const ROOT = rootDir();
   fs.mkdirSync(ROOT, { recursive: true });
@@ -328,7 +328,7 @@ function start(url, { ua, maxMin = 60, ch = '', match = false, live = false } = 
   }, 15000);
   if (s.diskT.unref) s.diskT.unref();
   sessions.set(id, s);
-  console.log(match ? '[match] spelar in' : '[paus] spelar in', ch || 'kanalen', 'från nu (högst', maxMin, 'min)');
+  console.log(match ? '[match] spelar in' : ring ? '[live] via minnet, spelas inte in:' : '[paus] spelar in', ch || 'kanalen', ring ? '' : 'från nu (högst ' + maxMin + ' min)');
   return s;
 }
 
@@ -464,7 +464,7 @@ async function playlist(s, prefix, { wait = 30000, edge = false } = {}) {
       if (!s.fmtLogged) { s.fmtLogged = true; logFormat(s); }
       // play from the start of the recording (where you paused), not from its end
       // live (edge): a little before its end, so a TV or Safari never starts by reading the oldest pieces
-      if (text.indexOf('#EXT-X-START') < 0) text = text.replace('#EXTM3U', '#EXTM3U\n#EXT-X-START:TIME-OFFSET=' + (edge ? '-12' : '0') + ',PRECISE=YES');
+      if (text.indexOf('#EXT-X-START') < 0 && !s.ring) text = text.replace('#EXTM3U', '#EXTM3U\n#EXT-X-START:TIME-OFFSET=' + (edge ? '-12' : '0') + ',PRECISE=YES');
       // finished (time limit or disk): mark the end so the player doesn't wait for more
       // finished: mark the end so the player doesn't wait for more. A match recording the provider dropped is not
       // finished (the server starts it again and the playlist goes on): only when it ran its full length
@@ -496,10 +496,14 @@ const AIR_WINDOW = +process.env.NSK_AIR_WINDOW || 100000;
 function livePlaylist(list, prefix, { window = AIR_WINDOW } = {}) {
   const parts = (list || []).filter(Boolean);
   const all = [];
+  let seq0 = 0;
   parts.forEach((s, pi) => {
     let text = '';
     try { text = fs.readFileSync(path.join(s.dir, 'index.m3u8'), 'utf8'); } catch (_) { return; }
     let dur = 0; let t = s.started || Date.now(); let first = true;
+    // live through memory only: the list slides, its first piece is not the recording's first
+    const sq = s.ring ? +((/#EXT-X-MEDIA-SEQUENCE:(\d+)/.exec(text) || [])[1] || 0) : 0;
+    if (sq) { seq0 = sq; t += sq * 4000; }
     for (const l of text.split('\n')) {
       if (l.startsWith('#EXTINF:')) { dur = parseFloat(l.slice(8)) || 0; continue; }
       if (!l || l[0] === '#' || !dur) continue;
@@ -512,7 +516,7 @@ function livePlaylist(list, prefix, { window = AIR_WINDOW } = {}) {
   const win = all.slice(from);
   const target = Math.max(4, Math.ceil(Math.max(...win.map(e => e.dur))));
   const discBefore = all.slice(0, from + 1).filter(e => e.disc).length - (win[0].disc ? 1 : 0);
-  const out = ['#EXTM3U', '#EXT-X-VERSION:7', '#EXT-X-TARGETDURATION:' + target, '#EXT-X-MEDIA-SEQUENCE:' + from, '#EXT-X-DISCONTINUITY-SEQUENCE:' + discBefore, '#EXT-X-INDEPENDENT-SEGMENTS'];
+  const out = ['#EXTM3U', '#EXT-X-VERSION:7', '#EXT-X-TARGETDURATION:' + target, '#EXT-X-MEDIA-SEQUENCE:' + (seq0 + from), '#EXT-X-DISCONTINUITY-SEQUENCE:' + discBefore, '#EXT-X-INDEPENDENT-SEGMENTS'];
   let map = '';
   win.forEach((e, i) => {
     if (e.disc && i > 0) out.push('#EXT-X-DISCONTINUITY');
