@@ -1991,6 +1991,9 @@ const server = http.createServer(async (req, res) => {
   res._gz = /\bgzip\b/.test(String(req.headers['accept-encoding'] || ''));
   const url = new URL(req.url, 'http://x');
   const pathname = url.pathname;
+  // what a TV fetches over AirPlay (its receiver is hls.js in a web engine): every answer readable by it, errors too –
+  // an error it may not read counts as a CORS failure and it gives up instead of trying again (TV log 12 Nov)
+  if (/^\/(pause|mrec)\//.test(pathname)) res.setHeader('Access-Control-Allow-Origin', '*');
   try {
     if (req.method === 'OPTIONS') {
       res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Range, Content-Type, X-Pin', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' });

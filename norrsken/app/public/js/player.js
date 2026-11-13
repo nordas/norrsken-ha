@@ -2514,8 +2514,10 @@
         air.classList.toggle('on', on);
         var vs = self.video.currentSrc || '';
         NS.diag('AirPlay ' + (on ? 'på' : 'av') + ': motor ' + (self.hls ? 'hls.js' : self.mp ? 'mpegts' : self.kind || '?') + (self.airNative ? ', Safaris egen spelare' : '') + ', källa ' + (/^blob:/.test(vs) ? 'Media Source (bara ljud når tv:n)' : vs.replace(/\?.*$/, '').replace(/^https?:\/\/[^/]+/, '')) + (self.live ? ', live' : ', film'));
-        if (on) { clearTimeout(self.airT); if (self.airNeedsHls()) self.airLiveHls(); else if (!self.airNative && self.hls) self.airToNative(); } // also when AirPlay was started from the phone's control centre or Safari's own button
-        else if (self.airNative) self.airBack();
+        if (on) { clearTimeout(self.airT); clearTimeout(self.airOffT); if (self.airNeedsHls()) self.airLiveHls(); else if (!self.airNative && self.hls) self.airToNative(); } // also when AirPlay was started from the phone's control centre or Safari's own button
+        // "off" can come for a moment while the TV reloads the stream (a TV that is not an Apple TV): only go back to the
+        // phone when it is still off 8 s later – going back at once cut the TV off
+        else if (self.airNative) { clearTimeout(self.airOffT); self.airOffT = setTimeout(function () { if (self.airNative && !self.video.webkitCurrentPlaybackTargetIsWireless) self.airBack(); }, 8000); }
       });
     }
     if (!(el.requestFullscreen || el.webkitRequestFullscreen)) el.classList.add('nofs');
