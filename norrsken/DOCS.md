@@ -98,3 +98,9 @@ Under **Favoritlag** väljer du ett eller flera lag: SHL-lagen, Tre Kronor och a
 ## AirPlay-loggen
 
 `/airlog` (samma PIN som inställningarna) visar vilka enheter som hämtar bild från Norrsken just nu. En tv som spelar via AirPlay hämtar bilden själv och syns då som en egen rad med ”Spelar nu”, antal hämtade bitar och eventuella fel. Samma sak skrivs i tilläggets logg (rader som börjar med `[airplay]`), så ett misslyckat försök går att läsa i efterhand.
+
+## Matchsidan
+
+Tryck på en match (kortet på startsidan, raden *Dina lags matcher* eller *Om matchen* på tv:n) så öppnas matchsidan: lagens färger möts snett över toppen med märkena och en klocka som räknar ner till start (eller visar LIVE och hur länge matchen pågått). Under den: kanal och tid, knapparna (*Från start*, *Live*, *Påminn mig*), om matchen spelas in automatiskt, tv-guidens text, vilka kanaler den sänds på (bäst bild först), *Följ ditt lag* (ett tryck gör laget till favorit eller tar bort det) och dina lags övriga matcher.
+
+Matcher visas och spelas in på svensk kanal. Finns matchen bara hos en utländsk kanal än står det *Svensk kanal kommer*; TV4 Play lägger oftast ut sina matcher några timmar innan, och Norrsken läser in kanallistan varje timme.

@@ -564,3 +564,55 @@ html.m .menu-list .btn.sel { background: rgba(255,255,255,.2); }
 .m-match-b .m-vs-b + .m-vs-b { margin-left: -8px; }
 html.m .menu-list .btn, html.m .menu-list .mi-head { flex: none; }
 html.m .menu-list { overflow-y: auto; -webkit-overflow-scrolling: touch; }
+
+/* the match page on the phone/iPad */
+html.m .matchpage { position: relative; inset: auto; overflow: visible; min-height: 100vh; padding-bottom: calc(110px + env(safe-area-inset-bottom)); }
+html.m .matchpage .mp-head { position: fixed; top: 0; left: 0; right: 0; z-index: 5; background: none; }
+html.m .matchpage .mp-hero { height: 370px; }
+html.m .matchpage .mp-face { top: calc(78px + env(safe-area-inset-top)); gap: 14px; }
+html.m .matchpage .mp-side { width: 104px; gap: 8px; }
+html.m .matchpage .mp-side b { font-size: 15px; }
+html.m .matchpage .mp-badge { width: 84px; height: 84px; font-size: 22px; box-shadow: 0 10px 26px rgba(0,0,0,.45); }
+html.m .matchpage .mp-badge.sm { font-size: 17px; }
+html.m .matchpage .mp-clock { min-width: 0; padding: 10px 12px; border-radius: 14px; gap: 4px; }
+html.m .matchpage .mp-cl-t { font-size: 24px; }
+html.m .matchpage .mp-cl-s { font-size: 11px; }
+html.m .matchpage .mp-cl-live { font-size: 20px; gap: 7px; }
+html.m .matchpage .mp-cl-live::before { width: 10px; height: 10px; }
+html.m .matchpage .mp-solo { font-size: 26px; }
+html.m .matchpage .mp-body { margin-top: -80px; padding: 0 20px 20px; }
+html.m .matchpage .mp-chips { font-size: 13px; margin-bottom: 12px; border-radius: 6px; }
+html.m .matchpage .mp-ch, html.m .matchpage .mp-when { padding: 4px 9px; }
+html.m .matchpage .mp-title { font-size: 34px; }
+html.m .matchpage .mp-tags { font-size: 16px; gap: 18px; margin-top: 10px; }
+html.m .matchpage .mp-rec i { width: 8px; height: 8px; }
+html.m .matchpage .mp-rec { gap: 6px; }
+html.m .matchpage .mp-btns { margin-top: 20px; gap: 10px; align-self: stretch; flex-wrap: wrap; }
+html.m .matchpage .mp-btn { height: 50px; padding: 0 22px; font-size: 16px; border-radius: 25px; gap: 8px; flex: 1 1 auto; justify-content: center; }
+html.m .matchpage .mp-btn.primary { min-width: 0; flex: 2 1 60%; }
+html.m .matchpage .mp-btn svg { width: 20px; height: 20px; }
+html.m .matchpage .mp-desc { margin-top: 20px; font-size: 16px; text-align: left; }
+html.m .matchpage .mp-note { font-size: 14px; text-align: left; }
+html.m .matchpage .mp-h2 { font-size: 21px; margin: 30px 0 10px; }
+html.m .matchpage .mp-chans, html.m .matchpage .mp-teams, html.m .matchpage .mp-more { gap: 10px; margin: 0 -20px; padding: 2px 20px 8px; }
+html.m .matchpage .mp-chan { height: 42px; padding: 0 14px; font-size: 14px; border-radius: 10px; gap: 8px; }
+html.m .matchpage .mp-chan small { font-size: 10px; }
+html.m .matchpage .mp-team { width: 150px; height: 150px; border-radius: 12px; gap: 8px; }
+html.m .matchpage .mp-team b { font-size: 15px; }
+html.m .matchpage .mp-tbadge { width: 62px; height: 62px; font-size: 17px; }
+html.m .matchpage .mp-star { font-size: 12px; }
+html.m .matchpage .mp-mcard { width: 240px; height: 150px; border-radius: 12px; padding: 12px; gap: 6px; }
+html.m .matchpage .mp-mtop { font-size: 11px; }
+html.m .matchpage .mp-mb { width: 36px; height: 36px; font-size: 10px; }
+html.m .matchpage .mp-mcard b { font-size: 15px; }
+html.m .matchpage .mp-mcard > span { font-size: 12px; }
+@media (min-width: 700px) and (min-height: 600px) {
+  html.m .matchpage .mp-hero { height: 400px; }
+  html.m .matchpage .mp-face { gap: 60px; }
+  html.m .matchpage .mp-side { width: 160px; }
+  html.m .matchpage .mp-badge { width: 130px; height: 130px; font-size: 32px; }
+  html.m .matchpage .mp-cl-t { font-size: 38px; }
+  html.m .matchpage .mp-body { max-width: 860px; margin-left: auto; margin-right: auto; }
+  html.m .matchpage .mp-btn.primary { flex: 0 1 320px; }
+  html.m .matchpage .mp-btn { flex: 0 1 auto; }
+}

@@ -724,3 +724,72 @@ html.m .player .tap-play { width: 84px; height: 84px; margin: -42px 0 0 -42px; f
 .k-live .card.matchcard .lcomp { position: absolute; right: 1.6rem; top: 1.6rem; padding: .3rem .9rem; border-radius: .5rem; background: rgba(0,0,0,.45); font-size: 1.5rem; font-weight: 700; z-index: 1; }
 .k-live .card.matchcard .mvs { z-index: 1; }
 .menu-list .btn, .menu-list .mi-head { flex: none; }
+
+/* ---------------------------------------------------------------- the match page (TV4 Play's layout, with a twist:
+   the two clubs' colours meet at an angle behind their badges, and the clock between them counts down live) */
+.matchpage { position: absolute; inset: 0; overflow-y: auto; overflow-x: hidden; background: var(--bg); scrollbar-width: none; }
+.matchpage::-webkit-scrollbar { display: none; }
+.matchpage .mp-hero { position: relative; height: 52rem; overflow: hidden; }
+.matchpage .mp-split { position: absolute; inset: -10%; background:
+  linear-gradient(105deg, var(--c1) 0%, color-mix(in srgb, var(--c1) 70%, #000) 46%, rgba(255,255,255,.85) 46.3%, rgba(255,255,255,.85) 46.7%, color-mix(in srgb, var(--c2) 70%, #000) 47%, var(--c2) 100%); filter: saturate(1.1); }
+.matchpage .mp-split::after { content: ''; position: absolute; inset: 0; background:
+  radial-gradient(60% 80% at 50% 45%, rgba(0,0,0,0) 0%, rgba(0,0,0,.35) 100%),
+  repeating-linear-gradient(105deg, rgba(255,255,255,.05) 0 .2rem, transparent .2rem 1.8rem); }
+.matchpage .mp-hero::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 60%; background: linear-gradient(to bottom, rgba(5,5,5,0), var(--bg)); }
+.matchpage .mp-face { position: absolute; z-index: 1; left: 0; right: 0; top: 9rem; display: flex; align-items: center; justify-content: center; gap: 9rem; }
+.matchpage .mp-side { display: flex; flex-direction: column; align-items: center; gap: 1.8rem; width: 34rem; }
+.matchpage .mp-side b { font-size: 3.4rem; font-weight: 800; text-shadow: 0 .2rem 1.2rem rgba(0,0,0,.6); }
+.matchpage .mp-badge { width: 19rem; height: 19rem; border-radius: 50%; display: grid; place-items: center; font-size: 5.4rem; font-weight: 900; color: #fff; text-shadow: 0 .2rem .6rem rgba(0,0,0,.5); box-shadow: 0 2rem 5rem rgba(0,0,0,.45); }
+.matchpage .mp-badge.sm { font-size: 4.2rem; }
+.matchpage .mp-badge.img { background: none !important; box-shadow: none; }
+.matchpage .mp-badge.img img { width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(0 1.6rem 3rem rgba(0,0,0,.5)); }
+.matchpage .mp-clock { display: flex; flex-direction: column; align-items: center; gap: .8rem; min-width: 26rem; padding: 2rem 3rem; border-radius: 2rem; background: rgba(0,0,0,.5); backdrop-filter: blur(1.4rem); -webkit-backdrop-filter: blur(1.4rem); }
+.matchpage .mp-cl-t { font-size: 6rem; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: .02em; }
+.matchpage .mp-cl-s { font-size: 1.8rem; color: var(--text-2); font-weight: 600; }
+.matchpage .mp-cl-live { font-size: 4.6rem; font-weight: 900; color: #fff; display: inline-flex; align-items: center; gap: 1.2rem; }
+.matchpage .mp-cl-live::before { content: ''; width: 1.8rem; height: 1.8rem; border-radius: 50%; background: #e50914; box-shadow: 0 0 0 0 rgba(229,9,20,.7); animation: mp-pulse 1.6s infinite; }
+@keyframes mp-pulse { 0% { box-shadow: 0 0 0 0 rgba(229,9,20,.7); } 70% { box-shadow: 0 0 0 1.6rem rgba(229,9,20,0); } 100% { box-shadow: 0 0 0 0 rgba(229,9,20,0); } }
+.matchpage .mp-face.solo { flex-direction: column; gap: 3rem; }
+.matchpage .mp-solo { font-size: 6rem; font-weight: 900; text-align: center; max-width: 80%; }
+.matchpage .mp-body { position: relative; z-index: 1; margin-top: -12rem; padding: 0 8rem 10rem; display: flex; flex-direction: column; align-items: center; text-align: center; }
+.matchpage .mp-chips { display: inline-flex; border-radius: .7rem; overflow: hidden; font-size: 1.9rem; font-weight: 700; margin-bottom: 2rem; }
+.matchpage .mp-ch { background: #000; color: #fff; padding: .6rem 1.4rem; }
+.matchpage .mp-when { background: #fff; color: #000; padding: .6rem 1.4rem; }
+.matchpage .mp-when.live { background: #e50914; color: #fff; }
+.matchpage .mp-title { font-size: 7.2rem; font-weight: 900; line-height: 1.05; letter-spacing: -.01em; max-width: 140rem; }
+.matchpage .mp-tags { display: flex; gap: 3.2rem; justify-content: center; flex-wrap: wrap; margin-top: 2rem; font-size: 2.6rem; color: var(--text-2); }
+.matchpage .mp-rec { display: inline-flex; align-items: center; gap: 1rem; color: #fff; font-weight: 700; }
+.matchpage .mp-rec i { width: 1.3rem; height: 1.3rem; border-radius: 50%; background: #e50914; }
+.matchpage .mp-rec.on i { animation: mp-pulse 1.6s infinite; }
+.matchpage .mp-btns { display: flex; gap: 2rem; justify-content: center; margin-top: 3.6rem; }
+.matchpage .mp-btn { height: 7.2rem; padding: 0 4.4rem; border-radius: 3.6rem; font-size: 2.6rem; font-weight: 700; display: inline-flex; align-items: center; gap: 1.4rem; background: rgba(255,255,255,.16); color: #fff; }
+.matchpage .mp-btn.primary { background: #fff; color: #000; min-width: 44rem; justify-content: center; }
+.matchpage .mp-btn svg { width: 3rem; height: 3rem; }
+.matchpage .mp-desc { margin-top: 3.4rem; font-size: 2.6rem; line-height: 1.45; color: var(--text-2); max-width: 110rem; }
+.matchpage .mp-note { margin-top: 2rem; font-size: 2.1rem; color: var(--muted); max-width: 100rem; }
+.matchpage .mp-h2 { align-self: flex-start; font-size: 3rem; font-weight: 800; margin: 6rem 0 2rem; }
+.matchpage .mp-chans, .matchpage .mp-teams, .matchpage .mp-more { align-self: stretch; display: flex; gap: 2rem; overflow-x: auto; scrollbar-width: none; padding: 1.2rem 1.2rem 2.4rem; margin: 0 -1.2rem; }
+.matchpage .mp-chans::-webkit-scrollbar, .matchpage .mp-teams::-webkit-scrollbar, .matchpage .mp-more::-webkit-scrollbar { display: none; }
+.matchpage .mp-chan { flex: none; height: 6.4rem; padding: 0 2.6rem; border-radius: 1.2rem; background: rgba(255,255,255,.1); font-size: 2.2rem; font-weight: 700; display: inline-flex; align-items: center; gap: 1.2rem; }
+.matchpage .mp-chan small { font-size: 1.5rem; font-weight: 800; padding: .3rem .8rem; border-radius: .5rem; background: #fff; color: #000; }
+.matchpage .mp-team { flex: none; width: 30rem; height: 30rem; border-radius: 1.6rem; background: radial-gradient(90% 90% at 50% 30%, color-mix(in srgb, var(--tc) 55%, transparent), rgba(255,255,255,.05) 75%); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1.4rem; }
+.matchpage .mp-team b { font-size: 2.6rem; font-weight: 800; }
+.matchpage .mp-tbadge { width: 12rem; height: 12rem; border-radius: 50%; display: grid; place-items: center; font-size: 3.4rem; font-weight: 900; }
+.matchpage .mp-tbadge.img { background: none !important; box-shadow: none; }
+.matchpage .mp-tbadge.img img { width: 100%; height: 100%; object-fit: contain; }
+.matchpage .mp-star { font-size: 1.9rem; font-weight: 700; color: var(--muted); }
+.matchpage .mp-team.on .mp-star { color: #ffd60a; }
+.matchpage .mp-mcard { flex: none; width: 46rem; height: 26rem; border-radius: 1.6rem; padding: 2rem; text-align: left; display: flex; flex-direction: column; gap: 1.2rem; background:
+  radial-gradient(90% 120% at 0% 0%, color-mix(in srgb, var(--c1) 60%, transparent), transparent 62%), radial-gradient(90% 120% at 100% 100%, color-mix(in srgb, var(--c2) 45%, transparent), transparent 62%), #18181a; }
+.matchpage .mp-mtop { display: inline-flex; border-radius: .6rem; overflow: hidden; font-size: 1.5rem; font-weight: 700; align-self: flex-start; }
+.matchpage .mp-mvs { display: flex; gap: 1rem; margin-top: auto; }
+.matchpage .mp-mb { width: 6.4rem; height: 6.4rem; border-radius: 50%; display: grid; place-items: center; font-size: 1.8rem; font-weight: 900; }
+.matchpage .mp-mb.img { background: none !important; box-shadow: none; }
+.matchpage .mp-mb.img img { width: 100%; height: 100%; object-fit: contain; }
+.matchpage .mp-mcard b { font-size: 2.6rem; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.matchpage .mp-mcard > span { font-size: 1.8rem; color: var(--muted); }
+.matchpage .focus { outline: .4rem solid #fff; outline-offset: .4rem; transform: scale(1.04); transition: transform 140ms; }
+.matchpage .mp-btn.focus { background: rgba(255,255,255,.3); color: #fff; }
+.matchpage .mp-btn.primary.focus { background: #fff; color: #000; }
+.matchpage .mp-chan, .matchpage .mp-team, .matchpage .mp-mcard { color: #fff; cursor: pointer; border: 0; font: inherit; }
+html.m .matchpage .mp-mcard { text-align: left; align-items: flex-start; }

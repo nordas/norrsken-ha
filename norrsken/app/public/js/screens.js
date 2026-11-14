@@ -503,12 +503,8 @@
   NS.openMatchCard = function (it) {
     var ch = Object.assign({}, it, { k: String(it.k).split('@')[0] });
     delete ch.mt;
-    if (it.mt.s - Date.now() > 30 * 60e3) { // far off: no hours-long countdown; Norrsken says when it starts
-      NS.confirm({ title: it.mt.t, text: [it.mt.label, NS.matchWhen(it.mt.s) + ' på ' + ch.n].filter(Boolean).join(' · ') + '. Norrsken säger till när matchen börjar.', buttons: [{ label: 'Okej', value: '' }, { label: 'Öppna kanalen nu', icon: 'play', value: 'go' }], cancel: '' })
-        .then(function (v) { if (v === 'go') NS.playItem(ch, { list: [ch], cat: ch.cat }); });
-      return;
-    }
-    NS.watchMatch({ state: Date.now() >= it.mt.s ? 'live' : 'soon', title: it.mt.t, s: it.mt.s, e: it.mt.e, ch: ch, chName: ch.n, chans: [ch] }, [ch], ch.cat);
+    var mt = it.mt;
+    NS.openMatch({ title: mt.t, s: mt.s, e: mt.e, label: mt.label, sides: mt.sides, foreign: mt.foreign, team: { col: mt.col }, ch: ch, chName: ch.n, chans: [ch] });
   };
   Browse.prototype.activate = function (first) {
     var self = this;

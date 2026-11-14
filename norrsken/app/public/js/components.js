@@ -219,6 +219,7 @@
    * OK switches to the channel; the second button opens the guide (live) or sets a reminder (soon).
    */
   Billboard.prototype.showSport = function (m) {
+    this.sport = m; // the match page ("Om matchen")
     var it = Object.assign({}, m.ch, { sport: m });
     this.item = it;
     this.el.classList.add('sport');
@@ -266,6 +267,7 @@
     if (second) this.btnEls.push(h('div', { class: 'btn' }, second));
     // a running match recording can be stopped from here (third button)
     if (rec && m.rec.recording) this.btnEls.push(h('div', { class: 'btn', 'data-act': 'stoprec' }, [NS.icon('x'), 'Avbryt inspelning']));
+    this.btnEls.push(h('div', { class: 'btn', 'data-act': 'matchpage' }, [NS.icon('info'), 'Om matchen']));
     this.btnEls.forEach(function (b) { this.hint.appendChild(b); }, this);
     this.clickBtns();
     t.appendChild(this.hint);
@@ -754,6 +756,7 @@
       if (a === 'ok') {
         var be = (this.bb.btnEls || [])[this.bb.sel];
         if (be && be.getAttribute('data-act') === 'stoprec') { NS.stopMatchRec(this.bb); return true; }
+        if (be && be.getAttribute('data-act') === 'matchpage' && this.bb.sport) { NS.openMatch(this.bb.sport); return true; }
         if (this.bb.sel === 0 && this.o.onPlay) this.o.onPlay(this.bb.item, { id: 'billboard' });
         else if (this.o.onSelect) this.o.onSelect(this.bb.item, { id: 'billboard' }, -1);
         return true;

@@ -672,9 +672,20 @@ function sportNow(prof, st, base = '') {
   const waits = !rec && Date.now() - (matchWait.get(m.team.id + '|' + m.s) || 0) < 90e3;
   // both teams' colours and short names, for the match card (no crests: those are the clubs' own)
   const side = (n) => matchSide(n, m, base);
-  return Object.assign({}, m, { rec, recWait: waits ? 'Spelas in när det som spelas nu stängs' : '', sides: m.home && m.away ? [side(m.home), side(m.away)] : null });
+  return Object.assign({}, m, { rec, d: matchDesc(m), autoRec: autoRecs(m), recWait: waits ? 'Spelas in när det som spelas nu stängs' : '', sides: m.home && m.away ? [side(m.home), side(m.away)] : null });
 }
 /** The profile's favourite teams (ids). Old profiles have one team; no choice at all means Luleå. */
+/** The programme's own text without the guide's HTML; or a plain sentence of who meets whom. */
+function matchDesc(m) {
+  const d = String(m.d || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  if (d && d.length > 20 && !/^matcher från/i.test(d)) return d.slice(0, 400);
+  const what = (m.label || '').split(' · ');
+  return m.home && m.away ? (what[0] || 'Match') + (what[1] ? ' i ' + what[1] : '') + ': ' + m.home + ' möter ' + m.away + '.' : d.slice(0, 400);
+}
+/** Is this recorded by itself (Luleå; the skiing world cups when switched on)? */
+function autoRecs(m) {
+  return m.team.id === MATCH_TEAM || ((m.team.id === 'langd' || m.team.id === 'skidskytte') && (store.config.options || {}).skiRec === true);
+}
 function teamsOf(st) {
   const p = (st && st.prefs) || {};
   if (Array.isArray(p.teams)) return sport.teamIds(p.teams);
@@ -684,7 +695,7 @@ function teamsOf(st) {
 function matchSide(n, m, base) {
   const foot = m.kind && m.kind.sport === 'Fotboll';
   const pool = sport.TEAMS.filter(x => (x.sport === 'football') === foot);
-  { const t = n && pool.find(x => x.re.test(n)); return t ? { n: t.short, col: t.col, ab: ABBR[t.id] || '', img: crestFile(t.id) ? base + '/crest/' + t.id : '' } : n ? { n, col: null, ab: '', img: '' } : null; }
+  { const t = n && pool.find(x => x.re.test(n)); return t ? { id: t.id, n: t.short, col: t.col, ab: ABBR[t.id] || '', img: crestFile(t.id) ? base + '/crest/' + t.id : '' } : n ? { n, col: null, ab: '', img: '' } : null; }
 }
 const sportCache = new Map();
 /** The live channels with their country (from the category name), so a match is shown and recorded on a Swedish one. */
@@ -713,6 +724,7 @@ function upcomingMatches(prof, st, base = '') {
   }
   return hit.list.map(m => ({
     team: m.team, label: m.label, state: Date.now() >= m.s ? 'live' : 'soon', title: m.title, s: m.s, e: m.e, ch: m.ch, chName: m.chName, chans: m.chans.slice(0, 6), foreign: !!m.foreign,
+    d: matchDesc(m), autoRec: autoRecs(m), rec: (() => { const r = matchRecs.get(m.team.id + '|' + m.s); return r ? recInfo(r, base) : null; })(),
     sides: m.home && m.away ? [matchSide(m.home, m, base), matchSide(m.away, m, base)] : null,
   }));
 }

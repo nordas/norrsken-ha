@@ -434,7 +434,7 @@
       live ? NS.progEl(NS.livePct(m)) : null,
       h('div', { class: 'm-sport-btns' }, [h('button', { class: 'm-btn', onclick: function (e) { e.stopPropagation(); go(); } }, [NS.icon('play'), live ? (rec ? 'Från start' : 'Titta nu') : m.state === 'ended' ? (rec ? 'Från start' : 'Tv-guide') : 'Från start']), second, stopB])
     ]);
-    el.addEventListener('click', go);
+    el.addEventListener('click', function () { NS.openMatch(m); }); // the card itself: the match page; its buttons: straight to it
     return el;
   }
   NS.mSportCard = sportCard;
@@ -446,7 +446,7 @@
       var live = Date.now() >= m.s;
       var w = NS.matchWhen(m.s).split(' ');
       var clock = w.pop();
-      return h('button', { class: 'm-match', onclick: function () { NS.watchMatch(m, m.chans || [m.ch], m.ch.cat); } }, [
+      return h('button', { class: 'm-match', onclick: function () { NS.openMatch(m); } }, [
         h('span', { class: 'when' }, live ? h('span', { class: 'live-pill', text: 'Live' }) : [w.join(' '), h('b', { text: clock })]),
         m.sides ? h('span', { class: 'm-match-b' }, [NS.teamBadge(m.sides[0], 'm-vs-b'), NS.teamBadge(m.sides[1], 'm-vs-b')]) : null,
         h('span', { class: 'what' }, [h('b', { text: m.title }), h('span', { text: [m.label, m.foreign && !live ? 'svensk kanal kommer' : m.chName || m.ch.n].filter(Boolean).join(' · ') })])

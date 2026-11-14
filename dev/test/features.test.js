@@ -746,3 +746,17 @@ test('sport: a Swedish channel always before another country\'s; one match on se
   assert.ok(sport.channelScore('TV4 Hockey', 'se') > sport.channelScore('Viaplay Sport FHD', 'foreign'));
   assert.deepEqual(['Sweden - Sport', 'Norway - VG+ Play', 'United Kingdom - Sport', 'Sport'].map(sport.regionOf), ['se', 'foreign', 'foreign', '']);
 });
+
+test('sport: each coming match carries the guide text, whether it records by itself, and the teams\' ids (the match page)', async () => {
+  await post('/api/state/p1/prefs', { teams: ['lulea'] });
+  const r = (await get('/api/sport?profile=p1')).json;
+  const all = (r.upcoming || []).concat(r.match ? [r.match] : []);
+  const lul = all.find(m => /Luleå/.test(m.title));
+  if (lul) {
+    assert.equal(typeof lul.d, 'string');
+    assert.ok(lul.d.length > 0);
+    assert.equal(lul.autoRec, true);
+    if (lul.sides) assert.equal(lul.sides.find(x => /Luleå/.test(x.n)).id, 'lulea');
+  }
+  await post('/api/state/p1/prefs', { team: 'lulea', sub: 'sv' });
+});
