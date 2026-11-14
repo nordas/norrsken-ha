@@ -637,6 +637,8 @@ const ABBR = { lulea: 'LHF', bjorkloven: 'IFB', brynas: 'BIF', djurgarden: 'DIF'
  */
 // the ones uploaded in /setup first (Norrsken's own folder), then a folder of the user's own
 const CREST_UP = path.join(DATA_DIR, 'crests');
+// a save that was cut off (the add-on stopped mid-write) leaves its temporary file: gone at start
+try { for (const f of fs.readdirSync(CREST_UP)) if (/^\..*\.tmp$/.test(f)) fs.unlinkSync(path.join(CREST_UP, f)); } catch (_) { /* no folder yet */ }
 const CREST_DIRS = [CREST_UP, process.env.NSK_CREST_DIR, '/homeassistant/norrsken/crests'].filter(Boolean);
 const CREST_TYPES = { '.png': 'image/png', '.svg': 'image/svg+xml', '.webp': 'image/webp', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg' };
 const CREST_ID = /^[a-z0-9-]{2,46}$/;
@@ -2132,7 +2134,16 @@ function crestUse() {
   try { for (const f of fs.readdirSync(CREST_UP)) { if (!CREST_TYPES[path.extname(f)]) continue; n++; try { bytes += fs.statSync(path.join(CREST_UP, f)).size; } catch (_) { /* gone */ } } } catch (_) { /* none yet */ }
   return { n, bytes };
 }
-async function saveCrest(req, res, id, label) {
+// one save at a time per crest: two pictures for one team at once (a png and a jpg) never both stay
+const crestLocks = new Map();
+function saveCrest(req, res, id, label) {
+  const prev = crestLocks.get(id) || Promise.resolve();
+  const run = prev.then(() => saveCrest1(req, res, id, label)).catch(() => { if (!res.headersSent) bad(res, 'Märket kunde inte sparas', 500); });
+  crestLocks.set(id, run);
+  run.then(() => { if (crestLocks.get(id) === run) crestLocks.delete(id); });
+  return run;
+}
+async function saveCrest1(req, res, id, label) {
   const tooBig = 'Bilden är för stor (högst 1 MB)';
   // refused before it is read when the size is known; otherwise read to the end and dropped (the answer then arrives)
   if (+req.headers['content-length'] > CREST_MAX) { res.setHeader('Connection', 'close'); req.resume(); return bad(res, tooBig, 413); }
@@ -2152,8 +2163,8 @@ async function saveCrest(req, res, id, label) {
   // the new file first (under another name), then the old ones go: a failed write never loses the crest there was
   const tmp = path.join(CREST_UP, '.' + id + '.' + process.pid + '.' + Date.now() + '.' + Math.random().toString(36).slice(2, 8) + '.tmp');
   try { fs.writeFileSync(tmp, buf); } catch (e) { try { fs.unlinkSync(tmp); } catch (_) { /* none */ } return bad(res, 'Märket kunde inte sparas', 500); }
-  for (const e of Object.keys(CREST_TYPES)) if (e !== ext) { try { fs.unlinkSync(path.join(CREST_UP, id + e)); } catch (_) { /* none */ } }
   try { fs.renameSync(tmp, path.join(CREST_UP, id + ext)); } catch (e) { try { fs.unlinkSync(tmp); } catch (_) { /* none */ } return bad(res, 'Märket kunde inte sparas', 500); }
+  for (const e of Object.keys(CREST_TYPES)) if (e !== ext) { try { fs.unlinkSync(path.join(CREST_UP, id + e)); } catch (_) { /* none */ } }
   sportCache.clear();
   crestKeyCache.at = 0;
   console.log('[märken] ' + id + ext + ' sparat (' + Math.round(buf.length / 1024) + ' kB)');

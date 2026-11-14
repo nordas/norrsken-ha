@@ -93,7 +93,9 @@ function keyForFile(fileName, abbr = {}) {
   if (/\b(juniorkronorna|smakronorna)\b/.test(w)) return pick('juniorkronorna');
   if (/\bbla ?gult\b/.test(w)) return pick(/\bdam/.test(w) ? 'sverige-fotboll-dam' : 'sverige-fotboll');
   const SPORTS = /(hockey|fotboll|football|soccer|handboll|handball|innebandy|floorball|bandy|basket|curling|landslag)/;
-  if (/^(sweden|sverige)\b/.test(w) || /\b(se|swe|sverige|sweden)\b/.test(w) && SPORTS.test(w)) {
+  // "se" names Sweden only at the end, after the sport (and men/women): "fotboll_dam_se", "Basket SE" – not "Brynäs hockey se"
+  const club = followedTeam(w, abbr);
+  if (/^(sweden|sverige)\b/.test(w) || !club && new RegExp('^' + SPORTS.source + '( (herr|dam|herrar|damer|men|women))? (se|swe|sverige|sweden)$').test(w)) {
     const dam = /\b(women|womens|dam|damer)\b/.test(w);
     if (/hockey/.test(w)) return pick(/junior|u20/.test(w) ? 'juniorkronorna' : dam ? 'damkronorna' : 'tre-kronor');
     if (/handball|handboll/.test(w)) return pick(dam ? 'sverige-handboll-dam' : 'sverige-handboll');

@@ -145,7 +145,7 @@ function get(cwd, dir, name) {
   if (!SAFE_PATH.test(dir) || !SAFE_NAME.test(name)) return Promise.resolve({ ok: false, err: 'Ogiltigt namn' });
   return exec('cd "' + dir + '"; get "' + name + '" "' + name + '.fetch"', { cwd, timeout: 3 * 60e3 }).then((r) => {
     if (!r.ok) return r;
-    try { require('fs').renameSync(require('path').join(cwd, name + '.fetch'), require('path').join(cwd, name)); } catch (e) { return { ok: false, err: e.message }; }
+    try { require('fs').renameSync(require('path').join(cwd, name + '.fetch'), require('path').join(cwd, name)); } catch (e) { return { ok: false, err: 'Filen kunde inte sparas' }; }
     return r;
   });
 }
