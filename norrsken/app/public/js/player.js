@@ -1641,8 +1641,11 @@
     if (st.mode === 'off') return;
     var e = NS.epgFor(this.item.id);
     var at = this.livePausedAt;
-    var arc = this.item.arc && e && e.now && e.now.s <= at;
-    if (!arc && !(st.mode === 'auto' && st.rec)) return;
+    // every channel is paused the same way: recorded by the server onto the Time Capsule (the provider's archive is
+    // used only when recording is switched off in the settings – it is slow to start and often a minute behind)
+    var rec = st.mode === 'auto' && st.rec;
+    var arc = !rec && this.item.arc && e && e.now && e.now.s <= at;
+    if (!arc && !rec) return;
     this.snapFrame();
     if (this.relay()) { // live through the server ends here: the pause recording takes over the connection
       var old = this.tshift;
@@ -1663,6 +1666,14 @@
       if (ts.resume) { ts.resume = false; self.liveResume(); }
     }).catch(function (err) {
       if (self.tshift !== ts) return;
+      // the Time Capsule (or the connection) could not take it: the provider's archive, when the channel has one
+      if (self.item.arc && e && e.now && e.now.s <= at) {
+        self.tshift = { mode: 'arc', at: at, prog: e.now, resume: ts.resume };
+        NS.diag('paus: inspelningen gick inte (' + ((err && err.message) || '') + '), använder kanalens arkiv');
+        self.paintTshift();
+        if (ts.resume) self.liveResume();
+        return;
+      }
       self.tshift = null;
       NS.toast((err && err.message) || 'Pausen kunde inte spelas in', 'info');
       self.paintTshift();

@@ -24,11 +24,26 @@ const smb = require('./smb');
  * the newest few stay for live and AirPlay. No Time Capsule, no recording. Everything is gone after 24 h.
  */
 const IN_HA = !!process.env.SUPERVISOR_TOKEN;
+/*
+ * Docker gives a container only 64 MB of /dev/shm unless told otherwise, and Home Assistant cannot be told: too
+ * small for even a minute of Full HD. Then the buffer is a small folder on the add-on's disk instead, held to the same
+ * hard cap (every finished piece still leaves for the Time Capsule at once) and only while the disk has room to spare.
+ */
+const SHM_MIN = +process.env.NSK_SHM_MIN_MB * 1e6 || 700e6;
+let shmSeen = null;
+function shmBig() {
+  if (shmSeen === null) {
+    try { const st = fs.statfsSync('/dev/shm'); shmSeen = st.blocks * st.bsize >= SHM_MIN; } catch (_) { shmSeen = false; }
+    if (IN_HA) console.log('[paus] buffert för inspelningen:', shmSeen ? 'minnet (/dev/shm)' : 'en liten mapp på disken (/dev/shm är för litet), allt går vidare till Time Capsule');
+  }
+  return shmSeen;
+}
 function stageRoot() {
   if (process.env.NSK_STAGE_DIR) return process.env.NSK_STAGE_DIR;
-  if (fs.existsSync('/dev/shm')) return '/dev/shm/norrsken-pause';
-  return IN_HA ? '' : path.join(os.tmpdir(), 'norrsken-pause'); // tests on a Mac; never in Home Assistant
+  if (shmBig()) return '/dev/shm/norrsken-pause';
+  return IN_HA ? '/data/norrsken-stage' : path.join(os.tmpdir(), 'norrsken-stage');
 }
+const stageOnDisk = () => !process.env.NSK_STAGE_DIR && !shmBig();
 const tcMode = () => !process.env.NSK_PAUSE_DIR && !storage.mounted();
 // a mounted network folder, or the memory buffer in front of the Time Capsule; looked up each time (shares come and go)
 const rootDir = () => process.env.NSK_PAUSE_DIR || (tcMode() ? stageRoot() : storage.pauseDir());
@@ -45,7 +60,9 @@ const KEEP_MS = 24 * 3600e3; // hard: nothing is kept longer, here or on the Tim
 const KEEP_MATCH_DIR_MS = KEEP_MS;
 const IDLE_MS = 3 * 60e3; // the player checks in every 30 s, also while paused
 const MIN_FREE = 1.5e9; // leave room on the disk: Home Assistant needs it more than we do
-const MIN_FREE_STAGE = 200e6; // and in memory
+const MIN_FREE_STAGE_MEM = 200e6; // and in memory
+// the buffer on the disk (no room in memory): the disk's own margin plus room for the buffer
+const stageMin = () => stageOnDisk() ? MIN_FREE + STAGE_MAX : MIN_FREE_STAGE_MEM;
 const sessions = new Map();
 
 /** '' when the Time Capsule can take a recording now, otherwise why not (nothing is then recorded at all). */
@@ -281,7 +298,7 @@ function start(url, { ua, maxMin = 60, ch = '', match = false, live = false } = 
   fs.mkdirSync(ROOT, { recursive: true });
   const free = freeBytes(ROOT);
   // live through memory keeps at most STAGE_MAX: it needs that much free, not the disk margin a pause needs
-  if (free < (ring ? STAGE_MAX + 50e6 : useMirror ? MIN_FREE_STAGE : MIN_FREE)) throw new Error(useMirror ? 'För lite ledigt minne för att spela in pausen' : 'För lite ledigt diskutrymme för att spela in pausen');
+  if (free < (!tcMode() ? MIN_FREE : stageOnDisk() ? stageMin() : ring ? stageMin() / 2 : stageMin())) throw new Error(tcMode() && !stageOnDisk() ? 'För lite ledigt minne för att spela in pausen' : 'För lite ledigt diskutrymme för att spela in pausen');
   const id = Math.random().toString(36).slice(2, 10);
   const dir = path.join(ROOT, id);
   fs.mkdirSync(dir, { recursive: true });
@@ -313,6 +330,20 @@ function start(url, { ua, maxMin = 60, ch = '', match = false, live = false } = 
     proc.on('close', (code) => {
       if (s.dead) { s.done = true; return; }
       if (bsf && code && /bitstream filter/i.test(s.err) && Date.now() - s.started < 20000) { s.err = ''; launch(false); return; }
+      /*
+       * The provider allows one connection: the player's own stream was closed a moment ago and the provider may still
+       * count it, so it answers 4XX (or closes at once). Nothing recorded yet: wait and ask again, a few times.
+       */
+      let pieces = 0;
+      try { pieces = fs.readdirSync(s.dir).filter(n => /^p\d{5}\.m4s$/.test(n)).length; } catch (_) { /* gone */ }
+      if (code && !pieces && (s.tries || 0) < 4 && Date.now() - s.started < 90e3) {
+        s.tries = (s.tries || 0) + 1;
+        console.log('[paus] kanalen svarade inte (' + hideLinks(s.err.split('\n').filter(Boolean).slice(-1).join(' ')) + '), försöker igen', s.tries + '/4');
+        s.err = '';
+        const t = setTimeout(() => { if (!s.dead) launch(bsf); }, 2500 * s.tries);
+        if (t.unref) t.unref();
+        return;
+      }
       s.done = true;
       if (Date.now() - s.started >= maxMin * 60e3 - 5000) { s.full = true; console.log('[paus] inspelningen nådde maxlängden', maxMin, 'min'); }
       else if (code) console.error('[paus] ffmpeg fel', code, hideLinks(s.err.split('\n').filter(Boolean).slice(-2).join(' ')));
@@ -325,7 +356,7 @@ function start(url, { ua, maxMin = 60, ch = '', match = false, live = false } = 
     if (s.dead) return clearInterval(s.diskT);
     if (s.mirror) smb.check().catch(() => {});
     if (s.ring && dirBytes(s.dir) > STAGE_MAX) return halt(s, 'bufferten i minnet är full', false);
-    if (freeBytes(path.dirname(s.dir)) < (s.mirror ? MIN_FREE_STAGE * 0.5 : MIN_FREE * 0.6) || (s.mirror && smb.free() && smb.free() < MIN_FREE * 0.6)) halt(s, s.mirror ? 'minnet eller Time Capsule börjar bli fullt' : 'disken börjar bli full');
+    if (freeBytes(path.dirname(s.dir)) < (s.mirror ? (stageOnDisk() ? MIN_FREE * 0.6 : MIN_FREE_STAGE_MEM * 0.5) : MIN_FREE * 0.6) || (s.mirror && smb.free() && smb.free() < MIN_FREE * 0.6)) halt(s, s.mirror ? 'minnet eller Time Capsule börjar bli fullt' : 'disken börjar bli full');
   }, 15000);
   if (s.diskT.unref) s.diskT.unref();
   sessions.set(id, s);
@@ -603,7 +634,7 @@ function preflight() {
   const why = tcProblem();
   if (why) return why;
   try { fs.mkdirSync(rootDir(), { recursive: true }); } catch (e) { return 'mappen för inspelningar går inte att skapa'; }
-  if (freeBytes(rootDir()) < (tcMode() ? MIN_FREE_STAGE : MIN_FREE)) return tcMode() ? 'för lite ledigt minne' : 'för lite ledigt diskutrymme';
+  if (freeBytes(rootDir()) < (tcMode() ? stageMin() : MIN_FREE)) return tcMode() && !stageOnDisk() ? 'för lite ledigt minne' : 'för lite ledigt diskutrymme';
   return '';
 }
 /** Pause recordings someone is using (a paused channel), not match recordings. */
@@ -624,4 +655,4 @@ function _forget(id) {
   fs.rmSync(s.dir, { recursive: true, force: true });
 }
 
-module.exports = { livePlaylist, _forget, wakeTC, sweepRemote, recoverTC, protect, recording, preflight, list, restore, playlistMulti, _hideLinks: hideLinks, start, get, stop, stopAll, stopPauses, matchSession, playlist, file, fileReady, length, active, pauseActive, cleanStart, rootDir };
+module.exports = { stageInfo: () => ({ dir: tcMode() ? stageRoot() : rootDir(), mem: tcMode() && !stageOnDisk(), freeMb: (f => isFinite(f) ? Math.round(f / 1e6) : null)(freeBytes(fs.existsSync(rootDir()) ? rootDir() : path.dirname(rootDir()))) }), livePlaylist, _forget, wakeTC, sweepRemote, recoverTC, protect, recording, preflight, list, restore, playlistMulti, _hideLinks: hideLinks, start, get, stop, stopAll, stopPauses, matchSession, playlist, file, fileReady, length, active, pauseActive, cleanStart, rootDir };

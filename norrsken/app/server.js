@@ -415,6 +415,7 @@ function status() {
     ffmpeg: ff.has(),
     previews: store.config.options.previews || 'sound',
     pause: { mode: store.config.options.pauseMode || 'auto', max: +store.config.options.pauseMax || 60, rec: ff.has() },
+    pauseStage: tsbuf.stageInfo(),
     storage: storage.info(),
     downloads: ff.has(),
     parentPin: (store.config.profiles || []).some(p => !p.kids && p.pin),
