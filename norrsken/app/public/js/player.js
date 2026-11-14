@@ -169,7 +169,10 @@
       self.buffering(true);
       var b = 0;
       try { var bb = v.buffered; for (var i = 0; i < bb.length; i++) if (v.currentTime >= bb.start(i) - 0.5 && v.currentTime <= bb.end(i)) b = bb.end(i) - v.currentTime; } catch (e) { /* ignore */ }
-      NS.diag('buffrar vid ' + Math.round(self.cur()) + ' s, buffert framåt ' + b.toFixed(1) + ' s, motor ' + (self.hls ? (window.ManagedMediaSource && !window.MediaSource ? 'hls.js/MMS' : 'hls.js') : self.mp ? 'mpegts' : self.kind));
+      var cs = self.sources && self.sources[self.si];
+      NS.diag('buffrar vid ' + Math.round(self.cur()) + ' s, buffert framåt ' + b.toFixed(1) + ' s, motor ' + (self.hls ? (window.ManagedMediaSource && !window.MediaSource ? 'hls.js/MMS' : 'hls.js') : self.mp ? 'mpegts' : self.kind) +
+        (self.relay() ? ', via servern' : cs ? ', ' + cs.kind + (cs.direct ? ' direkt' : ' via servern') : '') + (self.live && self.item ? ', ' + (self.item.n || '') : ''));
+      self.liveStall();
     });
     on('stalled', function () { self.buffering(true); });
     on('canplay', function () { self.buffering(false); });
@@ -461,12 +464,31 @@
    */
   Player.prototype.relay = function () { var ts = this.tshift; return !!(ts && ts.ios && !ts.match); };
 
+  /**
+   * A live channel that stops again and again while playing straight from the provider (their sport channels send in
+   * bursts): from the second stop within a few minutes it goes through the server instead – the server reads the
+   * channel without pause and hands the screen a steady stream with picture in hand – and the channel is remembered.
+   */
+  Player.prototype.liveStall = function () {
+    if (!this.live || !this.played || this.relay() || this.tshift || this.video.paused || !this.item || this.item.t === 'catchup') return;
+    if (Date.now() - (this.srcStart || 0) < 8000) return; // starting up is not a stall
+    var now = Date.now();
+    this.stalls = (this.stalls || []).filter(function (t) { return now - t < 180e3; });
+    this.stalls.push(now);
+    if (this.stalls.length < 2 || NS.steadyLive(this.item)) return;
+    NS.steadyLearn(this.item);
+    this.stalls = [];
+    NS.diag('stabil live: ' + (this.item.n || '') + ' hackade – spelas via servern från nu');
+    NS.toast('Kanalen hackade – spelar den via servern för jämnare bild', 'info');
+    this.startSource(0);
+  };
+
   Player.prototype.startSource = function (at) {
     var self = this;
     if (this.suspended) return;
     // iPhone/iPad and a live channel sent as MPEG-TS: play the server's HLS of it in Safari's own player from the
     // start, so AirPlay to a TV gets the picture without switching source (which ends AirPlay on those TVs)
-    if (this.live && !this.tshift && this.item.t !== 'catchup' && !this.iosLiveOff && NS.iosNative(this.video)) {
+    if (this.live && !this.tshift && this.item.t !== 'catchup' && !this.iosLiveOff && (NS.iosNative(this.video) || NS.steadyLive(this.item))) {
       // every live channel, also one the provider sends as HLS: handed the provider's own address over AirPlay the
       // Philips TV went on and straight off again (log 12 Nov); the server's recording is the form it plays
       var c0 = this.sources && this.sources[this.si];
@@ -1707,7 +1729,7 @@
     }).catch(function (e) {
       if (self.tshift !== ts) return;
       self.tshift = null;
-      NS.diag('iPhone: live via servern gick inte (' + ((e && e.message) || '') + '), spelar kanalen direkt');
+      NS.diag((NS.iosNative(self.video) ? 'iPhone' : 'stabil live') + ': live via servern gick inte (' + ((e && e.message) || '') + '), spelar kanalen direkt');
       self.iosLiveOff = true; // this channel the usual way (AirPlay then may only get the sound)
       self.startSource(0);
     });
@@ -1727,9 +1749,10 @@
       // live on an iPhone (and "Gå till live"): near the end of the recording, as Safari's own player does; otherwise
       // the time it took to start, and every stall, would add up behind live
       var edge = !!(ts.ios && ts.edge);
+      var steady = !!(ts.ios && NS.steadyLive(this.item) && !NS.iosNative(v)); // a channel that stalls: more picture in hand
       if (edge) { ts.edge = false; url = url + (url.indexOf('?') < 0 ? '?' : '&') + 'edge=1'; this.airUrl = url; }
       // an EVENT playlist: start where the recording starts (or near its end, above) and never jump ahead by itself
-      var hls = this.hls = new window.Hls({ enableWorker: true, startPosition: edge ? -1 : (at || 0), liveSyncDurationCount: edge ? 3 : 99999, liveMaxLatencyDurationCount: Infinity,
+      var hls = this.hls = new window.Hls({ enableWorker: true, startPosition: edge ? -1 : (at || 0), liveSyncDurationCount: edge ? (steady ? 5 : 3) : 99999, liveMaxLatencyDurationCount: Infinity,
         maxBufferLength: 40, backBufferLength: 60, manifestLoadingTimeOut: 40000, manifestLoadingMaxRetry: 2, levelLoadingMaxRetry: 6, fragLoadingMaxRetry: 6 });
       // a stall or a bad piece in a recording must not throw the viewer back to live (that made rewinding look broken):
       // stuck with picture buffered ahead → step over the spot; a media error → let hls.js rebuild the decoder; a
@@ -2145,6 +2168,17 @@
         NS.store.set('engine', own ? (iosDef ? 'hlsjs' : '') : (iosDef ? '' : 'native'));
         self.closePanel();
         self.switchSource(self.si);
+      } });
+    }
+    // live: through the server (steady) or straight from the provider (a little closer to live)
+    if (this.live && this.item && this.item.t !== 'catchup' && !NS.iosNative(this.video)) {
+      var viaSrv = this.relay();
+      srcs.unshift({ label: viaSrv ? 'Spela direkt från leverantören' : 'Spela via servern (stabilare)', note: viaSrv ? 'via servern nu – jämnare bild, några sekunder efter' : 'för kanaler som hackar', act: function () {
+        if (viaSrv) { NS.store.set('steadyIds', NS.store.get('steadyIds', []).filter(function (x) { return x !== String(self.item.id); })); if (NS.steadyLive(self.item)) NS.store.set('steadyOff', true); }
+        else { NS.store.set('steadyOff', false); NS.steadyLearn(self.item); }
+        self.closePanel();
+        if (viaSrv) { self.iosLiveOff = true; self.endTshift(); }
+        self.startSource(0);
       } });
     }
     add('Spelare', srcs);

@@ -223,6 +223,22 @@
     if (!ios || NS.store.get('engine', '') === 'hlsjs') return false;
     try { return !!(v || document.createElement('video')).canPlayType('application/vnd.apple.mpegurl'); } catch (e) { return false; }
   };
+  /*
+   * Live channels that go through the server (its memory, nothing recorded) instead of straight from the provider:
+   * the Viaplay and V Sport channels from the start (they send in bursts and stall), and any channel that stalled
+   * twice in a few minutes (remembered on this screen). "Direkt från leverantören" in the player settings turns it off.
+   */
+  var STEADY_RE = /viaplay|viapaly|viasat|(^|[\s\]])v ?sport|(^|[\s\]])v film/i;
+  NS.steadyLive = function (it) {
+    if (!it) return false;
+    if (NS.store.get('steadyIds', []).indexOf(String(it.id)) >= 0) return true;
+    return !NS.store.get('steadyOff', false) && STEADY_RE.test(String(it.n || ''));
+  };
+  NS.steadyLearn = function (it) {
+    var ids = NS.store.get('steadyIds', []).filter(function (x) { return x !== String(it.id); });
+    ids.unshift(String(it.id));
+    NS.store.set('steadyIds', ids.slice(0, 200));
+  };
   NS.remuxUrl = function (base, at, a, safe) { return base + '&ss=' + Math.floor(at || 0) + '&a=' + (a || 0) + '&caps=' + (safe ? '' : NS.caps) + (safe ? '&safe=1' : ''); };
 
   /* ---------------------------------------------------------------- direct playback */
