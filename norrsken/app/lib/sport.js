@@ -95,14 +95,29 @@ function matchup(title, fav) {
   return { home, away };
 }
 
-/** How good a channel is for the match: HD before SD, Swedish before others, not "backup"/"alt". */
-function channelScore(name) {
+/**
+ * Where a channel comes from, by its category ("Sweden - Sport", "Norway - VG+ Play", "United Kingdom - …"):
+ * 'se', 'foreign', or '' when the list has no countries in its category names.
+ */
+function regionOf(catName) {
+  const c = String(catName || '');
+  if (!c) return '';
+  if (/^\s*(sweden|sverige|swe?)\b/i.test(c)) return 'se';
+  if (/^\s*(norway|norge|denmark|danmark|finland|suomi|united kingdom|uk|usa|us|germany|deutschland|new zealand|canada|france|spain|italy|ireland)\b/i.test(c)) return 'foreign';
+  return '';
+}
+/** How good a channel is for the match: Swedish always first, then Full HD/4K before HD before SD, not "backup"/"alt". */
+function channelScore(name, region) {
   const n = String(name || '');
   let s = 0;
+  if (region === 'se') s += 20;
+  else if (region === 'foreign') s -= 20;
+  if (/^\[(viaplay no|vgtv|tv2|hbo max uk|dazn uk)\b/i.test(n)) s -= 20; // an event channel of another country's service
   // Full HD first (what Oskar wants recorded and shown), then HD
-  if (/\b(fhd|1080[pi]?)\b/i.test(n)) s += 5;
+  if (/\b(4k|uhd|2160p?)\b/i.test(n)) s += 6;
+  else if (/\b(fhd|1080[pi]?)\b/i.test(n)) s += 5;
   else if (/\bhd\b/i.test(n)) s += 3;
-  if (/\b(4k|uhd)\b/i.test(n)) s += 2;
+  if (/^\[tv4 ?play\]/i.test(n)) s += 4; // TV4 Play's own event channel: the Swedish broadcast, in full HD
   if (/\bsd\b/i.test(n)) s -= 3;
   if (/(^|[\s|:[(])(se|swe|sverige)([\s|:\])]|$)/i.test(n)) s += 2;
   if (/backup|alt\b|\braw\b/i.test(n)) s -= 4;
@@ -154,6 +169,7 @@ const EVENT_LEN = 4 * 3600e3; // the name only says when it starts: a hockey bro
 /* What the start page follows besides the favourite team: Sweden (hockey or football) and the skiing world cups. */
 const SWE_SIDE = /(^|[:\s])(sverige|tre kronor|damkronorna|sweden)\s+[-–—]\s+\S|\S\s+[-–—]\s+(sverige|tre kronor|damkronorna|sweden)(\s|$|[,(])/i;
 const FOOTBALL = /fotboll|football|soccer|landskamp|vm-kval|em-kval|nations league|\bvm\b|\bem\b|\bos\b|fifa|uefa/i;
+const YOUTH = /\b(u\d{2}[pfdj]?|j\d{2}|junior|ungdom|damjunior)\b/i;
 const OTHER_SPORT = /handboll|bandy|innebandy|basket|volley|curling|tennis|padel|rugby|friidrott|simning|e-?sport|golf|dart/i;
 const WORLD_CUP = /v[äa]rldscup|world cup|tour de ski/i;
 const FOLLOW = {
@@ -243,14 +259,18 @@ function collect(follows, channels, epg, now, days = 1) {
     if (s >= day.end) return;
     if (s < day.start && now >= e) return; // yesterday's: only while it is still on (a late match past midnight)
     if (NOT_LIVE.test(t)) return;
+    if (YOUTH.test(t)) return; // U14, J20 …: the club's youth teams, not the team
     d = d || '';
     for (const f of follows) {
       if (!f.ok(t, d, ch.n || '', ev)) continue;
       if (e - s > f.maxLen) continue; // hours of the same thing: a re-run block, not the event
       const mu = f.vs ? matchup(t, f.vs) : null;
-      const key = f.id + '|' + (mu ? mu.home + '|' + mu.away : t.toLowerCase()) + '|' + Math.round(s / 600e3);
-      let h = hits.get(key);
-      if (!h) hits.set(key, (h = { f, s, e, t, d, mu, chans: [], labels: new Map() }));
+      // the same match on several channels (TV4 Play 17:55, a Norwegian service 17:50) is one match
+      const who = f.id + '|' + (mu ? [mu.home, mu.away].sort().join('|') : t.toLowerCase());
+      let h = null;
+      for (const x of hits.values()) if (x.who === who && Math.abs(x.s - s) <= 45 * 60e3) { h = x; break; }
+      if (!h) hits.set(who + '|' + s + '|' + hits.size, (h = { who, f, s, e, t, d, mu, chans: [], labels: new Map() }));
+      else if (ch.region === 'se' && !h.chans.some(c => c.region === 'se')) { h.s = s; h.e = e; h.t = t; h.d = d || h.d; if (mu) h.mu = mu; } // the Swedish listing's times and names
       if (!h.chans.includes(ch)) h.chans.push(ch);
       h.labels.set(ch.id, label || ch.n);
       return; // one thing per programme
@@ -270,7 +290,11 @@ function collect(follows, channels, epg, now, days = 1) {
   }
   const rank = (h) => (h.s <= now && now < h.e) ? 0 : h.s > now ? 1 : 2;
   return [...hits.values()].sort((a, b) => (rank(a) - rank(b)) || a.s - b.s || b.chans.length - a.chans.length).map((best) => {
-    const chans = best.chans.slice().sort((a, b) => channelScore(b.n) - channelScore(a.n));
+    let chans = best.chans.slice().sort((a, b) => channelScore(b.n, b.region) - channelScore(a.n, a.region));
+    // Swedish channels only, when there is one; another country's broadcast only when nothing Swedish has it (yet)
+    const swe = chans.filter(c => c.region === 'se' || (c.region !== 'foreign' && channelScore(c.n, c.region) > -10));
+    const foreign = !swe.length;
+    if (swe.length) chans = swe;
     const f = best.f;
     const kind = classify(best.t, best.d, chans[0].n || '', f.id === 'langd' ? 'Längdskidor' : f.id === 'skidskytte' ? 'Skidskytte' : (f.vs && f.id !== 'sverige') ? (f.sport || 'Ishockey') : '');
     return {
@@ -284,6 +308,7 @@ function collect(follows, channels, epg, now, days = 1) {
       ch: chans[0],
       chName: best.labels.get(chans[0].id) || chans[0].n, // "TV4 Play" instead of the event channel's long name
       chans,
+      foreign, // only a foreign broadcast is known so far (the Swedish one usually shows up hours before the match)
     };
   });
 }
@@ -317,4 +342,4 @@ function findMatch(teamIdValue, channels, epg, opts = {}) {
   return todayAll(teamIdValue, channels, epg, opts)[0] || null;
 }
 
-module.exports = { classify, TEAMS, teamId, teamIds, upcoming, recToday, team, list, matchup, findMatch, matchesToday, todayAll, channelScore, stockholmDay, stockholmTime, eventOf };
+module.exports = { regionOf, classify, TEAMS, teamId, teamIds, upcoming, recToday, team, list, matchup, findMatch, matchesToday, todayAll, channelScore, stockholmDay, stockholmTime, eventOf };

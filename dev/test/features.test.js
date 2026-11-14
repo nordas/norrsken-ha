@@ -728,3 +728,21 @@ test('sport: several favourite teams, Premier League clubs in every competition,
   assert.equal(s.prefs.team, 'none');
   await post('/api/state/p1/prefs', { team: 'lulea', sub: 'sv' });
 });
+
+test('sport: a Swedish channel always before another country\'s; one match on several channels; youth teams are not the team', () => {
+  const sport = require('../lib/sport');
+  const now = Date.UTC(2026, 10, 14, 6);
+  const mk = (n, region) => ({ id: n, n, region, epg: '' });
+  const ch = [mk('[Vgtv] (14/11) 17:50 Luleå vs Färjestad', 'foreign'), mk('[Svensk] (14/11) 11:10 U14P: Luleå HF  Vs Piteå HC', 'se'), mk('[Svensk] (14/11) 12:00 J20: Luleå HF - Skellefteå AIK', 'se')];
+  let up = sport.upcoming(['lulea'], ch, { map: new Map() }, { now });
+  assert.equal(up.length, 1);
+  assert.equal(up[0].foreign, true); // only the Norwegian one is known so far: said, not hidden
+  ch.push(mk('[TV4Play] (14/11) 17:55 Luleå HF - Färjestad BK', 'se'), mk('V Sport 1 FHD', 'se'));
+  up = sport.upcoming(['lulea'], ch, { map: new Map() }, { now });
+  assert.equal(up.length, 1);
+  assert.deepEqual([up[0].title, up[0].chName, up[0].foreign, up[0].chans.length], ['Luleå – Färjestad', 'TV4 Play', false, 1]);
+  assert.equal(new Date(up[0].s).toISOString(), '2026-11-14T16:55:00.000Z');
+  assert.ok(sport.channelScore('TV4 Hockey UHD', 'se') > sport.channelScore('TV4 Hockey FHD', 'se'));
+  assert.ok(sport.channelScore('TV4 Hockey', 'se') > sport.channelScore('Viaplay Sport FHD', 'foreign'));
+  assert.deepEqual(['Sweden - Sport', 'Norway - VG+ Play', 'United Kingdom - Sport', 'Sport'].map(sport.regionOf), ['se', 'foreign', 'foreign', '']);
+});

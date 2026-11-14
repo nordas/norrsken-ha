@@ -249,7 +249,7 @@
     var logo = h('span', { class: 'chlogo' });
     if (m.ch.img) logo.appendChild(NS.pic(m.ch.img, '', function () { logo.remove(); }));
     meta.appendChild(logo);
-    meta.appendChild(h('span', { text: m.chName || m.ch.n }));
+    meta.appendChild(h('span', { text: m.foreign && m.state !== 'live' ? 'Svensk kanal visas när TV4 lägger ut matchen' : (m.chName || m.ch.n) + (m.foreign ? ' (utländsk)' : '') }));
     meta.appendChild(h('span', { text: NS.fmtClock(m.s) + '–' + NS.fmtClock(m.e) }));
     if (m.chans && m.chans.length > 1) meta.appendChild(h('span', { class: 'soft', text: 'på ' + m.chans.length + ' kanaler' }));
     t.appendChild(meta);
@@ -378,7 +378,7 @@
       if (mt.comp) f.appendChild(h('div', { class: 'lcomp', text: mt.comp }));
       f.appendChild(h('div', { class: 'mvs' }, [NS.teamBadge(mt.sides[0], 'mvs-b'), h('i', { text: '–' }), NS.teamBadge(mt.sides[1], 'mvs-b')]));
       f.appendChild(h('div', { class: 'lnow', text: mt.t }));
-      f.appendChild(h('div', { class: 'lch', text: item.n }));
+      f.appendChild(h('div', { class: 'lch', text: mt.foreign && !onNow ? 'Svensk kanal kommer' : item.n }));
       return c;
     }
     if (kind === 'live') {

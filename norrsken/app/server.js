@@ -656,7 +656,7 @@ function sportNow(prof, st, base = '') {
   if (!hit || Date.now() - hit.at >= 60e3) {
     let m = null;
     try {
-      m = sport.findMatch(tid, catalog.list('live', 'all', prof), catalog.epg);
+      m = sport.findMatch(tid, sportChannels(prof), catalog.epg);
       if (m) m.chans = m.chans.slice(0, 12);
     } catch (e) { console.error('[sport]', e.message); }
     hit = { at: Date.now(), m };
@@ -687,6 +687,17 @@ function matchSide(n, m, base) {
   { const t = n && pool.find(x => x.re.test(n)); return t ? { n: t.short, col: t.col, ab: ABBR[t.id] || '', img: crestFile(t.id) ? base + '/crest/' + t.id : '' } : n ? { n, col: null, ab: '', img: '' } : null; }
 }
 const sportCache = new Map();
+/** The live channels with their country (from the category name), so a match is shown and recorded on a Swedish one. */
+let sportChanCache = { key: '', list: [] };
+function sportChannels(prof) {
+  const list = catalog.list('live', 'all', prof);
+  const key = prof.id + '|' + catalog.status.at + '|' + list.length;
+  if (sportChanCache.key === key) return sportChanCache.list;
+  const names = new Map(((catalog.data && catalog.data.live && catalog.data.live.cats) || []).map(c => [c.id, c.raw || c.name]));
+  const out = list.map(c => Object.assign({}, c, { region: sport.regionOf(names.get(c.cat)) }));
+  sportChanCache = { key, list: out };
+  return out;
+}
 /** The favourite teams' matches the days ahead (whatever league or cup), for the list on the start page. */
 function upcomingMatches(prof, st, base = '') {
   const ids = teamsOf(st);
@@ -695,13 +706,13 @@ function upcomingMatches(prof, st, base = '') {
   let hit = sportCache.get(key);
   if (!hit || Date.now() - hit.at >= 60e3) {
     let list = [];
-    try { list = sport.upcoming(ids, catalog.list('live', 'all', prof), catalog.epg, { days: 8 }).slice(0, 40); } catch (e) { console.error('[sport]', e.message); }
+    try { list = sport.upcoming(ids, sportChannels(prof), catalog.epg, { days: 8 }).slice(0, 40); } catch (e) { console.error('[sport]', e.message); }
     hit = { at: Date.now(), list };
     sportCache.set(key, hit);
     if (sportCache.size > 50) sportCache.clear();
   }
   return hit.list.map(m => ({
-    team: m.team, label: m.label, state: Date.now() >= m.s ? 'live' : 'soon', title: m.title, s: m.s, e: m.e, ch: m.ch, chName: m.chName, chans: m.chans.slice(0, 6),
+    team: m.team, label: m.label, state: Date.now() >= m.s ? 'live' : 'soon', title: m.title, s: m.s, e: m.e, ch: m.ch, chName: m.chName, chans: m.chans.slice(0, 6), foreign: !!m.foreign,
     sides: m.home && m.away ? [matchSide(m.home, m, base), matchSide(m.away, m, base)] : null,
   }));
 }
@@ -709,7 +720,7 @@ function upcomingMatches(prof, st, base = '') {
 function matchRow(prof, st, base) {
   const list = upcomingMatches(prof, st, base);
   if (!list.length) return null;
-  const items = list.map(m => Object.assign({}, m.ch, { k: m.ch.k + '@' + m.s, mt: { t: m.title, s: m.s, e: m.e, label: m.label, comp: (m.label || '').split(' · ').pop(), sides: m.sides, col: m.team.col } }));
+  const items = list.map(m => Object.assign({}, m.ch, { k: m.ch.k + '@' + m.s, mt: { t: m.title, s: m.s, e: m.e, label: m.label, foreign: m.foreign, comp: (m.label || '').split(' · ').pop(), sides: m.sides, col: m.team.col } }));
   return row('matches', 'Dina lags matcher', 'live', items, { limit: 40 });
 }
 
@@ -1353,7 +1364,7 @@ route('GET', '/mrec/:mid/live.m3u8', (req, res, q, p) => {
 /** Records every match of the favourite team (Luleå Hockey) from just before it starts until the end, if it's on a channel we have. */
 /** What records by itself today: Luleå's matches, and the skiing world cups when that is switched on. Nothing else. */
 function recList(now) {
-  return sport.recToday(MATCH_TEAM, (store.config.options || {}).skiRec === true, catalog.list('live', 'all', store.profile('')), catalog.epg, { now });
+  return sport.recToday(MATCH_TEAM, (store.config.options || {}).skiRec === true, sportChannels(store.profile('')), catalog.epg, { now });
 }
 function matchRecTick() {
   if (!catalog.ready() || !matchRecReady) return;

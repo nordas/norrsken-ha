@@ -47,7 +47,7 @@
         h('span', { class: 'm-livetag' + (onNow ? '' : ' when'), text: onNow ? 'LIVE' : NS.matchWhen(mt.s) }),
         h('div', { class: 'm-mvs' }, [NS.teamBadge(mt.sides[0], 'm-vs-b'), h('i', { text: '–' }), NS.teamBadge(mt.sides[1], 'm-vs-b')])
       ]);
-      var mc = h('div', { class: 'm-card m-live' }, [mf, h('div', { class: 'm-now' }, [h('b', { text: mt.t }), h('span', { text: [mt.comp, it.n].filter(Boolean).join(' · ') })])]);
+      var mc = h('div', { class: 'm-card m-live' }, [mf, h('div', { class: 'm-now' }, [h('b', { text: mt.t }), h('span', { text: [mt.comp, mt.foreign && !onNow ? 'svensk kanal kommer' : it.n].filter(Boolean).join(' · ') })])]);
       mc._it = it;
       return mc;
     }
@@ -429,7 +429,7 @@
     var el = h('section', { class: 'm-sport' + (live ? ' live' : ''), style: 'background:radial-gradient(90% 140% at 100% 0%, ' + c + 'bb 0%, ' + c + '22 55%, transparent 80%)' + (oc ? ', radial-gradient(80% 130% at 0% 100%, ' + oc + '88 0%, ' + oc + '18 55%, transparent 80%)' : '') + ', #121318' }, [
       h('div', { class: 'm-sport-top' }, [live ? h('span', { class: 'live-pill', text: 'Live nu' }) : h('span', { class: 'soon-pill', text: m.state === 'ended' ? 'Slut' : 'Börjar ' + NS.fmtClock(m.s) }), h('span', { text: m.label || m.team.name })]),
       m.sides ? h('div', { class: 'm-vs' }, [badge(m.sides[0]), h('span', { class: 'm-vs-x', text: '–' }), badge(m.sides[1])]) : h('h2', { text: m.title }),
-      h('div', { class: 'm-sport-meta' }, [logo, h('span', { text: (m.chName || m.ch.n) + '  ·  ' + NS.fmtClock(m.s) + '–' + NS.fmtClock(m.e) })]),
+      m.foreign && m.state !== 'live' ? h('div', { class: 'm-sport-meta' }, h('span', { text: 'Svensk kanal visas när TV4 lägger ut matchen · ' + NS.fmtClock(m.s) })) : h('div', { class: 'm-sport-meta' }, [logo, h('span', { text: (m.chName || m.ch.n) + '  ·  ' + NS.fmtClock(m.s) + '–' + NS.fmtClock(m.e) + (m.foreign ? '  ·  utländsk sändning' : '') })]),
       m.recWait ? h('div', { class: 'm-sport-wait', text: m.recWait }) : null,
       live ? NS.progEl(NS.livePct(m)) : null,
       h('div', { class: 'm-sport-btns' }, [h('button', { class: 'm-btn', onclick: function (e) { e.stopPropagation(); go(); } }, [NS.icon('play'), live ? (rec ? 'Från start' : 'Titta nu') : m.state === 'ended' ? (rec ? 'Från start' : 'Tv-guide') : 'Från start']), second, stopB])
@@ -449,7 +449,7 @@
       return h('button', { class: 'm-match', onclick: function () { NS.watchMatch(m, m.chans || [m.ch], m.ch.cat); } }, [
         h('span', { class: 'when' }, live ? h('span', { class: 'live-pill', text: 'Live' }) : [w.join(' '), h('b', { text: clock })]),
         m.sides ? h('span', { class: 'm-match-b' }, [NS.teamBadge(m.sides[0], 'm-vs-b'), NS.teamBadge(m.sides[1], 'm-vs-b')]) : null,
-        h('span', { class: 'what' }, [h('b', { text: m.title }), h('span', { text: [m.label, m.chName || m.ch.n].filter(Boolean).join(' · ') })])
+        h('span', { class: 'what' }, [h('b', { text: m.title }), h('span', { text: [m.label, m.foreign && !live ? 'svensk kanal kommer' : m.chName || m.ch.n].filter(Boolean).join(' · ') })])
       ]);
     };
     list.slice(0, 5).forEach(function (m) { el.appendChild(rowOf(m)); });
