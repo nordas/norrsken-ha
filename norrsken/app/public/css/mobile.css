@@ -623,3 +623,4 @@ html.m .matchpage .mp-mcard > span { font-size: 12px; }
 html.m .matchpage .mp-comp { padding: 3px 7px; border-radius: 6px; }
 html.m .matchpage .mp-comp img { height: 20px; max-width: 80px; }
 html.m .matchpage .mp-mcomp img { height: 16px; max-width: 56px; }
+html.m .osd .tshift b::after { font-size: 13px; }

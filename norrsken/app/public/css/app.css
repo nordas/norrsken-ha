@@ -809,3 +809,44 @@ html.m .matchpage .mp-mcard { text-align: left; align-items: flex-start; }
 .matchpage .mp-mtop { max-width: 100%; white-space: nowrap; }
 .matchpage .mp-mtop .mp-ch { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .matchpage .mp-mtop .mp-when { flex: none; }
+
+/* ===== Live player, TV4 Play style (2026-11): one left edge, quiet chrome, the picture first ===== */
+.player.lshift:not(.touch) .osd .bottom { height: 46rem; background: linear-gradient(0deg, rgba(0,0,0,.9) 0%, rgba(0,0,0,.72) 34%, rgba(0,0,0,.28) 68%, rgba(0,0,0,0) 100%); }
+.player.lshift:not(.touch) .osd .top { height: 22rem; background: linear-gradient(180deg, rgba(0,0,0,.7), rgba(0,0,0,0)); }
+/* the channel and programme: left, above the bar; the channel's name is enough (no tile) */
+.player.lshift:not(.touch) .osd .chan { left: 8rem; right: 8rem; bottom: 22rem; gap: 0; }
+.player.lshift:not(.touch) .osd .chan .clogo { display: none; }
+.player.lshift:not(.touch) .osd .chan .cname { font-size: 2.2rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: rgba(255,255,255,.72); gap: 1.4rem; }
+.player.lshift:not(.touch) .osd .chan .cname .n { color: rgba(255,255,255,.5); }
+.player.lshift:not(.touch) .osd .chan .cnow { font-size: 5.2rem; margin-top: .4rem; }
+.player.lshift:not(.touch) .osd .chan .ctime { margin-top: .8rem; font-size: 2.2rem; color: rgba(255,255,255,.7); }
+.player.lshift:not(.touch) .osd .chan .ctime .prog { display: none; } /* the bar under it already shows where we are */
+.player.lshift:not(.touch) .osd .chan .cnext { display: none; }
+/* the bar: full width between the same edges, thin until it has focus */
+.player.lshift:not(.touch) .osd .tsrow { left: 8rem; right: 8rem; bottom: 13.6rem; gap: 2.4rem; }
+.player.lshift:not(.touch) .osd .tsrow .bar.tsbar { height: .6rem; }
+.player.lshift:not(.touch) .osd .tsrow .bar.tsbar .rail2 { background: rgba(255,255,255,.22); }
+.player.lshift:not(.touch) .osd .tsrow .bar.tsbar .knob { width: 2.2rem; height: 2.2rem; margin: -1.1rem 0 0 -1.1rem; background: #fff; box-shadow: 0 0 0 .4rem rgba(229,36,43,.0); }
+.player.lshift:not(.touch) .osd .tsrow .bar.tsbar.focus { height: 1rem; }
+.player.lshift:not(.touch) .osd .tsrow .bar.tsbar.focus .knob { transform: scale(1.35); box-shadow: 0 0 0 .5rem rgba(255,255,255,.35); }
+.player.lshift:not(.touch) .osd .tsrow > span { font-size: 2.2rem; color: rgba(255,255,255,.8); font-weight: 600; }
+.osd .tslive-pill { height: 3.4rem; font-size: 2rem; letter-spacing: .04em; text-transform: uppercase; }
+.player.behind .osd .tslive-pill { background: rgba(255,255,255,.16); } /* behind live: Live is where to go, not where we are */
+/* the buttons: round glass icons, the focused one white – nothing outlined */
+.player.lshift:not(.touch) .osd .lctl { left: 8rem; right: 8rem; bottom: 4.4rem; gap: 1.4rem; align-items: center; }
+.player.lshift:not(.touch) .osd .lctl .btn { height: 6.4rem; min-width: 6.4rem; padding: 0 2.6rem; border: 0; border-radius: 3.2rem; background: rgba(255,255,255,.12); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); color: #fff; font-size: 2.2rem; font-weight: 700; box-shadow: none; }
+.player.lshift:not(.touch) .osd .lctl .btn.focus, .player.mouse .osd .lctl .btn:hover { background: #fff; color: #111; transform: scale(1.06); }
+.player.lshift:not(.touch) .osd .lctl .btn svg { font-size: 2.8rem; }
+.player.lshift:not(.touch) .osd .tsgo { height: 6.4rem; padding: 0 2.8rem; border-radius: 3.2rem; background: var(--red); font-size: 2.2rem; }
+.player.lshift:not(.touch):not(.behind) .osd .tsgo { display: none; } /* at live already */
+/* the paused/behind note: a small glass tag top left, under the back button's line */
+.osd .tshift { left: 12rem; top: 6.6rem; padding: 1.1rem 2.2rem 1.1rem 1.8rem; border-radius: 1.2rem; font-size: 2.1rem; background: rgba(10,10,12,.6); }
+.osd .tshift b { font-size: 2.4rem; }
+.osd .tshift b::after { content: ' efter live'; font-weight: 600; font-size: 2.1rem; color: var(--text-2); }
+/* the big pause sign: frosted, not a dark blot */
+.player .big-icon { width: 16rem; height: 16rem; background: rgba(255,255,255,.14); -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); box-shadow: 0 1rem 4rem rgba(0,0,0,.35); font-size: 6.4rem; }
+/* the sport hero (2026-11): text always readable over a live picture, one line of facts, the arena under it */
+.billboard.sport .art::after { background: linear-gradient(90deg, rgba(0,0,0,.86) 0%, rgba(0,0,0,.62) 34%, rgba(0,0,0,.18) 62%, rgba(0,0,0,0) 78%), linear-gradient(0deg, rgba(0,0,0,.6) 0%, rgba(0,0,0,0) 45%); }
+.billboard.sport .meta { flex-wrap: nowrap; white-space: nowrap; }
+.billboard.sport .sarena { margin-top: 1rem; font-size: 2.4rem; font-weight: 600; color: rgba(255,255,255,.72); letter-spacing: .01em; }
+.billboard.sport .sarena::before { content: ''; display: inline-block; width: 1.1rem; height: 1.1rem; margin-right: 1.2rem; border-radius: 50% 50% 50% 0; transform: rotate(-45deg) translateY(-.2rem); background: currentColor; opacity: .8; }

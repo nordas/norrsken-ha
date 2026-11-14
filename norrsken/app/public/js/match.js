@@ -97,7 +97,8 @@
 
     // where it is on (Swedish first, the best picture first)
     var chans = (m.chans || []).slice(0, 6);
-    if (chans.length > 1 && !(m.foreign && st !== 'live')) {
+    // one channel, the best one (it is on the card and the button): the others are only tried when it fails
+    if (false) {
       body.appendChild(h('h2', { class: 'mp-h2', text: 'Sänds på' }));
       body.appendChild(h('div', { class: 'mp-chans' }, row(chans.map(function (c, i) {
         return h('button', { class: 'mp-chan' + (i === 0 ? ' best' : ''), onclick: function () { NS.playItem(c, { list: chans, cat: c.cat }); } }, [c.n.replace(/^\[[^\]]+\]\s*\([^)]*\)\s*\d\d:\d\d\s*/, ''), i === 0 ? h('small', { text: 'Bäst bild' }) : null]);

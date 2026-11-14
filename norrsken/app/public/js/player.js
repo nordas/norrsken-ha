@@ -1944,8 +1944,10 @@
     if (ts && (ts.playing || ts.pos)) behind = Math.max(0, (Date.now() - ts.at) / 1000 - (ts.playing ? v.currentTime || 0 : ts.pos) - 4);
     else behind = (Date.now() - (ts ? ts.at : this.livePausedAt)) / 1000;
     var paused = !ts || !ts.playing || v.paused;
-    el.appendChild(h('span', { class: 'ts-state' }, [NS.icon(paused ? 'pause' : 'play'), paused ? 'Pausad' : 'Efter live']));
-    el.appendChild(h('b', { text: '−' + NS.fmtTime(behind) }));
+    // at the live end and playing: nothing to say (the red Live on the bar says it)
+    if (!paused && behind < 8) { el.classList.remove('on'); this.el.classList.remove('behind'); return; }
+    el.appendChild(h('span', { class: 'ts-state' }, [NS.icon(paused ? 'pause' : 'play'), paused ? 'Pausad' : ''])); // "0:26 efter live" says the rest
+    el.appendChild(h('b', { text: NS.fmtTime(behind) }));
     var note = '';
     if (ts && ts.mode === 'arc') note = 'Fortsätter från arkivet där du pausade';
     else if (ts && ts.mode === 'rec' && ts.match) note = ts.done ? 'Inspelad match' : 'Matchen spelas in';

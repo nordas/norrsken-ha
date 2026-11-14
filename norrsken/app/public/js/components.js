@@ -239,7 +239,7 @@
       var badge = function (s) {
         var c1 = (s.col && s.col[0]) || '#444', c2 = (s.col && s.col[1]) || '#fff';
         var ini = s.ab || s.n.slice(0, 3).toUpperCase();
-        var st = 'background:' + c1 + ';box-shadow:inset 0 0 0 .35rem ' + c2;
+        var st = 'background:linear-gradient(160deg,rgba(255,255,255,.28),rgba(255,255,255,0) 52%,rgba(0,0,0,.18)),' + c1 + ';box-shadow:inset 0 0 0 .3rem ' + c2 + ',inset 0 0 0 .5rem rgba(0,0,0,.25),0 .4rem 1.4rem rgba(0,0,0,.45);text-shadow:0 .1rem .4rem rgba(0,0,0,.45)';
         var b = s.img ? h('span', { class: 'bvs-b img' }, NS.pic(s.img, '', function () { b.className = 'bvs-b'; b.textContent = ini; b.style.cssText = st; }))
           : h('span', { class: 'bvs-b' + (ini.length > 3 ? ' sm' : ''), style: st, text: ini });
         return h('div', { class: 'bvs-t' }, [b, h('b', { text: s.n })]);
@@ -251,10 +251,10 @@
     if (m.ch.img) logo.appendChild(NS.pic(m.ch.img, '', function () { logo.remove(); }));
     meta.appendChild(logo);
     meta.appendChild(h('span', { text: m.foreign && m.state !== 'live' ? 'Svensk kanal visas när TV4 lägger ut matchen' : (m.chName || m.ch.n) + (m.foreign ? ' (utländsk)' : '') }));
-    if (m.arena) meta.appendChild(h('span', { text: m.arena }));
     meta.appendChild(h('span', { text: NS.fmtClock(m.s) + '–' + NS.fmtClock(m.e) }));
-    if (m.chans && m.chans.length > 1) meta.appendChild(h('span', { class: 'soft', text: 'på ' + m.chans.length + ' kanaler' }));
     t.appendChild(meta);
+    // the arena on a line of its own, like TV4 Play: never wraps the channel and time onto two lines
+    if (m.arena) t.appendChild(h('div', { class: 'sarena', text: m.arena }));
     if (m.recWait) t.appendChild(h('div', { class: 'recwait', text: m.recWait })); // its own line: no separator dot
     if (live) t.appendChild(h('div', { class: 'sprog' }, NS.progEl(NS.livePct(m))));
     if (m.d) t.appendChild(h('div', { class: 'desc', text: m.d }));

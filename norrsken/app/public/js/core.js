@@ -577,7 +577,8 @@
   NS.teamBadge = function (t, cls) {
     var c1 = (t.col && t.col[0]) || '#444', c2 = (t.col && t.col[1]) || '#fff';
     var ini = t.ab || String(t.n || '').slice(0, 3).toUpperCase();
-    var st = 'background:' + c1 + ';box-shadow:inset 0 0 0 .22em ' + c2;
+    // no crest uploaded: a badge in the club's colours, lit from above like enamel, a thin ring in its second colour
+    var st = 'background:linear-gradient(160deg,rgba(255,255,255,.28),rgba(255,255,255,0) 52%,rgba(0,0,0,.18)),' + c1 + ';box-shadow:inset 0 0 0 .1em ' + c2 + ',inset 0 0 0 .16em rgba(0,0,0,.25),0 .12em .4em rgba(0,0,0,.45);text-shadow:0 .04em .12em rgba(0,0,0,.45);letter-spacing:.02em'
     var plain = function () { return NS.h('span', { class: cls + (ini.length > 3 ? ' sm' : ''), style: st, text: ini }); };
     // a country without a crest of its own: its flag, round, filling the badge
     var flag = function () { var e = t.flag && NS.canFlags() ? NS.flagEmoji(t.flag) : ''; return e ? NS.h('span', { class: cls + ' flag', title: t.n || '' }, NS.h('span', { class: 'fl', text: e })) : plain(); };
