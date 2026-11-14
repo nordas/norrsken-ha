@@ -760,3 +760,27 @@ test('sport: each coming match carries the guide text, whether it records by its
   }
   await post('/api/state/p1/prefs', { team: 'lulea', sub: 'sv' });
 });
+
+test('club crests: uploaded in /setup (PIN), checked by their bytes, shown at /crest/:id, removable', async () => {
+  const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8ffff3f0005fe02fea7d6a90f0000000049454e44ae426082', 'hex');
+  const hdr = Object.assign({ 'Content-Type': 'application/octet-stream' }, process.env.__NSK_TEST_PIN ? { 'X-Pin': process.env.__NSK_TEST_PIN } : {});
+  let r = await fetch(base + '/api/setup/crest/lulea', { method: 'POST', headers: hdr, body: PNG });
+  if (r.status === 401) return; // a PIN is required here: the PIN guard is covered elsewhere
+  assert.equal(r.status, 200);
+  r = await fetch(base + '/crest/lulea');
+  assert.equal(r.status, 200);
+  assert.equal(r.headers.get('content-type'), 'image/png');
+  // not a picture: refused, whatever it calls itself
+  r = await fetch(base + '/api/setup/crest/farjestad', { method: 'POST', headers: hdr, body: '<html><script>alert(1)</script></html>' });
+  assert.equal(r.status, 415);
+  r = await fetch(base + '/api/setup/crest/nobody', { method: 'POST', headers: hdr, body: PNG });
+  assert.equal(r.status, 404);
+  const list = await (await fetch(base + '/api/setup/crests', { headers: hdr })).json();
+  assert.equal(list.teams.find(t => t.id === 'lulea').mine, true);
+  const sp = (await get('/api/sport?profile=p1')).json;
+  const side = [sp.match].concat(sp.upcoming || []).filter(Boolean).flatMap(m => m.sides || []).find(x => x.id === 'lulea');
+  if (side) assert.match(side.img, /\/crest\/lulea\?v=\d+/);
+  r = await fetch(base + '/api/setup/crest/lulea', { method: 'DELETE', headers: hdr });
+  assert.equal(r.status, 200);
+  assert.equal((await fetch(base + '/crest/lulea')).status, 404);
+});

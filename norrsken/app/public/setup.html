@@ -42,6 +42,16 @@ input:focus, select:focus { border-color: var(--violett); }
 .btn:disabled { opacity: .5; }
 .btn.small { height: 38px; padding: 0 14px; font-size: 14px; }
 .row { display: flex; gap: 10px; align-items: center; }
+.crests { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 10px; margin-top: 14px; }
+.crest-g { grid-column: 1 / -1; font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--frost); margin-top: 8px; }
+.crest { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px 6px 10px; border-radius: 14px; border: 1.5px solid var(--skymning-2); background: var(--natt); color: var(--is); font: inherit; cursor: pointer; }
+.crest.has { border-color: rgba(79,240,180,.45); }
+.crest-pic { width: 56px; height: 56px; border-radius: 50%; display: grid; place-items: center; font-size: 14px; font-weight: 900; color: #fff; overflow: hidden; }
+.crest.has .crest-pic { border-radius: 0; }
+.crest-pic img { width: 100%; height: 100%; object-fit: contain; }
+.crest-n { font-size: 13px; font-weight: 650; text-align: center; line-height: 1.2; }
+.crest-s { font-size: 11px; color: var(--frost); }
+.crest.has .crest-s { color: var(--gron); }
 .result { margin-top: 12px; font-size: 14px; padding: 12px 14px; border-radius: 12px; background: var(--natt); display: none; }
 .result.on { display: block; }
 .result.ok { color: var(--gron); }
@@ -210,6 +220,14 @@ summary { cursor: pointer; font-weight: 650; color: #c9d3df; padding: 10px 0; }
     <label for="tmdbKey">TMDB-nyckel</label>
     <input type="password" id="tmdbKey" placeholder="API-nyckel eller läsnyckel" autocapitalize="off" spellcheck="false" autocomplete="off">
     <p class="help" id="tmdbHelp">Gratis: skapa ett konto på themoviedb.org, gå till Inställningar → API och kopiera API-nyckeln. Utan nyckel visas bara det som finns i ditt eget utbud.</p>
+  </section>
+
+  <section id="crestSec">
+    <h2>Klubbmärken</h2>
+    <p class="sub">Lägg in lagens egna märken så visas de på matchkorten och matchsidan. Tryck på ett lag och välj en bild – från Bilder på iPhonen eller en fil på datorn. Bäst blir en kvadratisk PNG med genomskinlig bakgrund. Utan bild visas lagets förkortning i klubbfärgerna.</p>
+    <div id="crestList" class="crests"></div>
+    <input type="file" id="crestFile" accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden>
+    <div class="result" id="crestRes"></div>
   </section>
 
   <section id="catSec" class="hidden">
@@ -549,13 +567,56 @@ summary { cursor: pointer; font-weight: 650; color: #c9d3df; padding: 10px 0; }
     setSource(cfg.source || 'xtream');
   }
 
+  /* ------------------------------------------------ club crests: one picture per team, uploaded from here */
+  var crestTeam = null;
+  function loadCrests() {
+    api('GET', 'api/setup/crests').then(function (r) {
+      var box = $('crestList');
+      box.innerHTML = '';
+      var group = '';
+      r.teams.forEach(function (t) {
+        if (t.group !== group) { group = t.group; var g = document.createElement('div'); g.className = 'crest-g'; g.textContent = group; box.appendChild(g); }
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'crest' + (t.has ? ' has' : '');
+        var pic = document.createElement('span');
+        pic.className = 'crest-pic';
+        if (t.has) { var im = document.createElement('img'); im.src = 'crest/' + t.id + '?t=' + Date.now(); im.alt = ''; pic.appendChild(im); }
+        else { pic.textContent = t.ab || t.name.slice(0, 3).toUpperCase(); pic.style.background = (t.col && t.col[0]) || '#333'; pic.style.boxShadow = 'inset 0 0 0 3px ' + ((t.col && t.col[1]) || '#fff'); }
+        var nm = document.createElement('span'); nm.className = 'crest-n'; nm.textContent = t.name;
+        var st = document.createElement('span'); st.className = 'crest-s'; st.textContent = t.mine ? 'Byt · ta bort' : t.has ? 'Byt' : 'Lägg till';
+        b.appendChild(pic); b.appendChild(nm); b.appendChild(st);
+        b.onclick = function () {
+          if (t.mine && confirm('Ta bort märket för ' + t.name + '?\n\nAvbryt om du i stället vill välja en ny bild.')) {
+            api('DELETE', 'api/setup/crest/' + t.id).then(loadCrests).catch(function (e) { result($('crestRes'), false, e.message); });
+            return;
+          }
+          crestTeam = t; $('crestFile').value = ''; $('crestFile').click();
+        };
+        box.appendChild(b);
+      });
+    }).catch(function () {});
+  }
+  $('crestFile').onchange = function () {
+    var f = this.files && this.files[0];
+    if (!f || !crestTeam) return;
+    var t = crestTeam;
+    var headers = { 'Content-Type': 'application/octet-stream' };
+    if (pin) headers['X-Pin'] = pin;
+    result($('crestRes'), true, 'Laddar upp märket för ' + t.name + '…');
+    fetch('api/setup/crest/' + t.id, { method: 'POST', headers: headers, body: f, cache: 'no-store' })
+      .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || 'Fel ' + r.status); return j; }); })
+      .then(function () { result($('crestRes'), true, 'Märket för ' + t.name + ' är sparat.'); loadCrests(); })
+      .catch(function (e) { result($('crestRes'), false, e.message); });
+  };
+
   function load() {
     $('tvAddr').textContent = location.origin + '/';
     fetch('api/status', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (st) {
       var u = (st.urls || [])[0];
       if (u && !/\/\/(172\.(1[6-9]|2\d|3[01])|127\.)/.test(u)) $('tvAddr').textContent = u.replace(/\/$/, '') + '/';
     }).catch(function () {});
-    api('GET', 'api/setup').then(function (c) { cfg = c; fill(); poll(); }).catch(function () { /* pin dialog or offline */ });
+    api('GET', 'api/setup').then(function (c) { cfg = c; fill(); poll(); loadCrests(); }).catch(function () { /* pin dialog or offline */ });
   }
   load();
 })();

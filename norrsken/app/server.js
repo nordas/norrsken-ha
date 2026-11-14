@@ -633,12 +633,21 @@ const ABBR = { lulea: 'LHF', bjorkloven: 'IFB', brynas: 'BIF', djurgarden: 'DIF'
  * Club crests are the clubs' own: none ship with Norrsken. The user's own picture files are shown when they are put in
  * Home Assistant's config folder: /config/norrsken/crests/<team>.png (or .svg, .webp, .jpg), e.g. lulea.png, hv71.png.
  */
-const CREST_DIRS = [process.env.NSK_CREST_DIR, '/homeassistant/norrsken/crests', path.join(DATA_DIR, 'crests')].filter(Boolean);
+// the ones uploaded in /setup first (Norrsken's own folder), then a folder of the user's own
+const CREST_UP = path.join(DATA_DIR, 'crests');
+const CREST_DIRS = [CREST_UP, process.env.NSK_CREST_DIR, '/homeassistant/norrsken/crests'].filter(Boolean);
 const CREST_TYPES = { '.png': 'image/png', '.svg': 'image/svg+xml', '.webp': 'image/webp', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg' };
 function crestFile(id) {
   if (!/^[a-z0-9-]{2,20}$/.test(id)) return '';
   for (const d of CREST_DIRS) for (const e of Object.keys(CREST_TYPES)) { const f = path.join(d, id + e); try { if (fs.statSync(f).isFile()) return f; } catch (_) { /* not there */ } }
   return '';
+}
+/** The crest's address, with its file time: a new picture is shown at once, not after the hour it may be cached. */
+function crestUrl(id, base) {
+  const f = crestFile(id);
+  if (!f) return '';
+  let v = 0; try { v = Math.round(fs.statSync(f).mtimeMs / 1000); } catch (_) { /* gone */ }
+  return base + '/crest/' + id + '?v=' + v;
 }
 route('GET', '/crest/:id', (req, res, q, p) => {
   const f = crestFile(p.id);
@@ -695,7 +704,7 @@ function teamsOf(st) {
 function matchSide(n, m, base) {
   const foot = m.kind && m.kind.sport === 'Fotboll';
   const pool = sport.TEAMS.filter(x => (x.sport === 'football') === foot);
-  { const t = n && pool.find(x => x.re.test(n)); return t ? { id: t.id, n: t.short, col: t.col, ab: ABBR[t.id] || '', img: crestFile(t.id) ? base + '/crest/' + t.id : '' } : n ? { n, col: null, ab: '', img: '' } : null; }
+  { const t = n && pool.find(x => x.re.test(n)); return t ? { id: t.id, n: t.short, col: t.col, ab: ABBR[t.id] || '', img: crestUrl(t.id, base) } : n ? { n, col: null, ab: '', img: '' } : null; }
 }
 const sportCache = new Map();
 /** The live channels with their country (from the category name), so a match is shown and recorded on a Swedish one. */
@@ -2031,6 +2040,49 @@ route('POST', '/api/setup/categories', async (req, res) => {
   for (const type of ['live', 'movie', 'series']) if (Array.isArray(b[type])) h[type] = b[type].map(String).slice(0, 20000);
   store.saveConfig();
   catalog.invalidate();
+  ok(res, { ok: true });
+});
+
+/* Club crests: uploaded one picture per team in /setup (the user's own files; Norrsken ships none). */
+route('GET', '/api/setup/crests', (req, res) => {
+  if (!checkPin(req, res)) return;
+  ok(res, { teams: sport.TEAMS.map(t => ({ id: t.id, name: t.name, group: t.group, ab: ABBR[t.id] || '', col: t.col, has: !!crestFile(t.id), mine: !!crestIn(CREST_UP, t.id) })) });
+});
+function crestIn(dir, id) { for (const e of Object.keys(CREST_TYPES)) { const f = path.join(dir, id + e); try { if (fs.statSync(f).isFile()) return f; } catch (_) { /* not there */ } } return ''; }
+/** What the picture is, by its first bytes (not by what the browser says): PNG, JPEG, WebP or SVG. */
+function crestKind(buf) {
+  if (buf.length > 8 && buf[0] === 0x89 && buf.toString('latin1', 1, 4) === 'PNG') return '.png';
+  if (buf.length > 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return '.jpg';
+  if (buf.length > 12 && buf.toString('latin1', 0, 4) === 'RIFF' && buf.toString('latin1', 8, 12) === 'WEBP') return '.webp';
+  const head = buf.toString('utf8', 0, Math.min(buf.length, 2000)).replace(/^\uFEFF/, '').trim();
+  if (/^(<\?xml[^>]*>\s*)?(<!--[\s\S]*?-->\s*)*(<!doctype svg[^>]*>\s*)?<svg[\s>]/i.test(head)) return '.svg';
+  return '';
+}
+route('POST', '/api/setup/crest/:id', async (req, res, q, p) => {
+  if (!checkPin(req, res)) return;
+  if (!sport.TEAMS.some(t => t.id === p.id)) return bad(res, 'okänt lag', 404);
+  const chunks = []; let size = 0;
+  try {
+    await new Promise((resolve, reject) => {
+      req.on('data', (c) => { size += c.length; if (size > 3e6) { reject(new Error('Bilden är för stor (högst 3 MB)')); req.destroy(); } else chunks.push(c); });
+      req.on('end', resolve); req.on('error', reject);
+    });
+  } catch (e) { return bad(res, e.message, 413); }
+  const buf = Buffer.concat(chunks);
+  const ext = crestKind(buf);
+  if (!ext) return bad(res, 'Det där är ingen bild Norrsken kan visa (PNG, JPG, WebP eller SVG)', 415);
+  fs.mkdirSync(CREST_UP, { recursive: true });
+  for (const e of Object.keys(CREST_TYPES)) { try { fs.unlinkSync(path.join(CREST_UP, p.id + e)); } catch (_) { /* none */ } }
+  fs.writeFileSync(path.join(CREST_UP, p.id + ext), buf);
+  sportCache.clear();
+  console.log('[märken] ' + p.id + ext + ' sparat (' + Math.round(buf.length / 1024) + ' kB)');
+  ok(res, { ok: true, id: p.id });
+});
+route('DELETE', '/api/setup/crest/:id', (req, res, q, p) => {
+  if (!checkPin(req, res)) return;
+  if (!/^[a-z0-9-]{2,20}$/.test(p.id)) return bad(res, 'okänt lag', 404);
+  for (const e of Object.keys(CREST_TYPES)) { try { fs.unlinkSync(path.join(CREST_UP, p.id + e)); } catch (_) { /* none */ } }
+  sportCache.clear();
   ok(res, { ok: true });
 });
 

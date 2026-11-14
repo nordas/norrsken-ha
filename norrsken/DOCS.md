@@ -104,3 +104,7 @@ Under **Favoritlag** väljer du ett eller flera lag: SHL-lagen, Tre Kronor och a
 Tryck på en match (kortet på startsidan, raden *Dina lags matcher* eller *Om matchen* på tv:n) så öppnas matchsidan: lagens färger möts snett över toppen med märkena och en klocka som räknar ner till start (eller visar LIVE och hur länge matchen pågått). Under den: kanal och tid, knapparna (*Från start*, *Live*, *Påminn mig*), om matchen spelas in automatiskt, tv-guidens text, vilka kanaler den sänds på (bäst bild först), *Följ ditt lag* (ett tryck gör laget till favorit eller tar bort det) och dina lags övriga matcher.
 
 Matcher visas och spelas in på svensk kanal. Finns matchen bara hos en utländsk kanal än står det *Svensk kanal kommer*; TV4 Play lägger oftast ut sina matcher några timmar innan, och Norrsken läser in kanallistan varje timme.
+
+## Klubbmärken
+
+Under **Inställningar → Klubbmärken** (`/setup`, samma PIN) trycker du på ett lag och väljer en bild – från Bilder på iPhonen eller en fil på datorn. PNG, JPG, WebP eller SVG, högst 3 MB; bäst blir en kvadratisk PNG med genomskinlig bakgrund. Märket visas direkt på matchkorten och matchsidan. Tryck på laget igen för att byta eller ta bort bilden. Utan bild visas lagets förkortning i klubbfärgerna. Norrsken har inga märken med sig – de är klubbarnas egna.
