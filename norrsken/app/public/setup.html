@@ -225,8 +225,12 @@ summary { cursor: pointer; font-weight: 650; color: #c9d3df; padding: 10px 0; }
   <section id="crestSec">
     <h2>Klubbmärken</h2>
     <p class="sub">Lägg in lagens egna märken så visas de på matchkorten och matchsidan. Tryck på ett lag och välj en bild – från Bilder på iPhonen eller en fil på datorn. Bäst blir en kvadratisk PNG med genomskinlig bakgrund. Utan bild visas lagets förkortning i klubbfärgerna.</p>
+    <div class="row" style="margin-top:14px"><button class="btn primary" type="button" id="crestBatch">Ladda upp flera på en gång</button></div>
+    <p class="help">Välj alla bilder samtidigt. Norrsken känner igen laget på filnamnet – <i>lulea.png</i>, <i>Luleå Hockey.png</i>, <i>LHF.svg</i>, <i>farjestad_logo.png</i> och <i>Manchester United.png</i> fungerar alla. Det som inte känns igen listas, så kan du lägga till det för hand.</p>
+    <div class="result" id="crestBatchRes"></div>
     <div id="crestList" class="crests"></div>
     <input type="file" id="crestFile" accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden>
+    <input type="file" id="crestFiles" accept="image/png,image/jpeg,image/webp,image/svg+xml" multiple hidden>
     <div class="result" id="crestRes"></div>
   </section>
 
@@ -569,8 +573,64 @@ summary { cursor: pointer; font-weight: 650; color: #c9d3df; padding: 10px 0; }
 
   /* ------------------------------------------------ club crests: one picture per team, uploaded from here */
   var crestTeam = null;
+  var crestTeams = [];
+  /** A file name made comparable: small letters, no accents, words split, the usual extra words removed. */
+  function crestKey(s) {
+    return String(s || '').replace(/\.[a-z0-9]{2,5}$/i, '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+      .replace(/[^a-z0-9]+/g, ' ').replace(/\b(logo|logga|logotyp|crest|emblem|badge|marke|klubbmarke|icon|ikon|png|svg|hd|transparent|vector|\d{2,4}x\d{2,4})\b/g, ' ')
+      .replace(/\s+/g, ' ').trim();
+  }
+  /** Which team a file is for: the whole name first (lulea, luleå hockey, lhf), then a team's name inside it. */
+  function crestMatch(fileName) {
+    var k = crestKey(fileName), best = null, bestLen = 0;
+    if (!k) return null;
+    crestTeams.forEach(function (t) {
+      var names = [t.id.replace(/-/g, ' '), t.name, t.short, t.ab].filter(Boolean).map(crestKey);
+      names.forEach(function (n) {
+        if (!n) return;
+        var len = n === k ? 1000 + n.length : (n.length >= 4 && (' ' + k + ' ').indexOf(' ' + n + ' ') >= 0) ? n.length : 0;
+        if (len > bestLen) { best = t; bestLen = len; }
+      });
+    });
+    return best;
+  }
+  $('crestBatch').onclick = function () { $('crestFiles').value = ''; $('crestFiles').click(); };
+  $('crestFiles').onchange = function () {
+    var files = [].slice.call(this.files || []);
+    if (!files.length) return;
+    var plan = files.map(function (f) { return { f: f, t: crestMatch(f.name) }; });
+    var taken = {};
+    plan.forEach(function (p) { if (p.t) { if (taken[p.t.id]) p.dup = true; taken[p.t.id] = 1; } });
+    var todo = plan.filter(function (p) { return p.t && !p.dup; });
+    var res = $('crestBatchRes');
+    var done = 0, bad = [];
+    result(res, true, 'Laddar upp ' + todo.length + ' av ' + files.length + ' bilder…');
+    var headers = { 'Content-Type': 'application/octet-stream' };
+    if (pin) headers['X-Pin'] = pin;
+    var next = function (i) {
+      if (i >= todo.length) {
+        var miss = plan.filter(function (p) { return !p.t; }).map(function (p) { return p.f.name; });
+        var dups = plan.filter(function (p) { return p.dup; }).map(function (p) { return p.f.name + ' (' + p.t.name + ' fanns redan i urvalet)'; });
+        var lines = [done + ' märken sparade.'];
+        if (bad.length) lines.push('Gick inte: ' + bad.join(', ') + '.');
+        if (miss.length) lines.push('Känns inte igen (döp om eller lägg till för hand): ' + miss.join(', ') + '.');
+        if (dups.length) lines.push('Hoppade över: ' + dups.join(', ') + '.');
+        result(res, !bad.length && !miss.length, lines.join(' '));
+        loadCrests();
+        return;
+      }
+      var p = todo[i];
+      res.textContent = 'Laddar upp ' + (i + 1) + ' av ' + todo.length + ': ' + p.t.name + '…';
+      fetch('api/setup/crest/' + p.t.id, { method: 'POST', headers: headers, body: p.f, cache: 'no-store' })
+        .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || 'Fel ' + r.status); }); })
+        .then(function () { done++; }, function (e) { bad.push(p.f.name + ' (' + e.message + ')'); })
+        .then(function () { next(i + 1); });
+    };
+    next(0);
+  };
   function loadCrests() {
     api('GET', 'api/setup/crests').then(function (r) {
+      crestTeams = r.teams || [];
       var box = $('crestList');
       box.innerHTML = '';
       var group = '';

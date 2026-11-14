@@ -2046,7 +2046,7 @@ route('POST', '/api/setup/categories', async (req, res) => {
 /* Club crests: uploaded one picture per team in /setup (the user's own files; Norrsken ships none). */
 route('GET', '/api/setup/crests', (req, res) => {
   if (!checkPin(req, res)) return;
-  ok(res, { teams: sport.TEAMS.map(t => ({ id: t.id, name: t.name, group: t.group, ab: ABBR[t.id] || '', col: t.col, has: !!crestFile(t.id), mine: !!crestIn(CREST_UP, t.id) })) });
+  ok(res, { teams: sport.TEAMS.map(t => ({ id: t.id, name: t.name, short: t.short, group: t.group, ab: ABBR[t.id] || '', col: t.col, has: !!crestFile(t.id), mine: !!crestIn(CREST_UP, t.id) })) });
 });
 function crestIn(dir, id) { for (const e of Object.keys(CREST_TYPES)) { const f = path.join(dir, id + e); try { if (fs.statSync(f).isFile()) return f; } catch (_) { /* not there */ } } return ''; }
 /** What the picture is, by its first bytes (not by what the browser says): PNG, JPEG, WebP or SVG. */
