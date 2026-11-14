@@ -762,7 +762,7 @@ function upcomingMatches(prof, st, base = '') {
   }
   return hit.list.map(m => ({
     team: m.team, label: m.label, state: Date.now() >= m.s ? 'live' : 'soon', title: m.title, s: m.s, e: m.e, ch: m.ch, chName: m.chName, chans: m.chans.slice(0, 6), foreign: !!m.foreign,
-    compImg: compImg(m.kind && m.kind.comp, base), d: matchDesc(m), autoRec: autoRecs(m), rec: (() => { const r = matchRecs.get(m.team.id + '|' + m.s); return r ? recInfo(r, base) : null; })(),
+    arena: m.arena || '', compImg: compImg(m.kind && m.kind.comp, base), d: matchDesc(m), autoRec: autoRecs(m), rec: (() => { const r = matchRecs.get(m.team.id + '|' + m.s); return r ? recInfo(r, base) : null; })(),
     sides: m.home && m.away ? [matchSide(m.home, m, base), matchSide(m.away, m, base)] : null,
   }));
 }
@@ -770,7 +770,7 @@ function upcomingMatches(prof, st, base = '') {
 function matchRow(prof, st, base) {
   const list = upcomingMatches(prof, st, base);
   if (!list.length) return null;
-  const items = list.map(m => Object.assign({}, m.ch, { k: m.ch.k + '@' + m.s, mt: { t: m.title, s: m.s, e: m.e, label: m.label, foreign: m.foreign, ch: m.chName, compImg: m.compImg, comp: (m.label || '').split(' · ').pop(), sides: m.sides, col: m.team.col } }));
+  const items = list.map(m => Object.assign({}, m.ch, { k: m.ch.k + '@' + m.s, mt: { t: m.title, s: m.s, e: m.e, label: m.label, foreign: m.foreign, ch: m.chName, arena: m.arena, compImg: m.compImg, comp: (m.label || '').split(' · ').pop(), sides: m.sides, col: m.team.col } }));
   return row('matches', 'Dina lags matcher', 'live', items, { limit: 40 });
 }
 
@@ -1456,7 +1456,11 @@ function matchRecTick() {
       matchWait.set(key, now);
       takeConnection('matchinspelning');
     }
-    try { startMatchRec(m, key, had, m.ch, now); } catch (e) { matchFailAt.set(key, now); console.error('[match]', e.message); }
+    // the Swedish channel first; when it will not start (three tries in a row) the others take turns with it, another
+    // country's broadcast last – a match recorded from Norway is better than no match
+    let ch = m.ch;
+    if (had && had.tries >= 3) { const cand = m.chans.concat(m.alt || []).slice(0, 6); ch = cand[(had.tries - 2) % cand.length] || m.ch; if (ch !== m.ch) console.log('[match]', m.title, '– provar', ch.n); }
+    try { startMatchRec(m, key, had, ch, now); } catch (e) { matchFailAt.set(key, now); console.error('[match]', e.message); }
   }
 }
 
@@ -1488,7 +1492,8 @@ function dueMatch(chId, now = Date.now(), aheadMs = 0) {
   let list = [];
   try { list = recList(now); } catch (e) { return null; }
   for (const m of list) {
-    const ch = (m.chans || [m.ch]).find(c => String(c.id) === String(chId));
+    // (any channel that shows the match, another country's too: whoever watches it there is watching the recording)
+    const ch = (m.chans || [m.ch]).concat(m.alt || []).find(c => String(c.id) === String(chId));
     if (!ch) continue;
     const key = m.team.id + '|' + m.s;
     if (matchStopped.has(key)) continue;

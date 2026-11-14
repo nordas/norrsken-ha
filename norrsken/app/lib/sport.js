@@ -457,9 +457,34 @@ function collect(follows, channels, epg, now, days = 1) {
       ch: chans[0],
       chName: best.labels.get(chans[0].id) || chans[0].n, // "TV4 Play" instead of the event channel's long name
       chans,
+      alt: best.chans.filter(c => !chans.includes(c)).sort((a, b) => channelScore(b.n, b.region) - channelScore(a.n, a.region)), // other countries' broadcasts: only for a recording whose Swedish channel will not start
+      arena: arenaOf(best, f),
       foreign, // only a foreign broadcast is known so far (the Swedish one usually shows up hours before the match)
     };
   });
+}
+
+/*
+ * Where the home team plays. The guide's own text wins ("Ishockey från Löfbergs Arena där …"); otherwise the home
+ * team's arena from this list (the names as of autumn 2026 – a sponsor's name changes now and then).
+ */
+const ARENAS = {
+  lulea: 'Coop Norrbotten Arena', bjorkloven: 'Winpos Arena', brynas: 'Monitor ERP Arena', djurgarden: 'Hovet', frolunda: 'Scandinavium',
+  farjestad: 'Löfbergs Arena', hv71: 'Husqvarna Garden', linkoping: 'Saab Arena', malmo: 'Malmö Arena', rogle: 'Catena Arena',
+  skelleftea: 'Skellefteå Kraft Arena', timra: 'SCA Arena', vaxjo: 'Vida Arena', orebro: 'Behrn Arena', leksand: 'Tegera Arena', modo: 'Hägglunds Arena', aik: 'Hovet',
+  arsenal: 'Emirates Stadium', 'aston-villa': 'Villa Park', bournemouth: 'Vitality Stadium', brentford: 'Gtech Community Stadium', brighton: 'Amex Stadium',
+  chelsea: 'Stamford Bridge', coventry: 'Coventry Building Society Arena', 'crystal-palace': 'Selhurst Park', everton: 'Hill Dickinson Stadium', fulham: 'Craven Cottage',
+  hull: 'MKM Stadium', ipswich: 'Portman Road', leeds: 'Elland Road', liverpool: 'Anfield', 'man-city': 'Etihad Stadium', 'man-utd': 'Old Trafford',
+  newcastle: "St James' Park", nottingham: 'City Ground', sunderland: 'Stadium of Light', tottenham: 'Tottenham Hotspur Stadium',
+};
+const ARENA_RE = /(?:^|[.!]\s+|\bfrån\s+|\bi\s+|\bpå\s+)((?:[A-ZÅÄÖ][\wåäöÅÄÖé'&-]*\s+){0,3}(?:Arena|Garden|Stadium|Stadion|Park|Ishall|Center|Centrum|Scandinavium|Hovet|Globen)(?:\s+[A-ZÅÄÖ][\wåäöÅÄÖ-]+)?)(?=[\s.,]|$)/;
+function arenaOf(best, f) {
+  const m = ARENA_RE.exec(String(best.d || '').replace(/<[^>]+>/g, ' '));
+  if (m) return m[1].trim();
+  if (!best.mu || !f.vs || f.nation) return '';
+  const pool = TEAMS.filter(x => x.sport === f.vs.sport);
+  const home = pool.find(x => x.re.test(best.mu.home));
+  return (home && ARENAS[home.id]) || '';
 }
 
 /** Every match of the favourite's team in the calendar day (used for the match recordings). */

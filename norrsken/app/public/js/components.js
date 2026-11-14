@@ -251,6 +251,7 @@
     if (m.ch.img) logo.appendChild(NS.pic(m.ch.img, '', function () { logo.remove(); }));
     meta.appendChild(logo);
     meta.appendChild(h('span', { text: m.foreign && m.state !== 'live' ? 'Svensk kanal visas när TV4 lägger ut matchen' : (m.chName || m.ch.n) + (m.foreign ? ' (utländsk)' : '') }));
+    if (m.arena) meta.appendChild(h('span', { text: m.arena }));
     meta.appendChild(h('span', { text: NS.fmtClock(m.s) + '–' + NS.fmtClock(m.e) }));
     if (m.chans && m.chans.length > 1) meta.appendChild(h('span', { class: 'soft', text: 'på ' + m.chans.length + ' kanaler' }));
     t.appendChild(meta);
@@ -572,7 +573,7 @@
       if (!d) return;
       if (d.t === 'live' && d.mt) { // a favourite team's match: when, what, where (not what the channel shows now)
         var on = Date.now() >= d.mt.s;
-        el.appendChild(h('div', { class: 'meta' }, [on ? h('span', { class: 'live-pill', text: 'Live nu' }) : h('span', { text: NS.matchWhen(d.mt.s) })].concat([d.mt.label, d.mt.ch || d.n].filter(Boolean).map(function (x) { return h('span', { text: x }); }))));
+        el.appendChild(h('div', { class: 'meta' }, [on ? h('span', { class: 'live-pill', text: 'Live nu' }) : h('span', { text: NS.matchWhen(d.mt.s) })].concat([d.mt.label, d.mt.arena, d.mt.ch || d.n].filter(Boolean).map(function (x) { return h('span', { text: x }); }))));
         el.appendChild(h('div', { class: 'big', text: d.mt.t }));
         el.appendChild(h('div', { class: 'desc', style: 'color:var(--text-2)', text: on ? 'Tryck OK för att titta' : 'Norrsken säger till när matchen börjar' }));
         return;

@@ -84,6 +84,7 @@
     var tags = lab.map(function (x) { return h('span', { text: x }); });
     if (m.compImg) tags.unshift(h('span', { class: 'mp-comp' }, h('img', { src: m.compImg, alt: '' }))); // the league's or tournament's logo
     if (m.autoRec) tags.push(h('span', { class: 'mp-rec' + (m.rec && m.rec.recording ? ' on' : '') }, [h('i'), m.rec && m.rec.recording ? 'Spelas in' : m.rec ? 'Inspelad' : 'Spelas in automatiskt']));
+    if (m.arena) tags.push(h('span', { class: 'mp-arena', text: m.arena }));
     body.appendChild(h('div', { class: 'mp-tags' }, tags));
 
     var bs = row(this.btns().map(function (b) {
