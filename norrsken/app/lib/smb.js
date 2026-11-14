@@ -44,7 +44,9 @@ function friendly(out) {
   const t = String(out || '');
   for (const [re, msg] of STATUS) if (re.test(t)) return msg;
   const m = /NT_STATUS_[A-Z_]+/.exec(t);
-  return m ? 'Time Capsule svarade ' + m[0] : 'Kunde inte prata med Time Capsule';
+  if (m) return 'Time Capsule svarade ' + m[0];
+  const line = t.split('\n').map(l => l.trim()).find(l => l && !/password|lösenord|PASSWD/i.test(l));
+  return 'Kunde inte prata med Time Capsule' + (line ? ' (' + line.slice(0, 120) + ')' : '');
 }
 
 /*
@@ -82,7 +84,20 @@ async function exec(cmd, opts = {}) {
   }
   return r;
 }
-function run(cmd, { cwd, timeout = 120000, ignore } = {}, old) {
+/*
+ * The Time Capsule takes only a few logins at a time and answers the rest with a closed connection: one copy, one
+ * check and one fetch at once is the most it is given (each smbclient is its own login).
+ */
+const MAX_AT_ONCE = 2;
+let running = 0;
+const waiting = [];
+function run(cmd, opts, old) {
+  return new Promise((resolve) => {
+    const go = () => { running++; run1(cmd, opts, old).then((r) => { running--; if (waiting.length) waiting.shift()(); resolve(r); }); };
+    if (running < MAX_AT_ONCE) go(); else waiting.push(go);
+  });
+}
+function run1(cmd, { cwd, timeout = 120000, ignore } = {}, old) {
   return new Promise((resolve) => {
     if (!SHARE) return resolve({ ok: false, out: '', err: 'Ingen Time Capsule inställd' });
     const env = Object.assign({}, process.env);
