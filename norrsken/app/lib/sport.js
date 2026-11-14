@@ -31,6 +31,102 @@ const TEAMS = [
  * ("Sverige – Bosnien" at 18:30) is read as the men's football team, the one that usually plays such a match.
  */
 const SWE = ['#005293', '#fecb00'];
+/* Countries by their Swedish, English and own names: a national side's flag (ISO code) and its three letters. */
+const COUNTRIES = [
+  ['SE', 'SWE', /^(sverige|sweden|svezia|schweden)\b/i],
+  ['NO', 'NOR', /^(norge|norway|noreg)\b/i],
+  ['DK', 'DEN', /^(danmark|denmark)\b/i],
+  ['FI', 'FIN', /^(finland|suomi)\b/i],
+  ['IS', 'ISL', /^(island|iceland)\b/i],
+  ['FO', 'FRO', /^(färöarna|faroe|færøyene)\b/i],
+  ['EE', 'EST', /^(estland|estonia)\b/i],
+  ['LV', 'LVA', /^(lettland|latvia)\b/i],
+  ['LT', 'LTU', /^(litauen|lithuania)\b/i],
+  ['DE', 'GER', /^(tyskland|germany|deutschland)\b/i],
+  ['FR', 'FRA', /^(frankrike|france)\b/i],
+  ['ES', 'ESP', /^(spanien|spain|españa)\b/i],
+  ['IT', 'ITA', /^(italien|italy|italia)\b/i],
+  ['PT', 'POR', /^(portugal)\b/i],
+  ['NL', 'NED', /^(nederländerna|holland|netherlands)\b/i],
+  ['BE', 'BEL', /^(belgien|belgium)\b/i],
+  ['CH', 'SUI', /^(schweiz|switzerland)\b/i],
+  ['AT', 'AUT', /^(österrike|austria)\b/i],
+  ['PL', 'POL', /^(polen|poland)\b/i],
+  ['CZ', 'CZE', /^(tjeckien|czechia|czech republic)\b/i],
+  ['SK', 'SVK', /^(slovakien|slovakia)\b/i],
+  ['HU', 'HUN', /^(ungern|hungary)\b/i],
+  ['RO', 'ROU', /^(rumänien|romania)\b/i],
+  ['BG', 'BUL', /^(bulgarien|bulgaria)\b/i],
+  ['GR', 'GRE', /^(grekland|greece)\b/i],
+  ['TR', 'TUR', /^(turkiet|turkey|türkiye)\b/i],
+  ['HR', 'CRO', /^(kroatien|croatia)\b/i],
+  ['RS', 'SRB', /^(serbien|serbia)\b/i],
+  ['SI', 'SVN', /^(slovenien|slovenia)\b/i],
+  ['BA', 'BIH', /^(bosnien|bosnia)\b/i],
+  ['ME', 'MNE', /^(montenegro)\b/i],
+  ['AL', 'ALB', /^(albanien|albania)\b/i],
+  ['MK', 'MKD', /^(nordmakedonien|north macedonia|makedonien)\b/i],
+  ['XK', 'KOS', /^(kosovo)\b/i],
+  ['UA', 'UKR', /^(ukraina|ukraine)\b/i],
+  ['BY', 'BLR', /^(vitryssland|belarus)\b/i],
+  ['RU', 'RUS', /^(ryssland|russia)\b/i],
+  ['GB-ENG', 'ENG', /^(england)\b/i],
+  ['GB-SCT', 'SCO', /^(skottland|scotland)\b/i],
+  ['GB-WLS', 'WAL', /^(wales)\b/i],
+  ['GB-NIR', 'NIR', /^(nordirland|northern ireland)\b/i],
+  ['IE', 'IRL', /^(irland|ireland)\b/i],
+  ['LU', 'LUX', /^(luxemburg|luxembourg)\b/i],
+  ['LI', 'LIE', /^(liechtenstein)\b/i],
+  ['MT', 'MLT', /^(malta)\b/i],
+  ['CY', 'CYP', /^(cypern|cyprus)\b/i],
+  ['AD', 'AND', /^(andorra)\b/i],
+  ['SM', 'SMR', /^(san marino)\b/i],
+  ['MD', 'MDA', /^(moldavien|moldova)\b/i],
+  ['GI', 'GIB', /^(gibraltar)\b/i],
+  ['GE', 'GEO', /^(georgien|georgia)\b/i],
+  ['AM', 'ARM', /^(armenien|armenia)\b/i],
+  ['AZ', 'AZE', /^(azerbajdzjan|azerbaijan)\b/i],
+  ['KZ', 'KAZ', /^(kazakstan|kazakhstan)\b/i],
+  ['IL', 'ISR', /^(israel)\b/i],
+  ['CA', 'CAN', /^(kanada|canada)\b/i],
+  ['US', 'USA', /^(usa|förenta staterna|united states)\b/i],
+  ['MX', 'MEX', /^(mexiko|mexico)\b/i],
+  ['BR', 'BRA', /^(brasilien|brazil)\b/i],
+  ['AR', 'ARG', /^(argentina)\b/i],
+  ['UY', 'URU', /^(uruguay)\b/i],
+  ['CO', 'COL', /^(colombia)\b/i],
+  ['CL', 'CHI', /^(chile)\b/i],
+  ['JP', 'JPN', /^(japan)\b/i],
+  ['KR', 'KOR', /^(sydkorea|south korea|korea)\b/i],
+  ['CN', 'CHN', /^(kina|china)\b/i],
+  ['AU', 'AUS', /^(australien|australia)\b/i],
+  ['NZ', 'NZL', /^(nya zeeland|new zealand)\b/i],
+  ['MA', 'MAR', /^(marocko|morocco)\b/i],
+  ['EG', 'EGY', /^(egypten|egypt)\b/i],
+  ['NG', 'NGA', /^(nigeria)\b/i],
+  ['SN', 'SEN', /^(senegal)\b/i],
+  ['GH', 'GHA', /^(ghana)\b/i],
+  ['CM', 'CMR', /^(kamerun|cameroon)\b/i],
+  ['CI', 'CIV', /^(elfenbenskusten|ivory coast|côte d'ivoire)\b/i],
+  ['TN', 'TUN', /^(tunisien|tunisia)\b/i],
+  ['DZ', 'ALG', /^(algeriet|algeria)\b/i],
+  ['ZA', 'RSA', /^(sydafrika|south africa)\b/i],
+  ['QA', 'QAT', /^(qatar)\b/i],
+  ['SA', 'KSA', /^(saudiarabien|saudi arabia)\b/i],
+  ['IR', 'IRN', /^(iran)\b/i],
+];
+/** "Bosnien-Hercegovina", "Bosnia-Herzegovina", "Danmark (dam)" → { flag: 'BA', ab: 'BIH' }; not a country → null. */
+function countryOf(name) {
+  const n = String(name || '').trim();
+  const c = COUNTRIES.find(x => x[2].test(n));
+  return c ? { flag: c[0], ab: c[1] } : null;
+}
+/** A side's name made comparable across languages and channels: "Bosnien-Hercegovina" = "Bosnia-Herzegovina". */
+function sideKey(n) {
+  const c = countryOf(n);
+  if (c) return c.ab;
+  return String(n || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 6);
+}
 const NATIONS = [
   { id: 'tre-kronor', name: 'Tre Kronor', want: { sport: 'Ishockey', gender: 'Herr' }, nick: /tre kronor/i },
   { id: 'damkronorna', name: 'Damkronorna', want: { sport: 'Ishockey', gender: 'Dam' }, nick: /damkronorna/i },
@@ -189,7 +285,8 @@ function eventOf(name, now = Date.now()) {
     const t = stockholmTime(yy, +mo, +dd, +hh, +mm);
     if (best === null || Math.abs(t - now) < Math.abs(best - now)) best = t;
   }
-  return { s: best, title, label: label.replace(/^\s*tv4\s*play\s*$/i, 'TV4 Play').trim() };
+  // "[Viapaly SE]" (the provider's spelling) → "Viaplay"; a country tag after the service is left out
+  return { s: best, title, label: label.replace(/^\s*tv4\s*play\s*$/i, 'TV4 Play').replace(/^viapaly/i, 'Viaplay').replace(/\s+(se|no|dk|fi|uk)$/i, '').trim() };
 }
 const EVENT_LEN = 4 * 3600e3; // the name only says when it starts: a hockey broadcast with overtime and shootout
 
@@ -314,9 +411,10 @@ function collect(follows, channels, epg, now, days = 1) {
       if (e - s > f.maxLen) continue; // hours of the same thing: a re-run block, not the event
       const mu = f.vs ? matchup(t, f.vs) : null;
       // the same match on several channels (TV4 Play 17:55, a Norwegian service 17:50) is one match
-      const who = f.id + '|' + (mu ? [mu.home, mu.away].sort().join('|') : t.toLowerCase());
+      // (names compared across languages; a match with its studio before it can start hours apart on two channels)
+      const who = f.id + '|' + (mu ? [sideKey(mu.home), sideKey(mu.away)].sort().join('|') : t.toLowerCase());
       let h = null;
-      for (const x of hits.values()) if (x.who === who && Math.abs(x.s - s) <= 45 * 60e3) { h = x; break; }
+      for (const x of hits.values()) if (x.who === who && Math.abs(x.s - s) <= (mu ? 4 * 3600e3 : 45 * 60e3)) { h = x; break; }
       if (!h) hits.set(who + '|' + s + '|' + hits.size, (h = { who, f, s, e, t, d, mu, chans: [], labels: new Map() }));
       else if (ch.region === 'se' && !h.chans.some(c => c.region === 'se')) { h.s = s; h.e = e; h.t = t; h.d = d || h.d; if (mu) h.mu = mu; } // the Swedish listing's times and names
       if (!h.chans.includes(ch)) h.chans.push(ch);
@@ -346,6 +444,8 @@ function collect(follows, channels, epg, now, days = 1) {
     const f = best.f;
     const kind = classify(best.t, best.d, chans[0].n || '', f.id === 'langd' ? 'Längdskidor' : f.id === 'skidskytte' ? 'Skidskytte' : (f.vs && f.id !== 'sverige') ? (f.sport || 'Ishockey') : '');
     if (f.nation && !kind.sport) { kind.sport = f.sport; kind.label = [f.sport, kind.label].filter(Boolean).join(' · '); }
+    // a national team's match that names no competition is still a national match: say so, not just the sport
+    if (f.nation && !kind.comp) { kind.comp = 'Landskamp'; kind.label = [kind.label, 'Landskamp'].filter(Boolean).join(' · '); }
     return {
       team: { id: f.id, name: f.name, short: f.short, col: f.col, group: f.nation ? 'Landslag' : (f.vs && f.vs.group) || '' },
       kind, label: kind.label || f.name,
@@ -391,4 +491,4 @@ function findMatch(teamIdValue, channels, epg, opts = {}) {
   return todayAll(teamIdValue, channels, epg, opts)[0] || null;
 }
 
-module.exports = { NATION_DEFAULT, regionOf, classify, TEAMS, teamId, teamIds, upcoming, recToday, team, list, matchup, findMatch, matchesToday, todayAll, channelScore, stockholmDay, stockholmTime, eventOf };
+module.exports = { countryOf, sideKey, NATION_DEFAULT, regionOf, classify, TEAMS, teamId, teamIds, upcoming, recToday, team, list, matchup, findMatch, matchesToday, todayAll, channelScore, stockholmDay, stockholmTime, eventOf };

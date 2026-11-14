@@ -19,6 +19,7 @@ const storage = require('./lib/storage');
 const downloads = require('./lib/downloads');
 const airtest = require('./lib/airtest');
 const airlog = require('./lib/airlog');
+const crests = require('./lib/crests');
 const { Services, serviceInfo } = require('./lib/services');
 const { redact, fetchText, pool } = require('./lib/util');
 const pkg = require('./package.json');
@@ -637,8 +638,9 @@ const ABBR = { lulea: 'LHF', bjorkloven: 'IFB', brynas: 'BIF', djurgarden: 'DIF'
 const CREST_UP = path.join(DATA_DIR, 'crests');
 const CREST_DIRS = [CREST_UP, process.env.NSK_CREST_DIR, '/homeassistant/norrsken/crests'].filter(Boolean);
 const CREST_TYPES = { '.png': 'image/png', '.svg': 'image/svg+xml', '.webp': 'image/webp', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg' };
+const CREST_ID = /^[a-z0-9-]{2,46}$/;
 function crestFile(id) {
-  if (!/^[a-z0-9-]{2,20}$/.test(id)) return '';
+  if (!CREST_ID.test(id)) return '';
   for (const d of CREST_DIRS) for (const e of Object.keys(CREST_TYPES)) { const f = path.join(d, id + e); try { if (fs.statSync(f).isFile()) return f; } catch (_) { /* not there */ } }
   return '';
 }
@@ -649,6 +651,17 @@ function crestUrl(id, base) {
   let v = 0; try { v = Math.round(fs.statSync(f).mtimeMs / 1000); } catch (_) { /* gone */ }
   return base + '/crest/' + id + '?v=' + v;
 }
+/** Every picture there is (team ids, nat-…, comp-…, club-…): the clubs are looked up by name among these. */
+let crestKeyCache = { at: 0, keys: [] };
+function crestKeys() {
+  if (Date.now() - crestKeyCache.at < 30e3) return crestKeyCache.keys;
+  const keys = new Set();
+  for (const d of CREST_DIRS) { try { for (const f of fs.readdirSync(d)) { const m = /^([a-z0-9-]{2,46})\.(png|svg|webp|jpe?g)$/.exec(f); if (m) keys.add(m[1]); } } catch (_) { /* no folder */ } }
+  crestKeyCache = { at: Date.now(), keys: [...keys] };
+  return crestKeyCache.keys;
+}
+/** A competition's logo ("Champions League", "SHL" …), when one was uploaded. */
+function compImg(comp, base) { const k = crests.compKey(comp); return k ? crestUrl(k, base) : ''; }
 route('GET', '/crest/:id', (req, res, q, p) => {
   const f = crestFile(p.id);
   if (!f) return bad(res, 'finns inte', 404);
@@ -681,7 +694,7 @@ function sportNow(prof, st, base = '') {
   const waits = !rec && Date.now() - (matchWait.get(m.team.id + '|' + m.s) || 0) < 90e3;
   // both teams' colours and short names, for the match card (no crests: those are the clubs' own)
   const side = (n) => matchSide(n, m, base);
-  return Object.assign({}, m, { rec, d: matchDesc(m), autoRec: autoRecs(m), recWait: waits ? 'Spelas in när det som spelas nu stängs' : '', sides: m.home && m.away ? [side(m.home), side(m.away)] : null });
+  return Object.assign({}, m, { rec, compImg: compImg(m.kind && m.kind.comp, base), d: matchDesc(m), autoRec: autoRecs(m), recWait: waits ? 'Spelas in när det som spelas nu stängs' : '', sides: m.home && m.away ? [side(m.home), side(m.away)] : null });
 }
 /** The profile's favourite teams (ids). Old profiles have one team; no choice at all means Luleå. */
 /** The programme's own text without the guide's HTML; or a plain sentence of who meets whom. */
@@ -705,10 +718,22 @@ function teamsOf(st) {
 /** One side of a match for the card: short name, colours, abbreviation, the user's crest picture. */
 function matchSide(n, m, base) {
   // Sweden in a national team's match: that team (its own crest: SvFF's for football, Tre Kronor's for hockey …)
-  if (n && m.team && m.team.group === 'Landslag' && /sverige|sweden|kronorna|bl[åa]gult|landslaget/i.test(n)) return { id: m.team.id, n: 'Sverige', col: m.team.col, ab: 'SWE', img: crestUrl(m.team.id, base) };
+  // (the crest you uploaded for that team, else the sport's main team's – SvFF's, Tre Kronor's – else the flag)
+  if (n && m.team && m.team.group === 'Landslag' && /sverige|sweden|kronorna|bl[åa]gult|landslaget/i.test(n)) {
+    const sp = m.kind && m.kind.sport;
+    const img = crestUrl(m.team.id, base) || (sp === 'Ishockey' ? crestUrl('tre-kronor', base) : sp === 'Fotboll' ? crestUrl('sverige-fotboll', base) : '');
+    return { id: m.team.id, n: 'Sverige', col: m.team.col, ab: 'SWE', img, flag: 'SE' };
+  }
+  // the other side of a national team's match: a country – its team's crest when uploaded, else its flag
+  if (n && m.team && m.team.group === 'Landslag') { const c = sport.countryOf(n); if (c) return { n, col: null, ab: c.ab, img: crestUrl(crests.nationKey(n), base), flag: c.flag }; }
   const foot = m.kind && m.kind.sport === 'Fotboll';
-  const pool = sport.TEAMS.filter(x => (x.sport === 'football') === foot);
-  { const t = n && pool.find(x => x.re.test(n)); return t ? { id: t.id, n: t.short, col: t.col, ab: ABBR[t.id] || '', img: crestUrl(t.id, base) } : n ? { n, col: null, ab: '', img: '' } : null; }
+  const pool = sport.TEAMS.filter(x => x.sport !== 'nation' && (x.sport === 'football') === foot);
+  const t = n && pool.find(x => x.re.test(n));
+  if (t) return { id: t.id, n: t.short, col: t.col, ab: ABBR[t.id] || '', img: crestUrl(t.id, base) };
+  if (!n) return null;
+  // any other club (Bayern, Real Madrid …): its uploaded crest found by its name
+  const ck = crests.clubKey(n, crestKeys());
+  return { n, col: null, ab: '', img: ck ? crestUrl(ck, base) : '' };
 }
 const sportCache = new Map();
 /** The live channels with their country (from the category name), so a match is shown and recorded on a Swedish one. */
@@ -737,7 +762,7 @@ function upcomingMatches(prof, st, base = '') {
   }
   return hit.list.map(m => ({
     team: m.team, label: m.label, state: Date.now() >= m.s ? 'live' : 'soon', title: m.title, s: m.s, e: m.e, ch: m.ch, chName: m.chName, chans: m.chans.slice(0, 6), foreign: !!m.foreign,
-    d: matchDesc(m), autoRec: autoRecs(m), rec: (() => { const r = matchRecs.get(m.team.id + '|' + m.s); return r ? recInfo(r, base) : null; })(),
+    compImg: compImg(m.kind && m.kind.comp, base), d: matchDesc(m), autoRec: autoRecs(m), rec: (() => { const r = matchRecs.get(m.team.id + '|' + m.s); return r ? recInfo(r, base) : null; })(),
     sides: m.home && m.away ? [matchSide(m.home, m, base), matchSide(m.away, m, base)] : null,
   }));
 }
@@ -745,7 +770,7 @@ function upcomingMatches(prof, st, base = '') {
 function matchRow(prof, st, base) {
   const list = upcomingMatches(prof, st, base);
   if (!list.length) return null;
-  const items = list.map(m => Object.assign({}, m.ch, { k: m.ch.k + '@' + m.s, mt: { t: m.title, s: m.s, e: m.e, label: m.label, foreign: m.foreign, comp: (m.label || '').split(' · ').pop(), sides: m.sides, col: m.team.col } }));
+  const items = list.map(m => Object.assign({}, m.ch, { k: m.ch.k + '@' + m.s, mt: { t: m.title, s: m.s, e: m.e, label: m.label, foreign: m.foreign, ch: m.chName, compImg: m.compImg, comp: (m.label || '').split(' · ').pop(), sides: m.sides, col: m.team.col } }));
   return row('matches', 'Dina lags matcher', 'live', items, { limit: 40 });
 }
 
@@ -2050,7 +2075,10 @@ route('POST', '/api/setup/categories', async (req, res) => {
 /* Club crests: uploaded one picture per team in /setup (the user's own files; Norrsken ships none). */
 route('GET', '/api/setup/crests', (req, res) => {
   if (!checkPin(req, res)) return;
-  ok(res, { teams: sport.TEAMS.map(t => ({ id: t.id, name: t.name, short: t.short, group: t.group, ab: ABBR[t.id] || '', col: t.col, has: !!crestFile(t.id), mine: !!crestIn(CREST_UP, t.id) })) });
+  const ids = new Set(sport.TEAMS.map(t => t.id));
+  const nice = (k) => k.replace(/^(nat|comp|club)-/, '').replace(/-/g, ' ').replace(/\b\w/g, (x) => x.toUpperCase());
+  const others = crestKeys().filter(k => !ids.has(k)).sort().map(k => ({ id: k, name: k.startsWith('nat-') ? nice(k).toUpperCase() : nice(k), group: k.startsWith('comp-') ? 'Ligor och turneringar' : k.startsWith('nat-') ? 'Andra länders landslag' : 'Andra klubbar', has: true, mine: !!crestIn(CREST_UP, k), extra: true }));
+  ok(res, { teams: sport.TEAMS.map(t => ({ id: t.id, name: t.name, short: t.short, group: t.group, ab: ABBR[t.id] || '', col: t.col, has: !!crestFile(t.id), mine: !!crestIn(CREST_UP, t.id) })).concat(others) });
 });
 function crestIn(dir, id) { for (const e of Object.keys(CREST_TYPES)) { const f = path.join(dir, id + e); try { if (fs.statSync(f).isFile()) return f; } catch (_) { /* not there */ } } return ''; }
 /** What the picture is, by its first bytes (not by what the browser says): PNG, JPEG, WebP or SVG. */
@@ -2062,9 +2090,22 @@ function crestKind(buf) {
   if (/^(<\?xml[^>]*>\s*)?(<!--[\s\S]*?-->\s*)*(<!doctype svg[^>]*>\s*)?<svg[\s>]/i.test(head)) return '.svg';
   return '';
 }
+/**
+ * A picture by its file name: Norrsken works out what it is (a followed team, another club, a national team, a
+ * competition) – the folder upload in /setup sends every file here.
+ */
+route('POST', '/api/setup/crest-auto', async (req, res, q) => {
+  if (!checkPin(req, res)) return;
+  const k = crests.keyForFile(q.get('name') || '', ABBR);
+  if (!k) { req.resume(); return bad(res, 'Filnamnet säger inte vilket lag eller vilken turnering det är', 422); }
+  return saveCrest(req, res, k.key, k.label);
+});
 route('POST', '/api/setup/crest/:id', async (req, res, q, p) => {
   if (!checkPin(req, res)) return;
-  if (!sport.TEAMS.some(t => t.id === p.id)) return bad(res, 'okänt lag', 404);
+  if (!sport.TEAMS.some(t => t.id === p.id) && !/^(nat|comp|club)-[a-z0-9-]{2,40}$/.test(p.id)) return bad(res, 'okänt lag', 404);
+  return saveCrest(req, res, p.id, '');
+});
+async function saveCrest(req, res, id, label) {
   const chunks = []; let size = 0;
   try {
     await new Promise((resolve, reject) => {
@@ -2076,17 +2117,19 @@ route('POST', '/api/setup/crest/:id', async (req, res, q, p) => {
   const ext = crestKind(buf);
   if (!ext) return bad(res, 'Det där är ingen bild Norrsken kan visa (PNG, JPG, WebP eller SVG)', 415);
   fs.mkdirSync(CREST_UP, { recursive: true });
-  for (const e of Object.keys(CREST_TYPES)) { try { fs.unlinkSync(path.join(CREST_UP, p.id + e)); } catch (_) { /* none */ } }
-  fs.writeFileSync(path.join(CREST_UP, p.id + ext), buf);
+  for (const e of Object.keys(CREST_TYPES)) { try { fs.unlinkSync(path.join(CREST_UP, id + e)); } catch (_) { /* none */ } }
+  fs.writeFileSync(path.join(CREST_UP, id + ext), buf);
   sportCache.clear();
-  console.log('[märken] ' + p.id + ext + ' sparat (' + Math.round(buf.length / 1024) + ' kB)');
-  ok(res, { ok: true, id: p.id });
-});
+  crestKeyCache.at = 0;
+  console.log('[märken] ' + id + ext + ' sparat (' + Math.round(buf.length / 1024) + ' kB)');
+  ok(res, { ok: true, id, label });
+}
 route('DELETE', '/api/setup/crest/:id', (req, res, q, p) => {
   if (!checkPin(req, res)) return;
-  if (!/^[a-z0-9-]{2,20}$/.test(p.id)) return bad(res, 'okänt lag', 404);
+  if (!CREST_ID.test(p.id)) return bad(res, 'okänt lag', 404);
   for (const e of Object.keys(CREST_TYPES)) { try { fs.unlinkSync(path.join(CREST_UP, p.id + e)); } catch (_) { /* none */ } }
   sportCache.clear();
+  crestKeyCache.at = 0;
   ok(res, { ok: true });
 });
 

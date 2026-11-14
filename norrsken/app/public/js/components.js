@@ -377,10 +377,11 @@
       c.classList.add('matchcard');
       f.appendChild(h('div', { class: 'glow', style: 'opacity:.8;background: radial-gradient(90% 120% at 0% 0%, ' + NS.rgba(c1, 0.75) + ', transparent 62%), radial-gradient(90% 120% at 100% 100%, ' + NS.rgba(c2, 0.6) + ', transparent 62%)' }));
       f.appendChild(h('div', { class: 'ltag' + (onNow ? '' : ' when'), text: onNow ? 'LIVE' : NS.matchWhen(mt.s) }));
-      if (mt.comp) f.appendChild(h('div', { class: 'lcomp', text: mt.comp }));
+      if (mt.compImg) f.appendChild(h('div', { class: 'lcomp logo', title: mt.comp || '' }, h('img', { src: mt.compImg, alt: mt.comp || '' })));
+      else if (mt.comp) f.appendChild(h('div', { class: 'lcomp', text: mt.comp }));
       f.appendChild(h('div', { class: 'mvs' }, [NS.teamBadge(mt.sides[0], 'mvs-b'), h('i', { text: '–' }), NS.teamBadge(mt.sides[1], 'mvs-b')]));
       f.appendChild(h('div', { class: 'lnow', text: mt.t }));
-      f.appendChild(h('div', { class: 'lch', text: mt.foreign && !onNow ? 'Svensk kanal kommer' : item.n }));
+      f.appendChild(h('div', { class: 'lch', text: mt.foreign && !onNow ? 'Svensk kanal kommer' : mt.ch || item.n }));
       return c;
     }
     if (kind === 'live') {
@@ -571,7 +572,7 @@
       if (!d) return;
       if (d.t === 'live' && d.mt) { // a favourite team's match: when, what, where (not what the channel shows now)
         var on = Date.now() >= d.mt.s;
-        el.appendChild(h('div', { class: 'meta' }, [on ? h('span', { class: 'live-pill', text: 'Live nu' }) : h('span', { text: NS.matchWhen(d.mt.s) })].concat([d.mt.label, d.n].filter(Boolean).map(function (x) { return h('span', { text: x }); }))));
+        el.appendChild(h('div', { class: 'meta' }, [on ? h('span', { class: 'live-pill', text: 'Live nu' }) : h('span', { text: NS.matchWhen(d.mt.s) })].concat([d.mt.label, d.mt.ch || d.n].filter(Boolean).map(function (x) { return h('span', { text: x }); }))));
         el.appendChild(h('div', { class: 'big', text: d.mt.t }));
         el.appendChild(h('div', { class: 'desc', style: 'color:var(--text-2)', text: on ? 'Tryck OK för att titta' : 'Norrsken säger till när matchen börjar' }));
         return;

@@ -793,3 +793,15 @@ html.m .player .tap-play { width: 84px; height: 84px; margin: -42px 0 0 -42px; f
 .matchpage .mp-btn.primary.focus { background: #fff; color: #000; }
 .matchpage .mp-chan, .matchpage .mp-team, .matchpage .mp-mcard { color: #fff; cursor: pointer; border: 0; font: inherit; }
 html.m .matchpage .mp-mcard { text-align: left; align-items: flex-start; }
+
+/* a country's flag as a round badge */
+.flag { border-radius: 50%; background: #222 !important; box-shadow: none !important; overflow: hidden; position: relative; container-type: size; outline: .12em solid rgba(255,255,255,.85); outline-offset: -.12em; }
+.flag .fl { opacity: 1; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font-size: 140cqw; line-height: 1; }
+
+/* a league's or tournament's logo (uploaded): on the match card, the match page and its cards */
+.k-live .card.matchcard .lcomp.logo { padding: .5rem .8rem; background: rgba(255,255,255,.92); }
+.k-live .card.matchcard .lcomp.logo img { display: block; height: 2.6rem; max-width: 9rem; object-fit: contain; }
+.matchpage .mp-comp { display: inline-flex; align-items: center; padding: .4rem .9rem; border-radius: .8rem; background: rgba(255,255,255,.92); }
+.matchpage .mp-comp img { height: 3rem; max-width: 12rem; object-fit: contain; display: block; }
+.matchpage .mp-mcomp { margin-left: auto; align-self: center; padding: .3rem .6rem; border-radius: .6rem; background: rgba(255,255,255,.92); display: inline-flex; }
+.matchpage .mp-mcomp img { height: 2.4rem; max-width: 8rem; object-fit: contain; display: block; }

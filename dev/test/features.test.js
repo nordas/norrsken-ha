@@ -806,3 +806,48 @@ test('sport: every Swedish national team on its own – sport, women/men, junior
   // only the chosen ones
   assert.deepEqual(sport.upcoming(['damkronorna'], ch, epg, { now, days: 5 }).map(m => m.title), ['Sverige – USA']);
 });
+
+test('sport: the same national match on two services in two languages is one match, on the Swedish one, with the flags', () => {
+  const sport = require('../lib/sport');
+  const now = Date.UTC(2026, 10, 14, 15);
+  const ch = [{ id: 1, n: '[Viapaly SE] (14/11) 18:30 Sverige - Bosnien-Hercegovina', region: 'se', epg: '' }, { id: 2, n: '[Viaplay NO] (14/11) 20:30 Sverige - Bosnia-Hercegovina', region: 'foreign', epg: '' }];
+  const r = sport.upcoming(['sverige-fotboll'], ch, { map: new Map() }, { now });
+  assert.equal(r.length, 1);
+  assert.deepEqual([r[0].title, r[0].chName, r[0].foreign, r[0].chans.map(c => c.id)], ['Sverige – Bosnien-Hercegovina', 'Viaplay', false, [1]]);
+  assert.deepEqual(sport.countryOf('Bosnia-Herzegovina'), { flag: 'BA', ab: 'BIH' });
+  assert.equal(sport.countryOf('Luleå'), null);
+});
+
+test('crests: one folder for everything – your teams, other clubs, other countries, competitions – found again by name', async () => {
+  const crests = require('../lib/crests');
+  const k = (f) => (crests.keyForFile(f, { aik: 'AIK', lulea: 'LHF' }) || {}).key;
+  assert.equal(k('aik-logo-footylogos.svg'), 'aik');
+  assert.equal(k('lulea-hockey-logo-footylogos.svg'), 'lulea');
+  assert.equal(k('djurgardens-if-hockey-logo-footylogos.svg'), 'djurgarden');
+  assert.equal(k('sweden-mens-national-ice-hockey-team-seeklogo-2.svg'), 'tre-kronor');
+  assert.equal(k('sweden-national-team-logo-footylogos.svg'), 'sverige-fotboll');
+  assert.equal(k('bosnia-and-herzegovina-national-team-logo-footylogos.svg'), 'nat-bih');
+  assert.equal(k('republic-of-ireland-national-team-logo-footylogos.svg'), 'nat-irl');
+  assert.equal(k('uefa-champions-league-logo-footylogos (1).svg'), 'comp-champions-league');
+  assert.equal(k('uefa-nations-league-logo-footylogos.svg'), 'comp-nations-league');
+  assert.equal(k('premier-league-england-logo-footylogos.svg'), 'comp-premier-league');
+  assert.equal(k('shl-logo-footylogos.svg'), 'comp-shl');
+  assert.equal(k('bayern-munich-logo-footylogos.svg'), 'club-bayern-munich');
+  const keys = ['club-bayern-munich', 'club-real-madrid', 'club-atletico-madrid', 'club-inter-milan', 'club-paris-saint-germain-psg', 'club-sporting-cp', 'club-fk-bodo-glimt'];
+  const c = (n) => crests.clubKey(n, keys);
+  assert.deepEqual(['Bayern München', 'Real Madrid', 'Atlético Madrid', 'AC Milan', 'Inter', 'PSG', 'Sporting Lissabon', 'Bodø/Glimt'].map(c),
+    ['club-bayern-munich', 'club-real-madrid', 'club-atletico-madrid', '', 'club-inter-milan', 'club-paris-saint-germain-psg', 'club-sporting-cp', 'club-fk-bodo-glimt']);
+  assert.equal(crests.compKey('Champions League'), 'comp-champions-league');
+  // through the server: sent by file name, kept under its key, shown for the list in /setup
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><circle cx="5" cy="5" r="5"/></svg>';
+  for (const name of ['bayern-munich-logo-footylogos.svg', 'uefa-champions-league-logo-footylogos.svg', 'bosnia-and-herzegovina-national-team-logo-footylogos.svg']) {
+    const r = await fetch(base + '/api/setup/crest-auto?name=' + encodeURIComponent(name), { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: svg });
+    assert.equal(r.status, 200, name);
+  }
+  assert.equal((await fetch(base + '/api/setup/crest-auto?name=' + encodeURIComponent('IMG_2092.PNG'), { method: 'POST', body: svg })).status, 422);
+  assert.equal((await fetch(base + '/crest/club-bayern-munich')).status, 200);
+  const list = (await get('/api/setup/crests')).json.teams;
+  assert.ok(list.some(t => t.id === 'comp-champions-league' && t.group === 'Ligor och turneringar'));
+  assert.ok(list.some(t => t.id === 'nat-bih' && t.group === 'Andra länders landslag'));
+  for (const id of ['club-bayern-munich', 'comp-champions-league', 'nat-bih']) await fetch(base + '/api/setup/crest/' + id, { method: 'DELETE' });
+});

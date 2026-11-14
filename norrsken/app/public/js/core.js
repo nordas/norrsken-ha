@@ -552,12 +552,37 @@
     });
   };
   /** A team's round badge: the club's abbreviation in its colours, or the user's own crest picture. */
+  /** A flag as the emoji the system draws ("BA" → 🇧🇦; "GB-ENG" → England's), or '' when there is none. */
+  NS.flagEmoji = function (code) {
+    var c = String(code || '').toUpperCase();
+    if (/^GB-[A-Z]{3}$/.test(c)) return String.fromCodePoint(0x1F3F4) + c.replace('-', '').toLowerCase().split('').map(function (x) { return String.fromCodePoint(0xE0000 + x.charCodeAt(0)); }).join('') + String.fromCodePoint(0xE007F);
+    if (!/^[A-Z]{2}$/.test(c)) return '';
+    return String.fromCodePoint(0x1F1E6 + c.charCodeAt(0) - 65, 0x1F1E6 + c.charCodeAt(1) - 65);
+  };
+  /** Can this screen draw flag emoji? (A TV without a colour emoji font draws two letters instead.) */
+  NS.canFlags = (function () {
+    var v;
+    return function () {
+      if (v !== undefined) return v;
+      try {
+        var c = document.createElement('canvas'); c.width = c.height = 16;
+        var x = c.getContext('2d'); x.font = '14px sans-serif'; x.textBaseline = 'top'; x.fillText(String.fromCodePoint(0x1F1F8, 0x1F1EA), 0, 0);
+        var d = x.getImageData(0, 0, 16, 16).data, colour = 0;
+        for (var i = 0; i < d.length; i += 4) if (d[i + 3] > 0 && (Math.abs(d[i] - d[i + 1]) > 30 || Math.abs(d[i + 1] - d[i + 2]) > 30)) colour++;
+        v = colour > 4;
+      } catch (e) { v = false; }
+      return v;
+    };
+  })();
   NS.teamBadge = function (t, cls) {
     var c1 = (t.col && t.col[0]) || '#444', c2 = (t.col && t.col[1]) || '#fff';
     var ini = t.ab || String(t.n || '').slice(0, 3).toUpperCase();
     var st = 'background:' + c1 + ';box-shadow:inset 0 0 0 .22em ' + c2;
-    var b = t.img ? NS.h('span', { class: cls + ' img' }, NS.pic(t.img, '', function () { b.className = cls; b.textContent = ini; b.style.cssText = st; }))
-      : NS.h('span', { class: cls + (ini.length > 3 ? ' sm' : ''), style: st, text: ini });
+    var plain = function () { return NS.h('span', { class: cls + (ini.length > 3 ? ' sm' : ''), style: st, text: ini }); };
+    // a country without a crest of its own: its flag, round, filling the badge
+    var flag = function () { var e = t.flag && NS.canFlags() ? NS.flagEmoji(t.flag) : ''; return e ? NS.h('span', { class: cls + ' flag', title: t.n || '' }, NS.h('span', { class: 'fl', text: e })) : plain(); };
+    var b = t.img ? NS.h('span', { class: cls + ' img' }, NS.pic(t.img, '', function () { var r = flag(); b.className = r.className; b.innerHTML = r.innerHTML; b.style.cssText = r.style.cssText; }))
+      : flag();
     return b;
   };
   NS.pickSubLang = function () {

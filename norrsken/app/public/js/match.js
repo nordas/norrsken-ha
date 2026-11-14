@@ -82,6 +82,7 @@
     body.appendChild(h('h1', { class: 'mp-title', text: m.title }));
     var lab = String(m.label || '').split(' · ').filter(Boolean);
     var tags = lab.map(function (x) { return h('span', { text: x }); });
+    if (m.compImg) tags.unshift(h('span', { class: 'mp-comp' }, h('img', { src: m.compImg, alt: '' }))); // the league's or tournament's logo
     if (m.autoRec) tags.push(h('span', { class: 'mp-rec' + (m.rec && m.rec.recording ? ' on' : '') }, [h('i'), m.rec && m.rec.recording ? 'Spelas in' : m.rec ? 'Inspelad' : 'Spelas in automatiskt']));
     body.appendChild(h('div', { class: 'mp-tags' }, tags));
 
@@ -125,9 +126,10 @@
       body.appendChild(h('div', { class: 'mp-more' }, row(this.others.map(function (o) {
         var on = Date.now() >= o.s;
         var s0 = (o.sides && o.sides[0]) || {}, s1 = (o.sides && o.sides[1]) || {};
-        return h('button', { class: 'mp-mcard', style: '--c1:' + ((s0.col && s0.col[0]) || '#333') + ';--c2:' + ((s1.col && s1.col[0]) || '#222'), onclick: function () { NS.router.replace ? NS.router.replace(new MatchPage(o)) : NS.router.push(new MatchPage(o)); } }, [
+        var oc = o.compImg ? h('span', { class: 'mp-mcomp' }, h('img', { src: o.compImg, alt: '' })) : null;
+      return h('button', { class: 'mp-mcard', style: '--c1:' + ((s0.col && s0.col[0]) || '#333') + ';--c2:' + ((s1.col && s1.col[0]) || '#222'), onclick: function () { NS.router.replace ? NS.router.replace(new MatchPage(o)) : NS.router.push(new MatchPage(o)); } }, [
           h('div', { class: 'mp-mtop' }, [h('span', { class: 'mp-ch', text: o.foreign && !on ? 'Svensk kanal kommer' : (o.chName || o.ch.n) }), h('span', { class: 'mp-when' + (on ? ' live' : ''), text: on ? 'Live' : NS.matchWhen(o.s) })]),
-          o.sides ? h('div', { class: 'mp-mvs' }, [NS.teamBadge(s0, 'mp-mb'), NS.teamBadge(s1, 'mp-mb')]) : null,
+          o.sides ? h('div', { class: 'mp-mvs' }, [NS.teamBadge(s0, 'mp-mb'), NS.teamBadge(s1, 'mp-mb'), oc]) : oc,
           h('b', { text: o.title }),
           h('span', { text: String(o.label || '').split(' · ').pop() })
         ]);

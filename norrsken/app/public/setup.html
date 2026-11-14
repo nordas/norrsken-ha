@@ -226,7 +226,7 @@ summary { cursor: pointer; font-weight: 650; color: #c9d3df; padding: 10px 0; }
     <h2>Klubbmärken</h2>
     <p class="sub">Lägg in lagens egna märken så visas de på matchkorten och matchsidan. Tryck på ett lag och välj en bild – från Bilder på iPhonen eller en fil på datorn. Bäst blir en kvadratisk PNG med genomskinlig bakgrund. Utan bild visas lagets förkortning i klubbfärgerna.</p>
     <div class="row" style="margin-top:14px"><button class="btn primary" type="button" id="crestDir">Välj mapp</button><button class="btn" type="button" id="crestBatch">Välj bilder</button></div>
-    <p class="help">Välj mappen med märkena (även undermappar följer med) eller markera bilderna. Norrsken känner igen laget på filnamnet – <i>lulea.png</i>, <i>Luleå Hockey.png</i>, <i>LHF.svg</i>, <i>farjestad_logo.png</i> och <i>Manchester United.png</i> fungerar alla. Det som inte känns igen listas, så kan du lägga till det för hand.</p>
+    <p class="help">Välj mappen med märkena (även undermappar följer med) eller markera bilderna. Norrsken läser filnamnet: dina lag, andra klubbar (motståndarna), andra länders landslag och ligor/turneringar (Champions League, SHL …) – allt visas på matchkorten – <i>lulea.png</i>, <i>Luleå Hockey.png</i>, <i>LHF.svg</i>, <i>farjestad_logo.png</i> och <i>Manchester United.png</i> fungerar alla. Det som inte känns igen listas, så kan du lägga till det för hand.</p>
     <div class="result" id="crestBatchRes"></div>
     <div id="crestList" class="crests"></div>
     <input type="file" id="crestFile" accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden>
@@ -601,34 +601,38 @@ summary { cursor: pointer; font-weight: 650; color: #c9d3df; padding: 10px 0; }
   $('crestDir').onclick = function () { $('crestFolder').value = ''; $('crestFolder').click(); };
   $('crestFolder').onchange = function () { crestUpload([].slice.call(this.files || []).filter(function (f) { return /\.(png|jpe?g|webp|svg)$/i.test(f.name) && !/^\./.test(f.name); })); };
   $('crestFiles').onchange = function () { crestUpload([].slice.call(this.files || [])); };
+  /**
+   * Many pictures at once: Norrsken reads each file name (team, other club, national team, competition) and keeps
+   * it under that. A picture given twice: the SVG wins over a PNG (it is sharp at any size).
+   */
   function crestUpload(files) {
     if (!files.length) return;
-    var plan = files.map(function (f) { return { f: f, t: crestMatch(f.name) }; });
-    var taken = {};
-    plan.forEach(function (p) { if (p.t) { if (taken[p.t.id]) p.dup = true; taken[p.t.id] = 1; } });
-    var todo = plan.filter(function (p) { return p.t && !p.dup; });
+    files = files.slice().sort(function (a, b) { return (/\.svg$/i.test(a.name) ? 1 : 0) - (/\.svg$/i.test(b.name) ? 1 : 0); });
     var res = $('crestBatchRes');
-    var done = 0, bad = [];
-    result(res, true, 'Laddar upp ' + todo.length + ' av ' + files.length + ' bilder…');
+    var done = 0, bad = [], miss = [], kinds = {};
+    result(res, true, 'Laddar upp ' + files.length + ' bilder…');
     var headers = { 'Content-Type': 'application/octet-stream' };
     if (pin) headers['X-Pin'] = pin;
     var next = function (i) {
-      if (i >= todo.length) {
-        var miss = plan.filter(function (p) { return !p.t; }).map(function (p) { return p.f.name; });
-        var dups = plan.filter(function (p) { return p.dup; }).map(function (p) { return p.f.name + ' (' + p.t.name + ' fanns redan i urvalet)'; });
-        var lines = [done + ' märken sparade.'];
+      if (i >= files.length) {
+        var parts = Object.keys(kinds).map(function (k) { return kinds[k] + ' ' + k; });
+        var lines = [done + ' bilder sparade' + (parts.length ? ' (' + parts.join(', ') + ')' : '') + '.'];
         if (bad.length) lines.push('Gick inte: ' + bad.join(', ') + '.');
-        if (miss.length) lines.push('Känns inte igen (döp om eller lägg till för hand): ' + miss.join(', ') + '.');
-        if (dups.length) lines.push('Hoppade över: ' + dups.join(', ') + '.');
-        result(res, !bad.length && !miss.length, lines.join(' '));
+        if (miss.length) lines.push('Känns inte igen: ' + miss.join(', ') + '.');
+        result(res, !bad.length, lines.join(' '));
         loadCrests();
         return;
       }
-      var p = todo[i];
-      res.textContent = 'Laddar upp ' + (i + 1) + ' av ' + todo.length + ': ' + p.t.name + '…';
-      fetch('api/setup/crest/' + p.t.id, { method: 'POST', headers: headers, body: p.f, cache: 'no-store' })
-        .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || 'Fel ' + r.status); }); })
-        .then(function () { done++; }, function (e) { bad.push(p.f.name + ' (' + e.message + ')'); })
+      var f = files[i];
+      res.textContent = 'Laddar upp ' + (i + 1) + ' av ' + files.length + ': ' + f.name + '…';
+      fetch('api/setup/crest-auto?name=' + encodeURIComponent(f.name), { method: 'POST', headers: headers, body: f, cache: 'no-store' })
+        .then(function (r) { return r.json().then(function (j) { if (r.status === 422) return 'miss'; if (!r.ok) throw new Error(j.error || 'Fel ' + r.status); return j.id; }); })
+        .then(function (id) {
+          if (id === 'miss') { miss.push(f.name); return; }
+          done++;
+          var k = /^comp-/.test(id) ? 'ligor/turneringar' : /^nat-/.test(id) ? 'landslag' : /^club-/.test(id) ? 'andra klubbar' : 'dina lag';
+          kinds[k] = (kinds[k] || 0) + 1;
+        }, function (e) { bad.push(f.name + ' (' + e.message + ')'); })
         .then(function () { next(i + 1); });
     };
     next(0);

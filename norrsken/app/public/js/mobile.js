@@ -45,9 +45,10 @@
       var c1 = (mt.sides[0].col || mt.col || ['#333'])[0], c2 = (mt.sides[1].col || ['#222'])[0];
       var mf = h('div', { class: 'm-frame m-mcard', style: 'background: radial-gradient(90% 120% at 0% 0%, ' + NS.rgba(c1, 0.7) + ', transparent 62%), radial-gradient(90% 120% at 100% 100%, ' + NS.rgba(c2, 0.55) + ', transparent 62%), #18181a' }, [
         h('span', { class: 'm-livetag' + (onNow ? '' : ' when'), text: onNow ? 'LIVE' : NS.matchWhen(mt.s) }),
+        mt.compImg ? h('span', { class: 'm-complogo' }, h('img', { src: mt.compImg, alt: mt.comp || '' })) : null,
         h('div', { class: 'm-mvs' }, [NS.teamBadge(mt.sides[0], 'm-vs-b'), h('i', { text: '–' }), NS.teamBadge(mt.sides[1], 'm-vs-b')])
       ]);
-      var mc = h('div', { class: 'm-card m-live' }, [mf, h('div', { class: 'm-now' }, [h('b', { text: mt.t }), h('span', { text: [mt.comp, mt.foreign && !onNow ? 'svensk kanal kommer' : it.n].filter(Boolean).join(' · ') })])]);
+      var mc = h('div', { class: 'm-card m-live' }, [mf, h('div', { class: 'm-now' }, [h('b', { text: mt.t }), h('span', { text: [mt.label || mt.comp, mt.foreign && !onNow ? 'svensk kanal kommer' : mt.ch || it.n].filter(Boolean).join(' · ') })])]);
       mc._it = it;
       return mc;
     }
@@ -68,7 +69,7 @@
     c._now.innerHTML = '';
     if (c._it.mt) { // a favourite team's match: which match and when, then the channel
       c._now.appendChild(h('b', { text: c._it.mt.t }));
-      c._now.appendChild(h('span', { text: (Date.now() >= c._it.mt.s ? 'Live nu' : NS.matchWhen(c._it.mt.s)) + ' · ' + c._it.n }));
+      c._now.appendChild(h('span', { text: (Date.now() >= c._it.mt.s ? 'Live nu' : NS.matchWhen(c._it.mt.s)) + ' · ' + (c._it.mt.ch || c._it.n) }));
       return;
     }
     c._now.appendChild(h('b', { text: (c._it.num ? c._it.num + '  ' : '') + c._it.n }));
@@ -449,6 +450,7 @@
       return h('button', { class: 'm-match', onclick: function () { NS.openMatch(m); } }, [
         h('span', { class: 'when' }, live ? h('span', { class: 'live-pill', text: 'Live' }) : [w.join(' '), h('b', { text: clock })]),
         m.sides ? h('span', { class: 'm-match-b' }, [NS.teamBadge(m.sides[0], 'm-vs-b'), NS.teamBadge(m.sides[1], 'm-vs-b')]) : null,
+        m.compImg ? h('span', { class: 'm-complogo inline' }, h('img', { src: m.compImg, alt: '' })) : null,
         h('span', { class: 'what' }, [h('b', { text: m.title }), h('span', { text: [m.label, m.foreign && !live ? 'svensk kanal kommer' : m.chName || m.ch.n].filter(Boolean).join(' · ') })])
       ]);
     };
