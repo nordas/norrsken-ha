@@ -414,7 +414,10 @@ function collect(follows, channels, epg, now, days = 1) {
       // (names compared across languages; a match with its studio before it can start hours apart on two channels)
       const who = f.id + '|' + (mu ? [sideKey(mu.home), sideKey(mu.away)].sort().join('|') : t.toLowerCase());
       let h = null;
-      for (const x of hits.values()) if (x.who === who && Math.abs(x.s - s) <= (mu ? 4 * 3600e3 : 45 * 60e3)) { h = x; break; }
+      // another country's channel showing it hours later (a rerun at 01:00) is the same match too, not a new one
+      const span = mu ? (ch.region === 'foreign' ? 12 * 3600e3 : 4 * 3600e3) : 45 * 60e3;
+      for (const x of hits.values()) if (x.who === who && Math.abs(x.s - s) <= span) { h = x; break; }
+      if (h && ch.region === 'foreign' && s > h.s + 4 * 3600e3) { if (!h.d && d) h.d = d; if (!h.dx) h.dx = d; return; } // its text (arena, competition) is welcome; its channel is not
       if (!h) hits.set(who + '|' + s + '|' + hits.size, (h = { who, f, s, e, t, d, mu, chans: [], labels: new Map() }));
       else if (ch.region === 'se' && !h.chans.some(c => c.region === 'se')) { h.s = s; h.e = e; h.t = t; h.d = d || h.d; if (mu) h.mu = mu; } // the Swedish listing's times and names
       if (!h.chans.includes(ch)) h.chans.push(ch);
@@ -442,7 +445,7 @@ function collect(follows, channels, epg, now, days = 1) {
     const foreign = !swe.length;
     if (swe.length) chans = swe;
     const f = best.f;
-    const kind = classify(best.t, best.d, chans[0].n || '', f.id === 'langd' ? 'Längdskidor' : f.id === 'skidskytte' ? 'Skidskytte' : (f.vs && f.id !== 'sverige') ? (f.sport || 'Ishockey') : '');
+    const kind = classify(best.t, [best.d, best.dx].filter(Boolean).join(' '), chans[0].n || '', f.id === 'langd' ? 'Längdskidor' : f.id === 'skidskytte' ? 'Skidskytte' : (f.vs && f.id !== 'sverige') ? (f.sport || 'Ishockey') : '');
     if (f.nation && !kind.sport) { kind.sport = f.sport; kind.label = [f.sport, kind.label].filter(Boolean).join(' · '); }
     // a national team's match that names no competition is still a national match: say so, not just the sport
     if (f.nation && !kind.comp) { kind.comp = 'Landskamp'; kind.label = [kind.label, 'Landskamp'].filter(Boolean).join(' · '); }
@@ -479,8 +482,10 @@ const ARENAS = {
 };
 const ARENA_RE = /(?:^|[.!]\s+|\bfrån\s+|\bi\s+|\bpå\s+)((?:[A-ZÅÄÖ][\wåäöÅÄÖé'&-]*\s+){0,3}(?:Arena|Garden|Stadium|Stadion|Park|Ishall|Center|Centrum|Scandinavium|Hovet|Globen)(?:\s+[A-ZÅÄÖ][\wåäöÅÄÖ-]+)?)(?=[\s.,]|$)/;
 function arenaOf(best, f) {
-  const m = ARENA_RE.exec(String(best.d || '').replace(/<[^>]+>/g, ' '));
-  if (m) return m[1].trim();
+  for (const txt of [best.d, best.dx]) {
+    const m = ARENA_RE.exec(String(txt || '').replace(/<[^>]+>/g, ' '));
+    if (m) return m[1].replace(/^(fra|från|from|aus|de)\s+/i, '').trim();
+  }
   if (!best.mu || !f.vs || f.nation) return '';
   const pool = TEAMS.filter(x => x.sport === f.vs.sport);
   const home = pool.find(x => x.re.test(best.mu.home));

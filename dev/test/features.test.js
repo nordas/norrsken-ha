@@ -851,3 +851,13 @@ test('crests: one folder for everything – your teams, other clubs, other count
   assert.ok(list.some(t => t.id === 'nat-bih' && t.group === 'Andra länders landslag'));
   for (const id of ['club-bayern-munich', 'comp-champions-league', 'nat-bih']) await fetch(base + '/api/setup/crest/' + id, { method: 'DELETE' });
 });
+
+test('sport: a foreign rerun hours later is the same match (its text gives arena and competition), not a second card', () => {
+  const sport = require('../lib/sport');
+  const now = Date.UTC(2026, 10, 14, 15);
+  const ch = [{ id: 1, n: '[Viapaly SE] (14/11) 18:30 Sverige - Bosnien-Hercegovina', region: 'se', epg: '' }, { id: 2, n: 'TV2 Sport 1 FHD', region: 'foreign', epg: 'a' }];
+  const epg = { map: new Map([['a', [[Date.UTC(2026, 10, 15, 0), Date.UTC(2026, 10, 15, 2), 'Sverige - Bosnia-Hercegovina', 'Fra Strawberry Arena, Stockholm og kampen mellom Sverige og Bosnia-Hercegovina i UEFA Nations League.']]]]) };
+  const r = sport.upcoming(['sverige-fotboll'], ch, epg, { now, days: 2 });
+  assert.equal(r.length, 1);
+  assert.deepEqual([r[0].chName, r[0].arena, r[0].kind.comp], ['Viaplay', 'Strawberry Arena', 'Nations League']);
+});

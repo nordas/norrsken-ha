@@ -280,7 +280,8 @@ function start(url, { ua, maxMin = 60, ch = '', match = false, live = false } = 
   const ROOT = rootDir();
   fs.mkdirSync(ROOT, { recursive: true });
   const free = freeBytes(ROOT);
-  if (free < (useMirror ? MIN_FREE_STAGE : MIN_FREE)) throw new Error(useMirror ? 'För lite ledigt minne för att spela in pausen' : 'För lite ledigt diskutrymme för att spela in pausen');
+  // live through memory keeps at most STAGE_MAX: it needs that much free, not the disk margin a pause needs
+  if (free < (ring ? STAGE_MAX + 50e6 : useMirror ? MIN_FREE_STAGE : MIN_FREE)) throw new Error(useMirror ? 'För lite ledigt minne för att spela in pausen' : 'För lite ledigt diskutrymme för att spela in pausen');
   const id = Math.random().toString(36).slice(2, 10);
   const dir = path.join(ROOT, id);
   fs.mkdirSync(dir, { recursive: true });
