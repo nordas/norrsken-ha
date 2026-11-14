@@ -274,6 +274,7 @@ function giveUp(s, why) {
   s.done = true;
   s.retrying = false;
   if (s.retryT) { clearTimeout(s.retryT); s.retryT = null; }
+  if (s.diskT) { clearInterval(s.diskT); s.diskT = null; } // nothing more is written (the copies to the Time Capsule go on)
   try { if (s.proc) s.proc.kill('SIGKILL'); } catch (_) { /* gone */ }
   console.log('[paus] slutar försöka med kanalen:', why);
 }

@@ -244,8 +244,10 @@ test('tidying the Time Capsule asks per folder at the moment of deleting (a reco
 });
 
 test('an error from the Time Capsule never carries the account, the password or where the disk is', () => {
-  for (const line of ['do_connect: Connection to 192.168.1.5 failed for oskar hemligt ord', 'session setup failed for oskar@192.168.1.5 //192.168.1.5/Data hemligt ord']) {
+  for (const line of ['do_connect: Connection to 192.168.1.5 failed for oskar hemligt ord', 'session setup failed for oskar@192.168.1.5 //192.168.1.5/Data hemligt ord',
+    'Connection to fe80::1 failed (Error NT_STATUS_x)', 'timecapsule.local: connection refused /Disk', 'tree connect failed: Data/Norrsken']) {
     const t = smb.friendly(line);
-    assert.ok(t && !/oskar|192\.168|hemligt/.test(t), t);
+    assert.ok(t && !/oskar|192\.168|hemligt|fe80|timecapsule\.local|Disk|Data|Norrsken/.test(t), t);
   }
+  assert.equal(smb.friendly('timecapsule.local: Connection refused'), 'Kunde inte prata med Time Capsule (anslutningen nekades)');
 });

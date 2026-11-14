@@ -39,20 +39,16 @@ const STATUS = [
   [/DISK_FULL|QUOTA/i, 'Disken är full'],
   [/NO_SUCH_FILE|NOT_FOUND|OBJECT_NAME_NOT_FOUND|PATH_NOT_FOUND/i, 'Filen finns inte på disken'],
 ];
-/** The account, the password and where the disk is never leave in an error text. */
-function redact(t) {
-  let out = String(t || '').replace(/\b\d{1,3}(\.\d{1,3}){3}\b/g, '…').replace(/\/\/[^\s/]+/g, '//…');
-  for (const sec of [PASS, USER]) if (sec && sec.length > 1) out = out.split(sec).join('…');
-  return out;
-}
 /** Short Swedish reason; never anything that could carry the account (smbclient does not print the password). */
 function friendly(out) {
   const t = String(out || '');
   for (const [re, msg] of STATUS) if (re.test(t)) return msg;
   const m = /NT_STATUS_[A-Z_]+/.exec(t);
   if (m) return 'Time Capsule svarade ' + m[0];
-  const line = t.split('\n').map(l => l.trim()).find(l => l && !/password|lösenord|PASSWD/i.test(l));
-  return 'Kunde inte prata med Time Capsule' + (line ? ' (' + redact(line).slice(0, 120) + ')' : '');
+  // only fixed words leave: what kind of trouble, never a line from smbclient (it may name the disk, the share, a user)
+  const why = [[/timed? ?out|IO_TIMEOUT/i, 'tidsgräns'], [/refused/i, 'anslutningen nekades'], [/reset|closed|EOF|broken pipe/i, 'anslutningen bröts'],
+    [/unreachable|no route|host is down|not known|resolve/i, 'nås inte på nätet'], [/ETIMEDOUT/i, 'tidsgräns']].find(([re]) => re.test(t));
+  return 'Kunde inte prata med Time Capsule' + (why ? ' (' + why[1] + ')' : '');
 }
 
 /*
@@ -102,7 +98,7 @@ function run(cmd, opts, old) {
     const go = () => {
       running++;
       Promise.resolve().then(() => run1(cmd, opts, old))
-        .catch(e => ({ ok: false, out: '', err: 'Kunde inte prata med Time Capsule (' + (e && e.message) + ')' }))
+        .catch(() => ({ ok: false, out: '', err: 'Kunde inte prata med Time Capsule' }))
         .then((r) => { running--; if (waiting.length) waiting.shift()(); resolve(r); });
     };
     if (running < MAX_AT_ONCE) go(); else waiting.push(go);

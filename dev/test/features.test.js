@@ -74,6 +74,7 @@ before(async () => {
   process.env.TMDB_BASE = 'http://127.0.0.1:' + tmdb.address().port;
   process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'nsk-f-'));
   process.env.NSK_PAUSE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'nsk-pause-'));
+  process.env.NSK_AIRTEST_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'nsk-airtest-'));
   process.env.PORT = '0';
   process.env.NSK_SETUP_OPEN = '1'; // the setup PIN has its own test (pin.test.js)
   app = require('../server');
@@ -783,6 +784,10 @@ test('club crests: uploaded in /setup (PIN), checked by their bytes, shown at /c
   r = await fetch(base + '/api/setup/crest/lulea', { method: 'POST', headers: hdr, body: Buffer.concat([PNG, Buffer.alloc(1.2e6)]) });
   assert.equal(r.status, 413);
   assert.match((await r.json()).error, /för stor/);
+  assert.equal((await fetch(base + '/crest/lulea')).status, 200);
+  // two uploads of the same crest at once (a folder with two names for one team): both answered, one crest left
+  const two = await Promise.all([1, 2].map(() => fetch(base + '/api/setup/crest/lulea', { method: 'POST', headers: hdr, body: PNG })));
+  assert.deepEqual(two.map(x => x.status), [200, 200]);
   assert.equal((await fetch(base + '/crest/lulea')).status, 200);
   const list = await (await fetch(base + '/api/setup/crests', { headers: hdr })).json();
   assert.equal(list.teams.find(t => t.id === 'lulea').mine, true);

@@ -2150,10 +2150,10 @@ async function saveCrest(req, res, id, label) {
   if (!ext) return bad(res, 'Det där är ingen bild Norrsken kan visa (PNG, JPG, WebP eller SVG)', 415);
   fs.mkdirSync(CREST_UP, { recursive: true });
   // the new file first (under another name), then the old ones go: a failed write never loses the crest there was
-  const tmp = path.join(CREST_UP, '.' + id + ext + '.tmp');
+  const tmp = path.join(CREST_UP, '.' + id + '.' + process.pid + '.' + Date.now() + '.' + Math.random().toString(36).slice(2, 8) + '.tmp');
   try { fs.writeFileSync(tmp, buf); } catch (e) { try { fs.unlinkSync(tmp); } catch (_) { /* none */ } return bad(res, 'Märket kunde inte sparas', 500); }
   for (const e of Object.keys(CREST_TYPES)) if (e !== ext) { try { fs.unlinkSync(path.join(CREST_UP, id + e)); } catch (_) { /* none */ } }
-  fs.renameSync(tmp, path.join(CREST_UP, id + ext));
+  try { fs.renameSync(tmp, path.join(CREST_UP, id + ext)); } catch (e) { try { fs.unlinkSync(tmp); } catch (_) { /* none */ } return bad(res, 'Märket kunde inte sparas', 500); }
   sportCache.clear();
   crestKeyCache.at = 0;
   console.log('[märken] ' + id + ext + ' sparat (' + Math.round(buf.length / 1024) + ' kB)');

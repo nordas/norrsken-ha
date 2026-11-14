@@ -10,7 +10,7 @@ const os = require('os');
 const path = require('path');
 
 const FF = process.env.FFMPEG_PATH || 'ffmpeg';
-const DIR = path.join(os.tmpdir(), 'norrsken-airtest');
+const DIR = process.env.NSK_AIRTEST_DIR || path.join(os.tmpdir(), 'norrsken-airtest'); // tests: their own folder (two runs at once never share one)
 const SRC = ['-f', 'lavfi', '-i', 'testsrc2=size=1280x720:rate=25', '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000', '-t', '20'];
 const H264 = ['-c:v', 'libx264', '-preset', 'veryfast', '-profile:v', 'main', '-pix_fmt', 'yuv420p', '-g', '50', '-keyint_min', '50', '-sc_threshold', '0', '-b:v', '2500k'];
 const VARIANTS = {

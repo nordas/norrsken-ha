@@ -242,10 +242,11 @@ test('a channel that answers 4XX at first is asked again (the provider still cou
     tsbuf.giveUp(m, 'ingen bild');
     const at = dead;
     await new Promise(r => setTimeout(r, 6000));
-    return { okAfter, gaveUpAt: at, deadAfter: dead, done: m.done, session: !!tsbuf.matchSession() };
+    return { okAfter, gaveUpAt: at, deadAfter: dead, done: m.done, session: !!tsbuf.matchSession(), timers: !!(m.retryT || m.diskT) };
   `, { NSK_PAUSE_DIR: path.join(tmp, 'retry') });
   assert.ok(r.okAfter.tries >= 1 && r.okAfter.sec > 0, 'it recorded after asking again: ' + JSON.stringify(r));
   assert.equal(r.deadAfter, r.gaveUpAt, 'no new connection after giving up: ' + JSON.stringify(r));
   assert.equal(r.done, true);
   assert.equal(r.session, false, 'the provider connection is free for the next channel');
+  assert.equal(r.timers, false, 'no timer of it lives on');
 });
