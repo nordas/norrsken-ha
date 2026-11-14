@@ -242,3 +242,10 @@ test('tidying the Time Capsule asks per folder at the moment of deleting (a reco
   assert.equal(fs.existsSync(path.join(base, 'gammal1')), false, 'left over from before: removed');
   assert.equal(fs.existsSync(path.join(base, 'ny2')), true, 'started since: kept');
 });
+
+test('an error from the Time Capsule never carries the account, the password or where the disk is', () => {
+  for (const line of ['do_connect: Connection to 192.168.1.5 failed for oskar hemligt ord', 'session setup failed for oskar@192.168.1.5 //192.168.1.5/Data hemligt ord']) {
+    const t = smb.friendly(line);
+    assert.ok(t && !/oskar|192\.168|hemligt/.test(t), t);
+  }
+});

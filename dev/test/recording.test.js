@@ -225,3 +225,27 @@ test('the AirPlay log tells devices apart and counts what each fetched (a TV fet
   assert.equal(s.clients.find(c => c.ip === '192.168.85.30').kind, 'iPhone/iPad');
   assert.equal(s.log[0].status, 404);
 });
+
+test('a channel that answers 4XX at first is asked again (the provider still counted the old connection), and giving up stops every try', () => {
+  const r = run(`
+    let hits = 0;
+    const srv = await new Promise(ok => { const s = http.createServer((q, res) => { hits++; if (hits <= 2) { res.writeHead(403); return res.end(); } res.setHeader('Content-Type', 'video/mp2t'); fs.createReadStream(${JSON.stringify(clip)}).pipe(res); }).listen(0, () => ok(s)); });
+    const p = tsbuf.start('http://127.0.0.1:' + srv.address().port + '/x.ts', { maxMin: 60, ch: 'TV4' });
+    await until(() => tsbuf.length(p) > 0 || p.done);
+    const okAfter = { hits, tries: p.tries, sec: tsbuf.length(p) };
+    tsbuf.stop(p, 'klar');
+    // a channel that never answers: the server gives up on it while the recorder waits to ask again
+    let dead = 0;
+    const srv2 = await new Promise(ok => { const s = http.createServer((q, res) => { dead++; res.writeHead(404); res.end(); }).listen(0, () => ok(s)); });
+    const m = tsbuf.start('http://127.0.0.1:' + srv2.address().port + '/y.ts', { maxMin: 60, ch: 'Död kanal', match: true });
+    await until(() => m.retrying);
+    tsbuf.giveUp(m, 'ingen bild');
+    const at = dead;
+    await new Promise(r => setTimeout(r, 6000));
+    return { okAfter, gaveUpAt: at, deadAfter: dead, done: m.done, session: !!tsbuf.matchSession() };
+  `, { NSK_PAUSE_DIR: path.join(tmp, 'retry') });
+  assert.ok(r.okAfter.tries >= 1 && r.okAfter.sec > 0, 'it recorded after asking again: ' + JSON.stringify(r));
+  assert.equal(r.deadAfter, r.gaveUpAt, 'no new connection after giving up: ' + JSON.stringify(r));
+  assert.equal(r.done, true);
+  assert.equal(r.session, false, 'the provider connection is free for the next channel');
+});

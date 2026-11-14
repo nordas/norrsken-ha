@@ -779,6 +779,11 @@ test('club crests: uploaded in /setup (PIN), checked by their bytes, shown at /c
   assert.equal(r.status, 415);
   r = await fetch(base + '/api/setup/crest/nobody', { method: 'POST', headers: hdr, body: PNG });
   assert.equal(r.status, 404);
+  // too big: a clear answer (not a cut connection), and the crest there was is still there
+  r = await fetch(base + '/api/setup/crest/lulea', { method: 'POST', headers: hdr, body: Buffer.concat([PNG, Buffer.alloc(1.2e6)]) });
+  assert.equal(r.status, 413);
+  assert.match((await r.json()).error, /för stor/);
+  assert.equal((await fetch(base + '/crest/lulea')).status, 200);
   const list = await (await fetch(base + '/api/setup/crests', { headers: hdr })).json();
   assert.equal(list.teams.find(t => t.id === 'lulea').mine, true);
   const sp = (await get('/api/sport?profile=p1')).json;

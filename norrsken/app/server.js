@@ -668,7 +668,7 @@ route('GET', '/crest/:id', (req, res, q, p) => {
   if (!f) return bad(res, 'finns inte', 404);
   // an SVG is shown as a picture only (never as a page): no scripts run from it
   res.writeHead(200, { 'Content-Type': CREST_TYPES[path.extname(f)], 'Cache-Control': 'max-age=3600', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'", 'X-Content-Type-Options': 'nosniff' });
-  fs.createReadStream(f).pipe(res);
+  fs.createReadStream(f).on('error', () => res.destroy()).pipe(res);
 });
 
 /** The profile's favourite team playing now or soon (start page billboard). */
@@ -1435,22 +1435,24 @@ function matchRecTick() {
     if (had) {
       // still recording, or finished as planned: nothing to do; it stopped early (provider dropped it): go on
       const hs = tsbuf.get(had.sessId);
-      // the channel is tested, always: no picture 18 s after it was opened means it does not work – stop waiting
-      if (hs && !hs.done && !hs.full && now - hs.started > 18e3 && tsbuf.length(hs) === 0) {
+      // the channel is tested, always: no picture 25 s after ffmpeg last asked for it means it does not work – stop
+      // waiting (not while the recorder itself is about to ask again: the provider may still count the old connection)
+      if (hs && !hs.done && !hs.full && !hs.retrying && now - (hs.lastLaunch || hs.started) > 25e3 && tsbuf.length(hs) === 0) {
         console.log('[match]', m.title, '–', had.chName, 'ger ingen bild');
-        try { if (hs.proc) hs.proc.kill('SIGKILL'); } catch (_) { /* gone */ }
-        hs.done = true;
+        tsbuf.giveUp(hs, 'ingen bild från ' + had.chName);
       }
       if (hs && (!hs.done || hs.full)) continue;
       if (!hs) continue; // removed by the viewer
       had.tries = had.tries || 0;
       // a channel that never gave a picture: the next one that shows the match at once (Full HD first, then the
       // others, another country's last); after a whole round of them, with the usual wait between tries
-      const dry = tsbuf.length(hs) === 0;
+      // stopped by the recorder itself (Time Capsule away, memory full) is not the channel's fault
+      const dry = tsbuf.length(hs) === 0 && !hs.halted;
       if (dry && !had.dryAt) { had.dryAt = hs.started; had.chIdx = (had.chIdx || 0) + 1; }
       const round = m.chans.length + (m.alt || []).length;
       // the whole match matters: never give up while it is on; wait a little longer each time (at most a minute)
-      if (!(dry && (had.chIdx || 0) < round * 2) && now - (had.restartAt || 0) < matchBackoff(had.tries)) continue;
+      // the next channel at once after a dry one, but never sooner than 10 s after the last start
+      if (now - (had.restartAt || 0) < (dry && (had.chIdx || 0) < round * 2 ? 10e3 : matchBackoff(had.tries))) continue;
       if (had.tries && had.tries % 10 === 0 && had.loggedTries !== had.tries) { had.loggedTries = had.tries; console.log('[match] inspelningen av', m.title, 'har avbrutits', had.tries, 'gånger – fortsätter försöka'); }
     }
     if (tsbuf.matchSession()) break; // the provider gives one connection: the recording that runs goes on
@@ -2122,20 +2124,36 @@ route('POST', '/api/setup/crest/:id', async (req, res, q, p) => {
   if (!sport.TEAMS.some(t => t.id === p.id) && !/^(nat|comp|club)-[a-z0-9-]{2,40}$/.test(p.id)) return bad(res, 'okänt lag', 404);
   return saveCrest(req, res, p.id, '');
 });
+const CREST_MAX = 1e6; // one crest (an SVG is a few kB, a PNG rarely 200)
+const CREST_MAX_N = 400; // all of them together: a few hundred small files in /data, never more
+const CREST_MAX_TOTAL = 40e6;
+function crestUse() {
+  let n = 0, bytes = 0;
+  try { for (const f of fs.readdirSync(CREST_UP)) { if (!CREST_TYPES[path.extname(f)]) continue; n++; try { bytes += fs.statSync(path.join(CREST_UP, f)).size; } catch (_) { /* gone */ } } } catch (_) { /* none yet */ }
+  return { n, bytes };
+}
 async function saveCrest(req, res, id, label) {
+  const tooBig = 'Bilden är för stor (högst 1 MB)';
+  // refused before it is read when the size is known; otherwise read to the end and dropped (the answer then arrives)
+  if (+req.headers['content-length'] > CREST_MAX) { res.setHeader('Connection', 'close'); req.resume(); return bad(res, tooBig, 413); }
   const chunks = []; let size = 0;
-  try {
-    await new Promise((resolve, reject) => {
-      req.on('data', (c) => { size += c.length; if (size > 3e6) { reject(new Error('Bilden är för stor (högst 3 MB)')); req.destroy(); } else chunks.push(c); });
-      req.on('end', resolve); req.on('error', reject);
-    });
-  } catch (e) { return bad(res, e.message, 413); }
+  await new Promise((resolve) => {
+    req.on('data', (c) => { size += c.length; if (size <= CREST_MAX) chunks.push(c); });
+    req.on('end', resolve); req.on('error', resolve);
+  });
+  if (size > CREST_MAX) return bad(res, tooBig, 413);
+  const use = crestUse();
+  const had = Object.keys(CREST_TYPES).some(e => fs.existsSync(path.join(CREST_UP, id + e)));
+  if (!had && (use.n >= CREST_MAX_N || use.bytes + size > CREST_MAX_TOTAL)) return bad(res, 'Det får inte plats fler märken (högst ' + CREST_MAX_N + ' st, ' + Math.round(CREST_MAX_TOTAL / 1e6) + ' MB) – ta bort några först', 507);
   const buf = Buffer.concat(chunks);
   const ext = crestKind(buf);
   if (!ext) return bad(res, 'Det där är ingen bild Norrsken kan visa (PNG, JPG, WebP eller SVG)', 415);
   fs.mkdirSync(CREST_UP, { recursive: true });
-  for (const e of Object.keys(CREST_TYPES)) { try { fs.unlinkSync(path.join(CREST_UP, id + e)); } catch (_) { /* none */ } }
-  fs.writeFileSync(path.join(CREST_UP, id + ext), buf);
+  // the new file first (under another name), then the old ones go: a failed write never loses the crest there was
+  const tmp = path.join(CREST_UP, '.' + id + ext + '.tmp');
+  try { fs.writeFileSync(tmp, buf); } catch (e) { try { fs.unlinkSync(tmp); } catch (_) { /* none */ } return bad(res, 'Märket kunde inte sparas', 500); }
+  for (const e of Object.keys(CREST_TYPES)) if (e !== ext) { try { fs.unlinkSync(path.join(CREST_UP, id + e)); } catch (_) { /* none */ } }
+  fs.renameSync(tmp, path.join(CREST_UP, id + ext));
   sportCache.clear();
   crestKeyCache.at = 0;
   console.log('[märken] ' + id + ext + ' sparat (' + Math.round(buf.length / 1024) + ' kB)');

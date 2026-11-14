@@ -39,6 +39,12 @@ const STATUS = [
   [/DISK_FULL|QUOTA/i, 'Disken är full'],
   [/NO_SUCH_FILE|NOT_FOUND|OBJECT_NAME_NOT_FOUND|PATH_NOT_FOUND/i, 'Filen finns inte på disken'],
 ];
+/** The account, the password and where the disk is never leave in an error text. */
+function redact(t) {
+  let out = String(t || '').replace(/\b\d{1,3}(\.\d{1,3}){3}\b/g, '…').replace(/\/\/[^\s/]+/g, '//…');
+  for (const sec of [PASS, USER]) if (sec && sec.length > 1) out = out.split(sec).join('…');
+  return out;
+}
 /** Short Swedish reason; never anything that could carry the account (smbclient does not print the password). */
 function friendly(out) {
   const t = String(out || '');
@@ -46,7 +52,7 @@ function friendly(out) {
   const m = /NT_STATUS_[A-Z_]+/.exec(t);
   if (m) return 'Time Capsule svarade ' + m[0];
   const line = t.split('\n').map(l => l.trim()).find(l => l && !/password|lösenord|PASSWD/i.test(l));
-  return 'Kunde inte prata med Time Capsule' + (line ? ' (' + line.slice(0, 120) + ')' : '');
+  return 'Kunde inte prata med Time Capsule' + (line ? ' (' + redact(line).slice(0, 120) + ')' : '');
 }
 
 /*
@@ -93,7 +99,12 @@ let running = 0;
 const waiting = [];
 function run(cmd, opts, old) {
   return new Promise((resolve) => {
-    const go = () => { running++; run1(cmd, opts, old).then((r) => { running--; if (waiting.length) waiting.shift()(); resolve(r); }); };
+    const go = () => {
+      running++;
+      Promise.resolve().then(() => run1(cmd, opts, old))
+        .catch(e => ({ ok: false, out: '', err: 'Kunde inte prata med Time Capsule (' + (e && e.message) + ')' }))
+        .then((r) => { running--; if (waiting.length) waiting.shift()(); resolve(r); });
+    };
     if (running < MAX_AT_ONCE) go(); else waiting.push(go);
   });
 }
@@ -130,13 +141,13 @@ function ensure(rel) {
 function put(cwd, names, dir) {
   if (!SAFE_PATH.test(dir) || !names.length || !names.every(n => SAFE_NAME.test(n))) return Promise.resolve({ ok: false, err: 'Ogiltigt namn' });
   const cmd = 'cd "' + dir + '"; ' + names.map(n => 'put "' + n + '" "' + n + '"').join('; ');
-  return exec(cmd, { cwd, timeout: 10 * 60e3 });
+  return exec(cmd, { cwd, timeout: 3 * 60e3 });
 }
 
 /** Fetch one file into `cwd` under the same name. */
 function get(cwd, dir, name) {
   if (!SAFE_PATH.test(dir) || !SAFE_NAME.test(name)) return Promise.resolve({ ok: false, err: 'Ogiltigt namn' });
-  return exec('cd "' + dir + '"; get "' + name + '" "' + name + '.fetch"', { cwd, timeout: 10 * 60e3 }).then((r) => {
+  return exec('cd "' + dir + '"; get "' + name + '" "' + name + '.fetch"', { cwd, timeout: 3 * 60e3 }).then((r) => {
     if (!r.ok) return r;
     try { require('fs').renameSync(require('path').join(cwd, name + '.fetch'), require('path').join(cwd, name)); } catch (e) { return { ok: false, err: e.message }; }
     return r;
@@ -154,7 +165,7 @@ function getMany(cwd, dir, names) {
   if (!SAFE_PATH.test(dir) || !names.length || !names.every(n => SAFE_NAME.test(n))) return Promise.resolve({ ok: false, err: 'Ogiltigt namn' });
   const fsm = require('fs');
   const pth = require('path');
-  return exec('cd "' + dir + '"; ' + names.map(n => 'get "' + n + '" "' + n + '.fetch"').join('; '), { cwd, timeout: 10 * 60e3 }).then((r) => {
+  return exec('cd "' + dir + '"; ' + names.map(n => 'get "' + n + '" "' + n + '.fetch"').join('; '), { cwd, timeout: 3 * 60e3 }).then((r) => {
     let all = true;
     for (const n of names) {
       try { fsm.renameSync(pth.join(cwd, n + '.fetch'), pth.join(cwd, n)); } catch (_) { all = false; }

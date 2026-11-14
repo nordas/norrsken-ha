@@ -243,6 +243,7 @@ function stop(s, why) {
   if (!s || s.dead) return;
   s.dead = true;
   sessions.delete(s.id);
+  if (s.retryT) clearTimeout(s.retryT);
   try { if (s.proc) s.proc.kill('SIGKILL'); } catch (_) { /* gone */ }
   if (s.mirrorT) clearInterval(s.mirrorT);
   if (s.mirror) smb.rmdirAll(s.mirror.dir).catch(() => {});
@@ -262,6 +263,19 @@ function halt(s, why, full = true) {
   try { if (s.proc) s.proc.kill('SIGINT'); } catch (_) { /* gone */ }
   if (full) s.full = true;
   if (s.diskT) clearInterval(s.diskT);
+}
+
+/**
+ * The server gives up on this connection (a match channel that shows no picture): ffmpeg and any try it was waiting
+ * to make go at once, so the next channel is the only connection to the provider. What it recorded stays.
+ */
+function giveUp(s, why) {
+  if (!s || s.dead || s.done) return;
+  s.done = true;
+  s.retrying = false;
+  if (s.retryT) { clearTimeout(s.retryT); s.retryT = null; }
+  try { if (s.proc) s.proc.kill('SIGKILL'); } catch (_) { /* gone */ }
+  console.log('[paus] slutar försöka med kanalen:', why);
 }
 
 function stopAll(why) { for (const s of [...sessions.values()]) stop(s, why); }
@@ -310,6 +324,8 @@ function start(url, { ua, maxMin = 60, ch = '', match = false, live = false } = 
    * it cannot use the filter, start again without it (it fails at once, before anything is recorded).
    */
   const launch = (bsf) => {
+    s.lastLaunch = Date.now();
+    s.retrying = false;
     const args = ['-hide_banner', '-loglevel', 'error', '-nostats', '-user_agent', ua || DEFAULT_UA, '-rw_timeout', '20000000'];
     if (!hls) args.push('-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5');
     args.push('-fflags', '+genpts+discardcorrupt', '-i', url,
@@ -326,7 +342,7 @@ function start(url, { ua, maxMin = 60, ch = '', match = false, live = false } = 
     proc.stderr.on('data', d => { if (s.err.length < 3000) s.err += d; });
     proc.on('error', (e) => { s.err += e.message; s.done = true; });
     proc.on('close', (code) => {
-      if (s.dead) { s.done = true; return; }
+      if (s.dead || s.done) { s.done = true; return; }
       if (bsf && code && /bitstream filter/i.test(s.err) && Date.now() - s.started < 20000) { s.err = ''; launch(false); return; }
       /*
        * The provider allows one connection: the player's own stream was closed a moment ago and the provider may still
@@ -334,12 +350,14 @@ function start(url, { ua, maxMin = 60, ch = '', match = false, live = false } = 
        */
       let pieces = 0;
       try { pieces = fs.readdirSync(s.dir).filter(n => /^p\d{5}\.m4s$/.test(n)).length; } catch (_) { /* gone */ }
-      if (code && !pieces && (s.tries || 0) < 4 && Date.now() - s.started < 90e3) {
+      const most = s.match ? 2 : 4; // a match has other channels to try: the server moves on sooner
+      if (code && !pieces && (s.tries || 0) < most && Date.now() - s.started < 90e3) {
         s.tries = (s.tries || 0) + 1;
-        console.log('[paus] kanalen svarade inte (' + hideLinks(s.err.split('\n').filter(Boolean).slice(-1).join(' ')) + '), försöker igen', s.tries + '/4');
+        console.log('[paus] kanalen svarade inte (' + hideLinks(s.err.split('\n').filter(Boolean).slice(-1).join(' ')) + '), försöker igen', s.tries + '/' + most);
         s.err = '';
-        const t = setTimeout(() => { if (!s.dead) launch(bsf); }, 2500 * s.tries);
-        if (t.unref) t.unref();
+        s.retrying = true;
+        s.retryT = setTimeout(() => { s.retryT = null; if (!s.dead && !s.done && !s.halted) launch(bsf); }, 2500 * s.tries);
+        if (s.retryT.unref) s.retryT.unref();
         return;
       }
       s.done = true;
@@ -355,7 +373,7 @@ function start(url, { ua, maxMin = 60, ch = '', match = false, live = false } = 
     if (s.mirror) smb.check().catch(() => {});
     if (s.ring && dirBytes(s.dir) > STAGE_MAX()) return halt(s, 'bufferten i minnet är full', false);
     if (freeBytes(path.dirname(s.dir)) < (s.mirror ? stageMin() * 0.25 : MIN_FREE * 0.6) || (s.mirror && smb.free() && smb.free() < MIN_FREE * 0.6)) halt(s, s.mirror ? 'minnet eller Time Capsule börjar bli fullt' : 'disken börjar bli full');
-  }, 15000);
+  }, 5000);
   if (s.diskT.unref) s.diskT.unref();
   sessions.set(id, s);
   console.log(match ? '[match] spelar in' : ring ? '[live] via minnet, spelas inte in:' : '[paus] spelar in', ch || 'kanalen', ring ? '' : 'från nu (högst ' + maxMin + ' min)');
@@ -653,4 +671,4 @@ function _forget(id) {
   fs.rmSync(s.dir, { recursive: true, force: true });
 }
 
-module.exports = { stageInfo: () => ({ dir: tcMode() ? stageRoot() : rootDir(), mem: tcMode(), shmMb: Math.round(shmTotal() / 1e6), freeMb: (f => isFinite(f) ? Math.round(f / 1e6) : null)(freeBytes(fs.existsSync(rootDir()) ? rootDir() : path.dirname(rootDir()))) }), livePlaylist, _forget, wakeTC, sweepRemote, recoverTC, protect, recording, preflight, list, restore, playlistMulti, _hideLinks: hideLinks, start, get, stop, stopAll, stopPauses, matchSession, playlist, file, fileReady, length, active, pauseActive, cleanStart, rootDir };
+module.exports = { giveUp, stageInfo: () => ({ dir: tcMode() ? stageRoot() : rootDir(), mem: tcMode(), shmMb: Math.round(shmTotal() / 1e6), freeMb: (f => isFinite(f) ? Math.round(f / 1e6) : null)(freeBytes(fs.existsSync(rootDir()) ? rootDir() : path.dirname(rootDir()))) }), livePlaylist, _forget, wakeTC, sweepRemote, recoverTC, protect, recording, preflight, list, restore, playlistMulti, _hideLinks: hideLinks, start, get, stop, stopAll, stopPauses, matchSession, playlist, file, fileReady, length, active, pauseActive, cleanStart, rootDir };
