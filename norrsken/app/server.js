@@ -1434,11 +1434,22 @@ function matchRecTick() {
     if (had) {
       // still recording, or finished as planned: nothing to do; it stopped early (provider dropped it): go on
       const hs = tsbuf.get(had.sessId);
+      // the channel is tested, always: no picture 18 s after it was opened means it does not work – stop waiting
+      if (hs && !hs.done && !hs.full && now - hs.started > 18e3 && tsbuf.length(hs) === 0) {
+        console.log('[match]', m.title, '–', had.chName, 'ger ingen bild');
+        try { if (hs.proc) hs.proc.kill('SIGKILL'); } catch (_) { /* gone */ }
+        hs.done = true;
+      }
       if (hs && (!hs.done || hs.full)) continue;
       if (!hs) continue; // removed by the viewer
       had.tries = had.tries || 0;
+      // a channel that never gave a picture: the next one that shows the match at once (Full HD first, then the
+      // others, another country's last); after a whole round of them, with the usual wait between tries
+      const dry = tsbuf.length(hs) === 0;
+      if (dry && !had.dryAt) { had.dryAt = hs.started; had.chIdx = (had.chIdx || 0) + 1; }
+      const round = m.chans.length + (m.alt || []).length;
       // the whole match matters: never give up while it is on; wait a little longer each time (at most a minute)
-      if (now - (had.restartAt || 0) < matchBackoff(had.tries)) continue;
+      if (!(dry && (had.chIdx || 0) < round * 2) && now - (had.restartAt || 0) < matchBackoff(had.tries)) continue;
       if (had.tries && had.tries % 10 === 0 && had.loggedTries !== had.tries) { had.loggedTries = had.tries; console.log('[match] inspelningen av', m.title, 'har avbrutits', had.tries, 'gånger – fortsätter försöka'); }
     }
     if (tsbuf.matchSession()) break; // the provider gives one connection: the recording that runs goes on
@@ -1459,7 +1470,7 @@ function matchRecTick() {
     // the Swedish channel first; when it will not start (three tries in a row) the others take turns with it, another
     // country's broadcast last – a match recorded from Norway is better than no match
     let ch = m.ch;
-    if (had && had.tries >= 3) { const cand = m.chans.concat(m.alt || []).slice(0, 6); ch = cand[(had.tries - 2) % cand.length] || m.ch; if (ch !== m.ch) console.log('[match]', m.title, '– provar', ch.n); }
+    if (had && had.chIdx) { const cand = m.chans.concat(m.alt || []); ch = cand[had.chIdx % cand.length] || m.ch; had.dryAt = 0; console.log('[match]', m.title, '– byter till', ch.n); }
     try { startMatchRec(m, key, had, ch, now); } catch (e) { matchFailAt.set(key, now); console.error('[match]', e.message); }
   }
 }
@@ -2256,7 +2267,7 @@ function start() {
   // background refresh: catalog every 12 h, EPG every 6 h
   setInterval(() => { if (store.config.configured && catalog.ready()) catalog.load(); }, 3600e3).unref();
   setInterval(() => { if (catalog.ready()) catalog.loadEpg().catch(() => {}); }, 30 * 60e3).unref();
-  setInterval(matchRecTick, 30e3).unref(); // match recordings
+  setInterval(matchRecTick, 10e3).unref(); // match recordings (often: a channel without a picture is left within seconds)
 }
 
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { store.flush(); process.exit(0); });
