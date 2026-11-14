@@ -225,12 +225,13 @@ summary { cursor: pointer; font-weight: 650; color: #c9d3df; padding: 10px 0; }
   <section id="crestSec">
     <h2>Klubbmärken</h2>
     <p class="sub">Lägg in lagens egna märken så visas de på matchkorten och matchsidan. Tryck på ett lag och välj en bild – från Bilder på iPhonen eller en fil på datorn. Bäst blir en kvadratisk PNG med genomskinlig bakgrund. Utan bild visas lagets förkortning i klubbfärgerna.</p>
-    <div class="row" style="margin-top:14px"><button class="btn primary" type="button" id="crestBatch">Ladda upp flera på en gång</button></div>
-    <p class="help">Välj alla bilder samtidigt. Norrsken känner igen laget på filnamnet – <i>lulea.png</i>, <i>Luleå Hockey.png</i>, <i>LHF.svg</i>, <i>farjestad_logo.png</i> och <i>Manchester United.png</i> fungerar alla. Det som inte känns igen listas, så kan du lägga till det för hand.</p>
+    <div class="row" style="margin-top:14px"><button class="btn primary" type="button" id="crestDir">Välj mapp</button><button class="btn" type="button" id="crestBatch">Välj bilder</button></div>
+    <p class="help">Välj mappen med märkena (även undermappar följer med) eller markera bilderna. Norrsken känner igen laget på filnamnet – <i>lulea.png</i>, <i>Luleå Hockey.png</i>, <i>LHF.svg</i>, <i>farjestad_logo.png</i> och <i>Manchester United.png</i> fungerar alla. Det som inte känns igen listas, så kan du lägga till det för hand.</p>
     <div class="result" id="crestBatchRes"></div>
     <div id="crestList" class="crests"></div>
     <input type="file" id="crestFile" accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden>
     <input type="file" id="crestFiles" accept="image/png,image/jpeg,image/webp,image/svg+xml" multiple hidden>
+    <input type="file" id="crestFolder" webkitdirectory directory multiple hidden>
     <div class="result" id="crestRes"></div>
   </section>
 
@@ -588,15 +589,19 @@ summary { cursor: pointer; font-weight: 650; color: #c9d3df; padding: 10px 0; }
       var names = [t.id.replace(/-/g, ' '), t.name, t.short, t.ab].filter(Boolean).map(crestKey);
       names.forEach(function (n) {
         if (!n) return;
-        var len = n === k ? 1000 + n.length : (n.length >= 4 && (' ' + k + ' ').indexOf(' ' + n + ' ') >= 0) ? n.length : 0;
+        // a whole word (or the word with an s: "djurgardens"), so "aik" never wins inside "skelleftea aik"
+        var kk = ' ' + k + ' ';
+        var len = n === k ? 1000 + n.length : (n.length >= 4 && (kk.indexOf(' ' + n + ' ') >= 0 || kk.indexOf(' ' + n + 's ') >= 0)) ? n.length : 0;
         if (len > bestLen) { best = t; bestLen = len; }
       });
     });
     return best;
   }
   $('crestBatch').onclick = function () { $('crestFiles').value = ''; $('crestFiles').click(); };
-  $('crestFiles').onchange = function () {
-    var files = [].slice.call(this.files || []);
+  $('crestDir').onclick = function () { $('crestFolder').value = ''; $('crestFolder').click(); };
+  $('crestFolder').onchange = function () { crestUpload([].slice.call(this.files || []).filter(function (f) { return /\.(png|jpe?g|webp|svg)$/i.test(f.name) && !/^\./.test(f.name); })); };
+  $('crestFiles').onchange = function () { crestUpload([].slice.call(this.files || [])); };
+  function crestUpload(files) {
     if (!files.length) return;
     var plan = files.map(function (f) { return { f: f, t: crestMatch(f.name) }; });
     var taken = {};
@@ -627,7 +632,7 @@ summary { cursor: pointer; font-weight: 650; color: #c9d3df; padding: 10px 0; }
         .then(function () { next(i + 1); });
     };
     next(0);
-  };
+  }
   function loadCrests() {
     api('GET', 'api/setup/crests').then(function (r) {
       crestTeams = r.teams || [];
