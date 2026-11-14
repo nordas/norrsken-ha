@@ -610,7 +610,7 @@ summary { cursor: pointer; font-weight: 650; color: #c9d3df; padding: 10px 0; }
     files = files.slice().sort(function (a, b) { return (/\.svg$/i.test(a.name) ? 1 : 0) - (/\.svg$/i.test(b.name) ? 1 : 0); });
     var res = $('crestBatchRes');
     var done = 0, bad = [], miss = [], kinds = {}, what = [];
-    var KIND = { comp: ['liga/turnering', 'ligor/turneringar'], nat: ['annat landslag', 'andra landslag'], club: ['annan klubb', 'andra klubbar'], team: ['av dina lag', 'av dina lag'] };
+    var KIND = { comp: ['liga/turnering', 'ligor/turneringar'], nat: ['annat landslag', 'andra landslag'], club: ['annan klubb', 'andra klubbar'], swe: ['svenskt landslag', 'svenska landslag'], team: ['av dina lag', 'av dina lag'] };
     result(res, true, 'Laddar upp ' + files.length + ' bilder…');
     var headers = { 'Content-Type': 'application/octet-stream' };
     if (pin) headers['X-Pin'] = pin;
@@ -634,7 +634,7 @@ summary { cursor: pointer; font-weight: 650; color: #c9d3df; padding: 10px 0; }
           done++;
           var id = j.id || '';
           what.push(f.name + ' → ' + (j.label || id));
-          var k = /^comp-/.test(id) ? 'comp' : /^nat-/.test(id) ? 'nat' : /^club-/.test(id) ? 'club' : 'team';
+          var k = /^comp-/.test(id) ? 'comp' : /^nat-/.test(id) ? 'nat' : /^club-/.test(id) ? 'club' : /^(sverige|tre-kronor|damkronorna|juniorkronorna)/.test(id) ? 'swe' : 'team';
           kinds[k] = (kinds[k] || 0) + 1;
         }, function (e) { bad.push(f.name + ' (' + e.message + ')'); })
         .then(function () { next(i + 1); });

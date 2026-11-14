@@ -876,4 +876,5 @@ test('crest file names: Tre Kronor, Blågult and "<sport>_<herr|dam>_se" are Swe
   const c = require('../lib/crests');
   const want = { 'Tre Kronor.svg': 'tre-kronor', 'Damkronorna.png': 'damkronorna', 'Blågult.svg': 'sverige-fotboll', 'fotboll_herr_se.svg': 'sverige-fotboll', 'fotboll_dam_se.png': 'sverige-fotboll-dam', 'handboll_dam_se.svg': 'sverige-handboll-dam', 'Basket SE.svg': 'sverige-basket', 'Sevilla.png': 'club-sevilla' };
   for (const [f, id] of Object.entries(want)) assert.equal((c.keyForFile(f) || {}).key, id, f);
+  assert.equal(c.keyForFile('Fjärås.png').label, 'Fjärås', 'the name as it was written');
 });

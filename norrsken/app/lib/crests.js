@@ -120,7 +120,9 @@ function keyForFile(fileName, abbr = {}) {
   // a camera's or a screenshot's name ("IMG_2092", "Skärmavbild 2026-…") says nothing of a club
   const real = w.split(' ').filter(x => /[a-z]{3}/.test(x) && !/^(img|image|dsc|dscn|pxl|screenshot|skarmavbild|skarmbild|bild|foto|photo|untitled|scan|visa|senaste|bilder)$/.test(x));
   if (s.length < 3 || !real.length) return null;
-  return { key: 'club-' + s, label: w.replace(/\b\w/g, (x) => x.toUpperCase()) };
+  // the label keeps the name as it was written (å, ä, ö): "Fjärås.png" → Fjärås
+  const shown = String(fileName).replace(/\.[a-z0-9]{2,5}$/i, '').replace(/[_\-.]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return { key: 'club-' + s, label: (shown || w).replace(/(^|\s)(\S)/g, (x, a, b) => a + b.toUpperCase()) };
 }
 
 /**
