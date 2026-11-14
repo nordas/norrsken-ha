@@ -518,11 +518,11 @@
       var count = function (g) { return teams.filter(function (t) { return t.group === g && sel.indexOf(t.id) >= 0; }).length; };
       // first the leagues (and what is chosen, a press removes it), then the teams of one league
       var top = function (focus) {
-        var items = [{ label: 'Klar' + (sel.length ? ' – ' + sel.length + ' valda' : ''), value: '__done', icon: 'check', on: !focus }];
+        var items = [{ label: 'Klar' + (sel.length ? ' – ' + sel.length + (sel.length === 1 ? ' vald' : ' valda') : ''), value: '__done', icon: 'check', on: !focus }];
         if (sel.length) items.push({ label: 'Dina lag', head: true });
         sel.forEach(function (id) { items.push({ label: NS.teamName(id), value: 'x:' + id, icon: 'x', on: focus === 'x:' + id }); });
         items.push({ label: 'Lägg till lag', head: true });
-        groups.forEach(function (g) { var n = count(g); items.push({ label: g + (n ? '  ·  ' + n + ' valda' : ''), value: 'g:' + g, icon: 'right', on: focus === 'g:' + g }); });
+        groups.forEach(function (g) { var n = count(g); items.push({ label: g + (n ? '  ·  ' + n + (n === 1 ? ' vald' : ' valda') : ''), value: 'g:' + g, icon: 'right', on: focus === 'g:' + g }); });
         return NS.menu('Favoritlag', items, 'Välj ett eller flera. Lagens alla matcher visas på startsidan – liga, cuper och Europa.').then(function (v) {
           if (v === undefined) return 'cancel'; // "Avbryt": nothing is changed
           if (v === '__done') return;

@@ -866,3 +866,9 @@ test('sport: a foreign rerun hours later is the same match (its text gives arena
   assert.equal(r.length, 1);
   assert.deepEqual([r[0].chName, r[0].arena, r[0].kind.comp], ['Viaplay', 'Strawberry Arena', 'Nations League']);
 });
+
+test('crest file names: Tre Kronor, Blågult and "<sport>_<herr|dam>_se" are Sweden\'s own teams, not other clubs', () => {
+  const c = require('../lib/crests');
+  const want = { 'Tre Kronor.svg': 'tre-kronor', 'Damkronorna.png': 'damkronorna', 'Blågult.svg': 'sverige-fotboll', 'fotboll_herr_se.svg': 'sverige-fotboll', 'fotboll_dam_se.png': 'sverige-fotboll-dam', 'handboll_dam_se.svg': 'sverige-handboll-dam', 'Basket SE.svg': 'sverige-basket', 'Sevilla.png': 'club-sevilla' };
+  for (const [f, id] of Object.entries(want)) assert.equal((c.keyForFile(f) || {}).key, id, f);
+});

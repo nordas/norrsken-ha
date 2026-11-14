@@ -805,3 +805,7 @@ html.m .matchpage .mp-mcard { text-align: left; align-items: flex-start; }
 .matchpage .mp-comp img { height: 3rem; max-width: 12rem; object-fit: contain; display: block; }
 .matchpage .mp-mcomp { margin-left: auto; align-self: center; padding: .3rem .6rem; border-radius: .6rem; background: rgba(255,255,255,.92); display: inline-flex; }
 .matchpage .mp-mcomp img { height: 2.4rem; max-width: 8rem; object-fit: contain; display: block; }
+/* the small match card's channel and time stay on one line: a long channel name ends in … */
+.matchpage .mp-mtop { max-width: 100%; white-space: nowrap; }
+.matchpage .mp-mtop .mp-ch { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.matchpage .mp-mtop .mp-when { flex: none; }

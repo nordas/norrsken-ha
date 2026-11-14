@@ -236,7 +236,7 @@ function channelScore(name, region) {
   if (region === 'se') s += 20;
   else if (region === 'foreign') s -= 20;
   if (/^\[(viaplay no|vgtv|tv2|hbo max uk|dazn uk)\b/i.test(n)) s -= 20; // an event channel of another country's service
-  // Full HD first (what Oskar wants recorded and shown), then HD
+  // Full HD first (what is recorded and shown), then HD
   if (/\b(4k|uhd|2160p?)\b/i.test(n)) s += 6;
   else if (/\b(fhd|1080[pi]?)\b/i.test(n)) s += 5;
   else if (/\bhd\b/i.test(n)) s += 3;

@@ -609,14 +609,16 @@ summary { cursor: pointer; font-weight: 650; color: #c9d3df; padding: 10px 0; }
     if (!files.length) return;
     files = files.slice().sort(function (a, b) { return (/\.svg$/i.test(a.name) ? 1 : 0) - (/\.svg$/i.test(b.name) ? 1 : 0); });
     var res = $('crestBatchRes');
-    var done = 0, bad = [], miss = [], kinds = {};
+    var done = 0, bad = [], miss = [], kinds = {}, what = [];
+    var KIND = { comp: ['liga/turnering', 'ligor/turneringar'], nat: ['annat landslag', 'andra landslag'], club: ['annan klubb', 'andra klubbar'], team: ['av dina lag', 'av dina lag'] };
     result(res, true, 'Laddar upp ' + files.length + ' bilder…');
     var headers = { 'Content-Type': 'application/octet-stream' };
     if (pin) headers['X-Pin'] = pin;
     var next = function (i) {
       if (i >= files.length) {
-        var parts = Object.keys(kinds).map(function (k) { return kinds[k] + ' ' + k; });
-        var lines = [done + ' bilder sparade' + (parts.length ? ' (' + parts.join(', ') + ')' : '') + '.'];
+        var parts = Object.keys(kinds).map(function (k) { return kinds[k] + ' ' + KIND[k][kinds[k] === 1 ? 0 : 1]; });
+        var lines = [done + (done === 1 ? ' bild sparad' : ' bilder sparade') + (parts.length ? ' (' + parts.join(', ') + ')' : '') + '.'];
+        if (what.length && what.length <= 60) lines.push(what.join(' · ') + '.');
         if (bad.length) lines.push('Gick inte: ' + bad.join(', ') + '.');
         if (miss.length) lines.push('Känns inte igen: ' + miss.join(', ') + '.');
         result(res, !bad.length, lines.join(' '));
@@ -626,11 +628,13 @@ summary { cursor: pointer; font-weight: 650; color: #c9d3df; padding: 10px 0; }
       var f = files[i];
       res.textContent = 'Laddar upp ' + (i + 1) + ' av ' + files.length + ': ' + f.name + '…';
       fetch('api/setup/crest-auto?name=' + encodeURIComponent(f.name), { method: 'POST', headers: headers, body: f, cache: 'no-store' })
-        .then(function (r) { return r.json().then(function (j) { if (r.status === 422) return 'miss'; if (!r.ok) throw new Error(j.error || 'Fel ' + r.status); return j.id; }); })
-        .then(function (id) {
-          if (id === 'miss') { miss.push(f.name); return; }
+        .then(function (r) { return r.json().then(function (j) { if (r.status === 422) return 'miss'; if (!r.ok) throw new Error(j.error || 'Fel ' + r.status); return j; }); })
+        .then(function (j) {
+          if (j === 'miss') { miss.push(f.name); return; }
           done++;
-          var k = /^comp-/.test(id) ? 'ligor/turneringar' : /^nat-/.test(id) ? 'landslag' : /^club-/.test(id) ? 'andra klubbar' : 'dina lag';
+          var id = j.id || '';
+          what.push(f.name + ' → ' + (j.label || id));
+          var k = /^comp-/.test(id) ? 'comp' : /^nat-/.test(id) ? 'nat' : /^club-/.test(id) ? 'club' : 'team';
           kinds[k] = (kinds[k] || 0) + 1;
         }, function (e) { bad.push(f.name + ' (' + e.message + ')'); })
         .then(function () { next(i + 1); });

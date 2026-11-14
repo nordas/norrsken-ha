@@ -86,10 +86,15 @@ function followedTeam(w, abbr) {
 function keyForFile(fileName, abbr = {}) {
   const w = words(fileName);
   if (!w) return null;
-  // Sweden's own national teams, by sport and men/women
-  if (/^(sweden|sverige)\b/.test(w)) {
+  // Sweden's own national teams, by sport and men/women: "Sverige hockey", "Tre Kronor", "Blågult", "fotboll_dam_se"
+  const pick = (id) => ({ key: id, label: sport.TEAMS.find(t => t.id === id).name });
+  if (/\btre kronor\b/.test(w)) return pick('tre-kronor');
+  if (/\bdamkronorna\b/.test(w)) return pick('damkronorna');
+  if (/\b(juniorkronorna|smakronorna)\b/.test(w)) return pick('juniorkronorna');
+  if (/\bbla ?gult\b/.test(w)) return pick(/\bdam/.test(w) ? 'sverige-fotboll-dam' : 'sverige-fotboll');
+  const SPORTS = /(hockey|fotboll|football|soccer|handboll|handball|innebandy|floorball|bandy|basket|curling|landslag)/;
+  if (/^(sweden|sverige)\b/.test(w) || /\b(se|swe|sverige|sweden)\b/.test(w) && SPORTS.test(w)) {
     const dam = /\b(women|womens|dam|damer)\b/.test(w);
-    const pick = (id) => ({ key: id, label: sport.TEAMS.find(t => t.id === id).name });
     if (/hockey/.test(w)) return pick(/junior|u20/.test(w) ? 'juniorkronorna' : dam ? 'damkronorna' : 'tre-kronor');
     if (/handball|handboll/.test(w)) return pick(dam ? 'sverige-handboll-dam' : 'sverige-handboll');
     if (/floorball|innebandy/.test(w)) return pick(dam ? 'sverige-innebandy-dam' : 'sverige-innebandy');
