@@ -627,7 +627,7 @@ route('GET', '/api/page/:page', (req, res, q, p) => {
 });
 
 // the clubs' own abbreviations, as on the scoreboard
-const ABBR = { lulea: 'LHF', bjorkloven: 'IFB', brynas: 'BIF', djurgarden: 'DIF', frolunda: 'FHC', farjestad: 'FBK', hv71: 'HV71', linkoping: 'LHC', malmo: 'MIF', rogle: 'RBK', skelleftea: 'SAIK', timra: 'TIK', vaxjo: 'VLH', orebro: 'ÖRE', leksand: 'LIF', modo: 'MODO', aik: 'AIK', 'tre-kronor': 'SWE',
+const ABBR = { lulea: 'LHF', bjorkloven: 'IFB', brynas: 'BIF', djurgarden: 'DIF', frolunda: 'FHC', farjestad: 'FBK', hv71: 'HV71', linkoping: 'LHC', malmo: 'MIF', rogle: 'RBK', skelleftea: 'SAIK', timra: 'TIK', vaxjo: 'VLH', orebro: 'ÖRE', leksand: 'LIF', modo: 'MODO', aik: 'AIK', 'tre-kronor': 'SWE', damkronorna: 'SWE', juniorkronorna: 'SWE', 'sverige-fotboll': 'SWE', 'sverige-fotboll-dam': 'SWE', 'sverige-u21': 'SWE', 'sverige-handboll': 'SWE', 'sverige-handboll-dam': 'SWE', 'sverige-bandy': 'SWE', 'sverige-bandy-dam': 'SWE', 'sverige-innebandy': 'SWE', 'sverige-innebandy-dam': 'SWE', 'sverige-basket': 'SWE', 'sverige-basket-dam': 'SWE', 'sverige-curling': 'SWE', 'sverige-curling-dam': 'SWE',
   arsenal: 'ARS', 'aston-villa': 'AVL', bournemouth: 'BOU', brentford: 'BRE', brighton: 'BHA', chelsea: 'CHE', coventry: 'COV', 'crystal-palace': 'CRY', everton: 'EVE', fulham: 'FUL', hull: 'HUL', ipswich: 'IPS', leeds: 'LEE', liverpool: 'LIV', 'man-city': 'MCI', 'man-utd': 'MUN', newcastle: 'NEW', nottingham: 'NFO', sunderland: 'SUN', tottenham: 'TOT' };
 /*
  * Club crests are the clubs' own: none ship with Norrsken. The user's own picture files are shown when they are put in
@@ -697,11 +697,15 @@ function autoRecs(m) {
 }
 function teamsOf(st) {
   const p = (st && st.prefs) || {};
-  if (Array.isArray(p.teams)) return sport.teamIds(p.teams);
-  return sport.teamIds(p.team === undefined ? 'lulea' : p.team);
+  const ids = Array.isArray(p.teams) ? p.teams : [p.team === undefined ? 'lulea' : p.team];
+  // before 1.16.3 Sweden's hockey and football matches were always followed; until the profile chooses its
+  // national teams itself (the team picker saves `nations`), they still are
+  return sport.teamIds(p.nations ? ids : ids.concat(sport.NATION_DEFAULT));
 }
 /** One side of a match for the card: short name, colours, abbreviation, the user's crest picture. */
 function matchSide(n, m, base) {
+  // Sweden in a national team's match: that team (its own crest: SvFF's for football, Tre Kronor's for hockey …)
+  if (n && m.team && m.team.group === 'Landslag' && /sverige|sweden|kronorna|bl[åa]gult|landslaget/i.test(n)) return { id: m.team.id, n: 'Sverige', col: m.team.col, ab: 'SWE', img: crestUrl(m.team.id, base) };
   const foot = m.kind && m.kind.sport === 'Fotboll';
   const pool = sport.TEAMS.filter(x => (x.sport === 'football') === foot);
   { const t = n && pool.find(x => x.re.test(n)); return t ? { id: t.id, n: t.short, col: t.col, ab: ABBR[t.id] || '', img: crestUrl(t.id, base) } : n ? { n, col: null, ab: '', img: '' } : null; }
@@ -824,7 +828,7 @@ route('POST', '/api/state/:profile/prefs', async (req, res, q, p) => {
   const pr = st.prefs || (st.prefs = {});
   for (const k of ['sub', 'audio']) if (typeof b[k] === 'string') pr[k] = b[k].toLowerCase().replace(/[^a-z-]/g, '').slice(0, 12);
   // several favourite teams; `team` (the first, or 'none') stays for a screen still running the older app
-  if (Array.isArray(b.teams)) { pr.teams = sport.teamIds(b.teams); pr.team = pr.teams[0] || 'none'; }
+  if (Array.isArray(b.teams)) { pr.teams = sport.teamIds(b.teams); pr.team = pr.teams[0] || 'none'; pr.nations = true; }
   else if (typeof b.team === 'string') { pr.team = sport.teamId(b.team); pr.teams = sport.teamIds(pr.team); }
   store.saveState();
   ok(res, { ok: true, prefs: pr });

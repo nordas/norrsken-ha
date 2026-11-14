@@ -93,7 +93,7 @@ Bara det här spelas in av sig självt: **Luleå Hockeys matcher** (alltid) och,
 
 ## Favoritlag
 
-Under **Favoritlag** väljer du ett eller flera lag: SHL-lagen, Tre Kronor och alla 20 lag i Premier League 2026/27. Lagens matcher de närmaste dagarna visas i raden **Dina lags matcher** på startsidan och under Live-tv – alla matcher tv-guiden har, oavsett liga eller cup (Premier League, FA-cupen, Ligacupen, Champions League …). Matcher utan tv-guide hos leverantören syns inte. När en match med ett favoritlag börjar säger Norrsken till av sig självt (**Titta** byter dit); mitt i en film blir det bara en kort rad.
+Under **Favoritlag** väljer du ett eller flera lag: SHL-lagen, alla 20 lag i Premier League 2026/27 och Sveriges landslag var för sig – ishockey (Tre Kronor, Damkronorna, Juniorkronorna), fotboll (herr, dam, U21), handboll, bandy, innebandy, basket och curling (herr och dam). Lagens matcher de närmaste dagarna visas i raden **Dina lags matcher** på startsidan och under Live-tv – alla matcher tv-guiden har, oavsett liga eller cup (Premier League, FA-cupen, Ligacupen, Champions League …). Matcher utan tv-guide hos leverantören syns inte. När en match med ett favoritlag börjar säger Norrsken till av sig självt (**Titta** byter dit); mitt i en film blir det bara en kort rad.
 
 ## AirPlay-loggen
 

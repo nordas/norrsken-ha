@@ -23,7 +23,31 @@ const TEAMS = [
   { id: 'leksand', name: 'Leksands IF', short: 'Leksand', re: /leksand/i, col: ['#0b4fa0', '#ffffff'] },
   { id: 'modo', name: 'Modo Hockey', short: 'Modo', re: /\bmodo\b/i, col: ['#c8102e', '#00843d'] },
   { id: 'aik', name: 'AIK', short: 'AIK', re: /\baik\b(?! fotboll)/i, col: ['#0a2240', '#f5c400'] },
-  { id: 'tre-kronor', name: 'Tre Kronor', short: 'Sverige', re: /tre kronor|sverige|sweden/i, col: ['#005293', '#fecb00'] },
+];
+/*
+ * Sweden's national teams, each its own favourite: the sport, men or women, seniors or juniors. A match is
+ * Sweden's when "Sverige"/"Sweden" (or the team's nickname) is one side of "A – B"; which team it is comes from
+ * what the title, description and channel say (classify). Nothing said about the sport on an event channel
+ * ("Sverige – Bosnien" at 18:30) is read as the men's football team, the one that usually plays such a match.
+ */
+const SWE = ['#005293', '#fecb00'];
+const NATIONS = [
+  { id: 'tre-kronor', name: 'Tre Kronor', want: { sport: 'Ishockey', gender: 'Herr' }, nick: /tre kronor/i },
+  { id: 'damkronorna', name: 'Damkronorna', want: { sport: 'Ishockey', gender: 'Dam' }, nick: /damkronorna/i },
+  { id: 'juniorkronorna', name: 'Juniorkronorna (U20)', want: { sport: 'Ishockey', youth: true }, nick: /juniorkronorna|småkronorna/i },
+  { id: 'sverige-fotboll', name: 'Fotboll herr (Blågult)', want: { sport: 'Fotboll', gender: 'Herr', fallback: true }, nick: /bl[åa]gult|herrlandslaget/i },
+  { id: 'sverige-fotboll-dam', name: 'Fotboll dam', want: { sport: 'Fotboll', gender: 'Dam' }, nick: /damlandslaget/i },
+  { id: 'sverige-u21', name: 'Fotboll U21', want: { sport: 'Fotboll', youth: true }, nick: /u-?21-?landslaget/i },
+  { id: 'sverige-handboll', name: 'Handboll herr', want: { sport: 'Handboll', gender: 'Herr' }, nick: /handbollsherrarna/i },
+  { id: 'sverige-handboll-dam', name: 'Handboll dam', want: { sport: 'Handboll', gender: 'Dam' }, nick: /handbollsdamerna/i },
+  { id: 'sverige-bandy', name: 'Bandy herr', want: { sport: 'Bandy', gender: 'Herr' } },
+  { id: 'sverige-bandy-dam', name: 'Bandy dam', want: { sport: 'Bandy', gender: 'Dam' } },
+  { id: 'sverige-innebandy', name: 'Innebandy herr', want: { sport: 'Innebandy', gender: 'Herr' } },
+  { id: 'sverige-innebandy-dam', name: 'Innebandy dam', want: { sport: 'Innebandy', gender: 'Dam' } },
+  { id: 'sverige-basket', name: 'Basket herr', want: { sport: 'Basket', gender: 'Herr' } },
+  { id: 'sverige-basket-dam', name: 'Basket dam', want: { sport: 'Basket', gender: 'Dam' } },
+  { id: 'sverige-curling', name: 'Curling herr', want: { sport: 'Curling', gender: 'Herr' } },
+  { id: 'sverige-curling-dam', name: 'Curling dam', want: { sport: 'Curling', gender: 'Dam' } },
 ];
 // Premier League 2026/27. Every match the club plays counts (league, the cups, Europe): its name in a "A – B" title.
 const PL = [
@@ -48,7 +72,8 @@ const PL = [
   { id: 'sunderland', name: 'Sunderland', short: 'Sunderland', re: /sunderland/i, col: ['#eb172b', '#ffffff'] },
   { id: 'tottenham', name: 'Tottenham Hotspur', short: 'Tottenham', re: /tottenham/i, col: ['#132257', '#ffffff'] },
 ];
-for (const t of TEAMS) { t.sport = 'hockey'; t.group = t.id === 'tre-kronor' ? 'Landslag' : 'Ishockey'; }
+for (const t of TEAMS) { t.sport = 'hockey'; t.group = 'Ishockey'; }
+for (const t of NATIONS) { t.short = 'Sverige'; t.col = SWE; t.sport = 'nation'; t.group = 'Landslag'; t.re = new RegExp('sverige|sweden' + (t.nick ? '|' + t.nick.source : ''), 'i'); TEAMS.push(t); }
 for (const t of PL) { t.sport = 'football'; t.group = 'Premier League'; TEAMS.push(t); }
 const BY_ID = new Map(TEAMS.map(t => [t.id, t]));
 
@@ -65,6 +90,8 @@ function teamId(v) {
 }
 function team(id) { return BY_ID.get(id) || null; }
 function list() { return TEAMS.map(t => ({ id: t.id, name: t.name, group: t.group })); }
+/** The national teams a profile from before 1.16.3 followed without choosing them (Sweden's hockey and football). */
+const NATION_DEFAULT = ['tre-kronor', 'sverige-fotboll'];
 /** The profile's favourite teams as ids: a list, one id, or 'none'. Unknown ones are left out; at most 12. */
 function teamIds(v) {
   const out = [];
@@ -167,7 +194,9 @@ function eventOf(name, now = Date.now()) {
 const EVENT_LEN = 4 * 3600e3; // the name only says when it starts: a hockey broadcast with overtime and shootout
 
 /* What the start page follows besides the favourite team: Sweden (hockey or football) and the skiing world cups. */
-const SWE_SIDE = /(^|[:\s])(sverige|tre kronor|damkronorna|sweden)\s+[-–—]\s+\S|\S\s+[-–—]\s+(sverige|tre kronor|damkronorna|sweden)(\s|$|[,(])/i;
+const SWE_NAMES = 'sverige|sweden|tre kronor|damkronorna|juniorkronorna|småkronorna|bl[åa]gult|damlandslaget|herrlandslaget';
+const SWE_SIDE = new RegExp('(^|[:\\s])(' + SWE_NAMES + ')\\s+[-–—]\\s+\\S|\\S\\s+[-–—]\\s+(' + SWE_NAMES + ')(\\s|$|[,(])', 'i');
+const JUNIOR = /\bjvm\b|junior-?vm|\bu-?(?:18|19|20|21)\b|\bj-?(?:18|20)\b|\bjunior/i;
 const FOOTBALL = /fotboll|football|soccer|landskamp|vm-kval|em-kval|nations league|\bvm\b|\bem\b|\bos\b|fifa|uefa/i;
 const YOUTH = /\b(u\d{2}[pfdj]?|j\d{2}|junior|ungdom|damjunior)\b/i;
 const OTHER_SPORT = /handboll|bandy|innebandy|basket|volley|curling|tennis|padel|rugby|friidrott|simning|e-?sport|golf|dart/i;
@@ -228,6 +257,24 @@ function classify(title, desc, chName, fallbackSport) {
 
 /** The favourite team as something to follow: its name in the title, and hockey. */
 function teamFollow(fav) {
+  if (fav.sport === 'nation') {
+    const w = fav.want;
+    return {
+      id: fav.id, name: fav.name, short: 'Sverige', col: SWE, maxLen: 5 * 3600e3, vs: fav, sport: w.sport, nation: true, youth: !!w.youth,
+      ok: (t, d, chn, ev) => {
+        if (!SWE_SIDE.test(t)) return false;
+        const k = classify(t, d, chn, '');
+        const nick = fav.nick && fav.nick.test(t + ' ' + d);
+        const sport = k.sport || (w.fallback && (ev || !d) ? w.sport : '');
+        if (sport !== w.sport) return false;
+        const young = !!k.age || JUNIOR.test(t + ' ' + d);
+        if (!!w.youth !== young && !nick) return false;
+        if (w.gender === 'Dam' && k.gender !== 'Dam' && !nick) return false;
+        if (w.gender === 'Herr' && k.gender === 'Dam') return false;
+        return true;
+      },
+    };
+  }
   if (fav.sport === 'football') {
     return {
       id: fav.id, name: fav.name, short: fav.short, col: fav.col, maxLen: 4 * 3600e3, vs: fav, sport: 'Fotboll',
@@ -259,9 +306,10 @@ function collect(follows, channels, epg, now, days = 1) {
     if (s >= day.end) return;
     if (s < day.start && now >= e) return; // yesterday's: only while it is still on (a late match past midnight)
     if (NOT_LIVE.test(t)) return;
-    if (YOUTH.test(t)) return; // U14, J20 …: the club's youth teams, not the team
+    const youth = YOUTH.test(t); // U14, J20 …: a club's youth teams are not the team (Juniorkronorna is a team)
     d = d || '';
     for (const f of follows) {
+      if (youth && !f.youth) continue;
       if (!f.ok(t, d, ch.n || '', ev)) continue;
       if (e - s > f.maxLen) continue; // hours of the same thing: a re-run block, not the event
       const mu = f.vs ? matchup(t, f.vs) : null;
@@ -297,8 +345,9 @@ function collect(follows, channels, epg, now, days = 1) {
     if (swe.length) chans = swe;
     const f = best.f;
     const kind = classify(best.t, best.d, chans[0].n || '', f.id === 'langd' ? 'Längdskidor' : f.id === 'skidskytte' ? 'Skidskytte' : (f.vs && f.id !== 'sverige') ? (f.sport || 'Ishockey') : '');
+    if (f.nation && !kind.sport) { kind.sport = f.sport; kind.label = [f.sport, kind.label].filter(Boolean).join(' · '); }
     return {
-      team: { id: f.id, name: f.name, short: f.short, col: f.col },
+      team: { id: f.id, name: f.name, short: f.short, col: f.col, group: f.nation ? 'Landslag' : (f.vs && f.vs.group) || '' },
       kind, label: kind.label || f.name,
       state: best.s > now ? 'soon' : now < best.e ? 'live' : 'ended',
       title: best.mu ? best.mu.home + ' – ' + best.mu.away : best.t,
@@ -322,7 +371,7 @@ function matchesToday(teamIdValue, channels, epg, { now = Date.now() } = {}) {
 
 /** What the start page shows today: the favourite team, Sweden (hockey/football), the skiing world cups. */
 function followsFor(teamIdValue) {
-  return teamIds(teamIdValue).map(id => teamFollow(team(id))).concat([FOLLOW.sverige, FOLLOW.langd, FOLLOW.skidskytte]);
+  return teamIds(teamIdValue).map(id => teamFollow(team(id))).concat([FOLLOW.langd, FOLLOW.skidskytte]);
 }
 /** The favourites' matches from now and `days` days ahead, in the order they are played (what is on now first). */
 function upcoming(teamIdValue, channels, epg, { now = Date.now(), days = 7 } = {}) {
@@ -342,4 +391,4 @@ function findMatch(teamIdValue, channels, epg, opts = {}) {
   return todayAll(teamIdValue, channels, epg, opts)[0] || null;
 }
 
-module.exports = { regionOf, classify, TEAMS, teamId, teamIds, upcoming, recToday, team, list, matchup, findMatch, matchesToday, todayAll, channelScore, stockholmDay, stockholmTime, eventOf };
+module.exports = { NATION_DEFAULT, regionOf, classify, TEAMS, teamId, teamIds, upcoming, recToday, team, list, matchup, findMatch, matchesToday, todayAll, channelScore, stockholmDay, stockholmTime, eventOf };

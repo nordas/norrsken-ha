@@ -250,7 +250,7 @@ test('sport: TV4 Play event channels carry the match in their name (no TV guide)
   assert.equal(sport.findMatch('lulea', chans, null, { now: Date.UTC(2026, 9, 25, 18) }).state, 'live');
 });
 
-test('sport: the start page also follows Sweden (hockey, football) and the skiing world cups', () => {
+test('sport: Sweden\'s national teams (chosen like any team) and the skiing world cups', () => {
   const sport = require('../lib/sport');
   const now = Date.UTC(2026, 10, 28, 10); // 28 Nov 2026, 11:00 Swedish time
   const day = sport.stockholmDay(now), H = 3600e3;
@@ -264,18 +264,22 @@ test('sport: the start page also follows Sweden (hockey, football) and the skiin
     ['svt1', [at(8, 2, 'Längdskidor: Världscupen', '10 km fri stil damer, Ruka.'), at(13, 1.5, 'Skidskytte: Världscupen', 'Sprint herrar.'), at(15, 1, 'Sverige idag'), at(16, 1, 'Handboll: Sverige - Norge')]],
     ['es1', [at(10.5, 2, 'Fotboll: Sverige - Danmark', 'Landskamp'), at(20, 1, 'Ishockey: Tre Kronor - Finland', 'Karjala Cup')]],
   ]) };
-  const all = sport.todayAll('lulea', chans, epg, { now });
+  const favs = ['lulea', 'tre-kronor', 'sverige-fotboll'];
+  const all = sport.todayAll(favs, chans, epg, { now });
   const got = all.map(m => m.state + ' ' + m.team.id + ' ' + m.title);
   assert.deepEqual(got, [
-    'live sverige Sverige – Danmark',
+    'live sverige-fotboll Sverige – Danmark',
     'soon skidskytte Skidskytte: Världscupen',
     'soon lulea Luleå – Brynäs',
-    'soon sverige Sverige – Finland',
-    'soon sverige Sverige – Schweiz',
+    'soon tre-kronor Sverige – Finland',
+    'soon sverige-fotboll Sverige – Schweiz', // an event channel says nothing of the sport: the men's football team
     'ended langd Längdskidor: Världscupen',
   ]);
   // the billboard takes the first; Sverige idag and handball are not followed
-  assert.equal(sport.findMatch('lulea', chans, epg, { now }).title, 'Sverige – Danmark');
+  assert.equal(sport.findMatch(favs, chans, epg, { now }).title, 'Sverige – Danmark');
+  // the handball match is followed once the handball team is chosen
+  assert.ok(sport.todayAll(['sverige-handboll'], chans, epg, { now }).some(m => m.team.id === 'sverige-handboll' && m.title === 'Sverige – Norge'));
+  assert.equal(sport.todayAll(['lulea'], chans, epg, { now }).filter(m => /Sverige/.test(m.title)).length, 0);
   // the recordings stay with the favourite team only
   assert.deepEqual(sport.matchesToday('lulea', chans, epg, { now }).map(m => m.title), ['Luleå – Brynäs']);
 });
@@ -783,4 +787,22 @@ test('club crests: uploaded in /setup (PIN), checked by their bytes, shown at /c
   r = await fetch(base + '/api/setup/crest/lulea', { method: 'DELETE', headers: hdr });
   assert.equal(r.status, 200);
   assert.equal((await fetch(base + '/crest/lulea')).status, 404);
+});
+
+test('sport: every Swedish national team on its own – sport, women/men, juniors', () => {
+  const sport = require('../lib/sport');
+  const now = Date.UTC(2026, 10, 14, 9), h = 3600e3;
+  const ch = [{ id: 1, n: '[Viapaly SE] (14/11) 18:30 Sverige - Bosnien-Hercegovina', region: 'se', epg: '' }, { id: 2, n: 'TV4 Hockey FHD', region: 'se', epg: 'a' }, { id: 3, n: 'SVT1 FHD', region: 'se', epg: 'b' }, { id: 4, n: 'TV4 Fotboll', region: 'se', epg: 'c' }];
+  const epg = { map: new Map([
+    ['a', [[now + 2 * h, now + 5 * h, 'Sverige - Finland', 'Ishockey, Euro Hockey Tour.'], [now + 6 * h, now + 9 * h, 'Sverige - USA', 'Damkronorna möter USA i ishockey.'], [now + 26 * h, now + 29 * h, 'JVM: Sverige - Kanada', 'Ishockey, junior-VM.']]],
+    ['b', [[now + 3 * h, now + 5 * h, 'Handboll: Sverige - Norge', 'EM-kval, damer.'], [now + 30 * h, now + 32 * h, 'Sverige - Danmark', 'Handbollslandskamp, herrar.']]],
+    ['c', [[now + 50 * h, now + 52 * h, 'Sverige - Spanien (dam)', 'Fotboll, Nations League.'], [now + 70 * h, now + 72 * h, 'Sverige - Italien', 'U21-landskamp i fotboll.']]],
+  ]) };
+  const nations = sport.TEAMS.filter(t => t.group === 'Landslag').map(t => t.id);
+  assert.ok(nations.length >= 16);
+  const got = sport.upcoming(nations, ch, epg, { now, days: 5 }).map(m => m.team.id + ' ' + m.title);
+  assert.deepEqual(got, ['tre-kronor Sverige – Finland', 'sverige-handboll-dam Sverige – Norge', 'damkronorna Sverige – USA', 'sverige-fotboll Sverige – Bosnien-Hercegovina',
+    'juniorkronorna Sverige – Kanada', 'sverige-handboll Sverige – Danmark', 'sverige-fotboll-dam Sverige – Spanien', 'sverige-u21 Sverige – Italien']);
+  // only the chosen ones
+  assert.deepEqual(sport.upcoming(['damkronorna'], ch, epg, { now, days: 5 }).map(m => m.title), ['Sverige – USA']);
 });
