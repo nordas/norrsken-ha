@@ -53,7 +53,8 @@ const KEEP_LOCAL = () => Math.max(3, Math.min(8, Math.floor(ofShm(0.5, 64e6) / 8
 // few stalls, a short pause) then never waits for the Time Capsule, which is slow to fetch from (one SMB1 login a go)
 const LOCAL_BUDGET = () => ofShm(0.25, (+process.env.NSK_LOCAL_MB || 150) * 1e6);
 const LOCAL_FOR_MS = +process.env.NSK_PAUSE_LOCAL_MS || 60e3; // a piece fetched back stays this long, then leaves again
-const RING = () => Math.max(6, Math.min(20, Math.floor(ofShm(0.5, 80e6) / 4e6))); // live without the Time Capsule: this many pieces (up to 80 s) in memory, no more
+const RING_SEC = 2; // live through memory: short pieces, so a channel starts in a few seconds (a pause keeps 4 s pieces)
+const RING = () => Math.max(8, Math.min(40, Math.floor(ofShm(0.5, 80e6) / 2e6))); // live without the Time Capsule: this many pieces (up to 80 s) in memory, no more
 const STAGE_MAX = () => ofShm(0.8, (+process.env.NSK_STAGE_MAX_MB || 300) * 1e6); // the buffer of one recording never grows past this
 const TC_GRACE_MS = +process.env.NSK_TC_GRACE_MS || 120e3; // the Time Capsule may be away this long, then the recording stops
 const KEEP_MS = 24 * 3600e3; // hard: nothing is kept longer, here or on the Time Capsule
@@ -334,11 +335,13 @@ function start(url, { ua, maxMin = 60, ch = '', match = false, live = false } = 
     s.lastLaunch = Date.now();
     s.retrying = false;
     const args = ['-hide_banner', '-loglevel', 'error', '-nostats', '-user_agent', ua || DEFAULT_UA, '-rw_timeout', '20000000'];
+    // live through memory: ffmpeg looks at the channel for 2 s, not its usual 5, before the first piece
+    if (ring) args.push('-analyzeduration', '2000000', '-probesize', '3000000');
     if (!hls) args.push('-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5');
     args.push('-fflags', '+genpts+discardcorrupt', '-i', url,
       '-map', '0:v:0?', '-map', '0:a:0?', '-c', 'copy');
     if (bsf) args.push('-bsf:a', 'aac_adtstoasc');
-    args.push('-t', String(Math.max(1, maxMin) * 60), '-f', 'hls', '-hls_time', '4');
+    args.push('-t', String(Math.max(1, maxMin) * 60), '-f', 'hls', '-hls_time', String(ring ? RING_SEC : 4));
     // ring (live only, no Time Capsule): a sliding list of the newest pieces, ffmpeg removes the older ones
     if (ring) args.push('-hls_list_size', String(RING()), '-hls_flags', 'independent_segments+temp_file+delete_segments');
     else args.push('-hls_list_size', '0', '-hls_playlist_type', 'event', '-hls_flags', 'independent_segments+temp_file');
@@ -558,7 +561,7 @@ function livePlaylist(list, prefix, { window = AIR_WINDOW } = {}) {
     let dur = 0; let t = s.started || Date.now(); let first = true;
     // live through memory only: the list slides, its first piece is not the recording's first
     const sq = s.ring ? +((/#EXT-X-MEDIA-SEQUENCE:(\d+)/.exec(text) || [])[1] || 0) : 0;
-    if (sq) { seq0 = sq; t += sq * 4000; }
+    if (sq) { seq0 = sq; t += sq * RING_SEC * 1000; }
     for (const l of text.split('\n')) {
       if (l.startsWith('#EXTINF:')) { dur = parseFloat(l.slice(8)) || 0; continue; }
       if (!l || l[0] === '#' || !dur) continue;
