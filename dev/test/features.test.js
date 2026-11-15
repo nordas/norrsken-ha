@@ -824,7 +824,7 @@ test('sport: the same national match on two services in two languages is one mat
   const r = sport.upcoming(['sverige-fotboll'], ch, { map: new Map() }, { now });
   assert.equal(r.length, 1);
   assert.deepEqual([r[0].title, r[0].chName, r[0].foreign, r[0].chans.map(c => c.id)], ['Sverige – Bosnien-Hercegovina', 'Viaplay', false, [1]]);
-  assert.deepEqual(sport.countryOf('Bosnia-Herzegovina'), { flag: 'BA', ab: 'BIH' });
+  assert.deepEqual(sport.countryOf('Bosnia-Herzegovina'), { flag: 'BA', ab: 'BIH', sv: 'Bosnien' });
   assert.equal(sport.countryOf('Luleå'), null);
 });
 
