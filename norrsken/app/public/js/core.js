@@ -232,7 +232,12 @@
   NS.steadyLive = function (it) {
     if (!it) return false;
     if (NS.store.get('steadyIds', []).indexOf(String(it.id)) >= 0) return true;
-    return !NS.store.get('steadyOff', false) && STEADY_RE.test(String(it.n || ''));
+    if (NS.store.get('steadyOff', false)) return false;
+    // Safari on a Mac stalled about once a minute playing channels straight from the provider (the log): every
+    // channel through the server there, as on iPhone and iPad
+    var ua = navigator.userAgent;
+    if (/Macintosh/.test(ua) && /Safari/.test(ua) && !/Chrome|Chromium|Edg\//.test(ua)) return true;
+    return STEADY_RE.test(String(it.n || ''));
   };
   NS.steadyLearn = function (it) {
     var ids = NS.store.get('steadyIds', []).filter(function (x) { return x !== String(it.id); });
