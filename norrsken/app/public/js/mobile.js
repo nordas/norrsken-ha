@@ -927,6 +927,8 @@
       if (s.configured && !s.ok) this.info.appendChild(h('p', { class: 'm-dl-warn', text: 'Lagringsdisken hittas inte (' + (s.err || 'okänt fel') + '). Tills den fungerar sparas filerna på tilläggets egen disk.' }));
       else this.info.appendChild(h('p', { text: (s.onNetwork ? 'Sparas på nätverksdisken' : 'Sparas på tilläggets egen disk') + (s.freeGb ? '  ·  ' + s.freeGb + ' GB ledigt' : '') }));
     }
+    // where a film goes when it is saved on this iPhone/iPad (to watch without the server, e.g. on a flight)
+    this.info.appendChild(h('p', { class: 'm-dl-how', text: 'Spela utan nät: tryck på pilen vid en klar film. Den sparas i appen Filer → Hämtade filer (eller den mapp Safari är inställd på) och spelas därifrån.' }));
     this.list.innerHTML = '';
     if (!NS.dl.items.length) {
       this.list.appendChild(h('div', { class: 'm-empty' }, [h('h2', { text: 'Inget nedladdat än' }), h('p', { text: NS.dl.on ? 'Tryck på Ladda ner på en film eller ett avsnitt. Filerna sparas på servern och spelas därifrån, utan att använda leverantörens anslutning.' : 'Nedladdning kräver ffmpeg på servern.' })]));

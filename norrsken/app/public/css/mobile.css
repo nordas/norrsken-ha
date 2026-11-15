@@ -696,3 +696,27 @@ html .player.touch .osd .lctl.tl .btn { flex: 1 1 0; max-width: 96px; }
   .player.touch .panel-side.right.on { transform: translateY(0); }
   .player.touch .panel-side.right .tracks { position: absolute; top: 56px; left: 8px; right: 8px; bottom: 0; }
 }
+.m-dl-how { margin-top: 6px; font-size: 13px; line-height: 1.4; color: var(--dim); }
+
+/* the phone player, round 2 (2026-11-15): no glass discs (they turned muddy over bright pictures and crowded each
+   other) – the picture dims a little while the controls show, and the three middle controls are plain white icons */
+.player.touch .osd::before { content: ''; position: absolute; inset: 0; background: rgba(0,0,0,.32); opacity: 0; transition: opacity .2s; pointer-events: none; }
+.player.touch .osd.on::before { opacity: 1; }
+.player.touch .tmid { gap: clamp(48px, 12vw, 120px); }
+.player.touch .tmid .tbtn, .player.touch .tmid .tplay { background: none !important; -webkit-backdrop-filter: none; backdrop-filter: none; filter: drop-shadow(0 2px 8px rgba(0,0,0,.6)); }
+.player.touch .tmid .tbtn { width: 56px; height: 56px; font-size: 34px; }
+.player.touch .tmid .tplay { width: 76px; height: 76px; font-size: 56px; }
+.player.touch .tmid .tbtn:active { transform: scale(.88); background: none !important; }
+/* landscape: the bar and the buttons share the bottom like a film player – less height taken from the picture */
+@media (orientation: landscape) and (max-height: 500px) {
+  .player.touch .osd .bar { left: 72px; right: 72px; bottom: calc(58px + env(safe-area-inset-bottom)); }
+  .player.touch .osd .times { left: 72px; right: 72px; bottom: calc(40px + env(safe-area-inset-bottom)); }
+  html.m .player.touch .osd .obtns, .player.touch .osd .obtns { left: 64px; right: 64px; bottom: calc(2px + env(safe-area-inset-bottom)); }
+  html.m .player.touch .osd .obtns .btn, .player.touch .osd .obtns .btn { flex-direction: row; gap: 6px; font-size: 13px; padding: 6px 10px; }
+  html.m .player.touch .osd .obtns .btn svg, .player.touch .osd .obtns .btn svg { width: 19px; height: 19px; font-size: 19px; }
+  .player.touch .osd .ttl { left: 72px; }
+  .player.touch .tclose { left: 20px; }
+  .player.touch .tair { right: 20px; }
+}
+.player.touch .tmid .tbtn { font-size: 42px; }
+.player.touch .tmid .tplay { font-size: 64px; }

@@ -48,7 +48,7 @@ function configure(d) { deps = Object.assign(deps, d); load(); }
 /** What the app shows. */
 function view(it) {
   const r = run.get(it.id);
-  return { id: it.id, type: it.type, mid: it.mid, ext: it.ext, title: it.title, sub: it.sub, img: it.img, status: it.status, pct: Math.round((it.pct || 0) * 1000) / 10, bytes: it.bytes || 0, dur: it.dur || 0, err: it.err || '', created: it.created, done: it.done || 0, active: !!r, file: it.status === 'done' ? it.id + '/' + encodeURIComponent((it.title || 'film').replace(/[\\/:*?"<>|]+/g, ' ').trim() || 'film') + '.mp4' : '' };
+  return { id: it.id, type: it.type, mid: it.mid, ext: it.ext, title: it.title, sub: it.sub, img: it.img, status: it.status, pct: Math.round((it.pct || 0) * 1000) / 10, q: it.q || 'orig', bytes: it.bytes || 0, dur: it.dur || 0, err: it.err || '', created: it.created, done: it.done || 0, active: !!r, file: it.status === 'done' ? it.id + '/' + encodeURIComponent((it.title || 'film').replace(/[\\/:*?"<>|]+/g, ' ').trim() || 'film') + '.mp4' : '' };
 }
 // newest batch first; inside a batch (a season) in the order it was queued
 function list() { load(); return [...items.values()].sort((a, b) => (b.created - a.created) || (a.ord || 0) - (b.ord || 0)).map(view); }
@@ -63,13 +63,17 @@ function fileOf(it) { return path.join(it.dir || dir(), it.id + '.mp4'); }
 
 /** Queue a film or episode. Returns the item (already existing ones are left alone, a failed one is retried). */
 let seq = 0;
-function add({ type, id, ext, title, sub, img, at }) {
+// the qualities one can save in: the original as the provider sends it, or made smaller on the server (H.264, plays
+// everywhere, also offline on an iPad): height, quality and the most it may take per second
+const QUALITY = { '1080': { h: 1080, crf: 21, max: '8M' }, '720': { h: 720, crf: 22, max: '4M' }, '480': { h: 480, crf: 23, max: '1800k' } };
+const qOf = (q) => (QUALITY[String(q)] ? String(q) : 'orig');
+function add({ type, id, ext, title, sub, img, at, q }) {
   load();
   if (type !== 'movie' && type !== 'episode') throw new Error('Bara filmer och avsnitt kan laddas ner');
   const key = safeId(type, id);
   const old = items.get(key);
   if (old && old.status !== 'error') return view(old);
-  const it = { id: key, type, mid: String(id), ext: clean(ext, 8), title: clean(title, 120) || 'Namnlös', sub: clean(sub, 120), img: clean(img, 600), status: 'queued', pct: 0, bytes: 0, dur: 0, err: '', created: at || Date.now(), ord: ++seq, done: 0 };
+  const it = { q: qOf(q), id: key, type, mid: String(id), ext: clean(ext, 8), title: clean(title, 120) || 'Namnlös', sub: clean(sub, 120), img: clean(img, 600), status: 'queued', pct: 0, bytes: 0, dur: 0, err: '', created: at || Date.now(), ord: ++seq, done: 0 };
   items.set(key, it);
   save();
   setTimeout(pump, 50);
@@ -124,21 +128,32 @@ async function start(it) {
   let info = null;
   try { info = deps.probe ? await deps.probe(src.primary, deps.ua()) : null; } catch (e) { /* download anyway, copy everything */ }
   if (r.stopped) { run.delete(it.id); return; }
-  if (info && info.video && !COPY_VIDEO.has(info.video)) { run.delete(it.id); it.status = 'error'; it.err = 'Bildformatet (' + info.video + ') går inte att spara utan omkodning'; save(); return; }
+  const want = QUALITY[it.q || 'orig'];
+  // made smaller: only when the original is bigger than asked (a 720p film asked as 1080p is kept as it is), and
+  // always when the picture is in a format Apple can't play from a file
+  const enc = (want && (!info || !info.height || info.height > want.h + 40)) ? want : (info && info.video && !COPY_VIDEO.has(info.video) ? QUALITY['1080'] : null);
   it.dur = (info && info.dur) || 0;
-  const estimate = info && info.br && info.dur ? info.br / 8 * info.dur : 0;
+  const estimate = enc && info && info.dur ? parseFloat(enc.max) * (/M$/.test(enc.max) ? 1e6 : 1e3) / 8 * info.dur : info && info.br && info.dur ? info.br / 8 * info.dur : 0;
   const free = storage.freeBytes(dir()).free;
   if (free && free - estimate < MIN_FREE) { run.delete(it.id); it.status = 'error'; it.err = 'För lite ledigt utrymme på lagringsdisken'; save(); return; }
   const out = path.join(dir(), it.id + '.part.mp4');
   const args = ['-hide_banner', '-loglevel', 'error', '-nostats', '-progress', 'pipe:1', '-user_agent', deps.ua(), '-rw_timeout', '30000000'];
   if (!/\.m3u8?(\?|$)/i.test(src.primary)) args.push('-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5');
-  args.push('-fflags', '+genpts+discardcorrupt', '-i', src.primary, '-map', '0:v:0', '-sn', '-dn', '-c:v', 'copy');
-  if (info && info.video === 'hevc') args.push('-tag:v', 'hvc1'); // Apple needs this tag to play H.265 from MP4
+  args.push('-fflags', '+genpts+discardcorrupt', '-i', src.primary, '-map', '0:v:0', '-sn', '-dn');
+  if (enc) {
+    const mx = enc.max, buf = (parseFloat(mx) * 2) + mx.replace(/[\d.]/g, '');
+    // scaled down to the height asked for, never made bigger than it is
+    args.push('-vf', "scale=-2:'min(ih," + enc.h + ")':flags=bicubic,format=yuv420p", '-c:v', 'libx264', '-preset', 'veryfast', '-profile:v', 'high', '-crf', String(enc.crf), '-maxrate', mx, '-bufsize', buf);
+  } else {
+    args.push('-c:v', 'copy');
+    if (info && info.video === 'hevc') args.push('-tag:v', 'hvc1'); // Apple needs this tag to play H.265 from MP4
+  }
   const audio = ((info && info.audio) || []).slice(0, 4);
   if (audio.length) {
     audio.forEach((a, n) => {
       args.push('-map', '0:a:' + a.i);
-      if (COPY_AUDIO.has(a.codec)) args.push('-c:a:' + n, 'copy');
+      if (enc) args.push('-c:a:' + n, 'aac', '-b:a:' + n, '192k', '-ac:a:' + n, '2'); // smaller: stereo AAC, plays on anything
+      else if (COPY_AUDIO.has(a.codec)) args.push('-c:a:' + n, 'copy');
       else args.push('-c:a:' + n, 'eac3', '-b:a:' + n, '640k', '-ac:a:' + n, String(Math.min(6, a.ch || 2)));
     });
   } else args.push('-map', '0:a:0?', '-c:a', 'copy');

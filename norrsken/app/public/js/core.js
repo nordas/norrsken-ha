@@ -61,7 +61,7 @@
     restart: '<path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3M4.5 4v4h4"/>',
     star: '<path d="M12 3.5l2.6 5.6 6 .7-4.5 4.1 1.2 6-5.3-3-5.3 3 1.2-6-4.5-4.1 6-.7z"/>',
     sub: '<rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M7 13h4M13 13h4M7 16h7"/>',
-    next: '<path d="M5.5 5v14l10-7zM18.5 5v14"/>',
+    next: '<path d="M4.5 5v14l10.5-7zM16.5 5h3v14h-3z"/>',
     back: '<path d="M15 5l-7 7 7 7"/>',
     down: '<path d="M6 9.5l6 6 6-6"/>',
     left: '<path d="M14.5 6l-6 6 6 6"/>',

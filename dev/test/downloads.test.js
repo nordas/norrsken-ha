@@ -81,12 +81,25 @@ test('sound a phone cannot play (DTS) becomes E-AC-3, picture is still copied', 
   assert.deepEqual(probe(path.join(dlDir(), 'movie-1004.mp4')).sort(), ['eac3:audio', 'h264:video']);
 });
 
-test('a picture format that cannot go into an MP4 is refused with a reason, nothing is kept', async () => {
+test('a picture format Apple cannot play from a file is made into H.264 instead of refused', async () => {
   await post('/api/downloads?profile=p1', { type: 'movie', id: '1003', ext: 'mkv', title: 'VP9-film' });
   const x = await until(async () => { const i = await find('movie-1003'); return i && (i.status === 'done' || i.status === 'error') && i; });
-  assert.equal(x.status, 'error');
-  assert.match(x.err, /vp9/i);
-  assert.ok(!fs.existsSync(path.join(dlDir(), 'movie-1003.mp4')));
+  assert.equal(x.status, 'done', x.err);
+  const pr = require('child_process').spawnSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=codec_name', '-of', 'csv=p=0', path.join(dlDir(), 'movie-1003.mp4')]);
+  assert.equal(String(pr.stdout).trim(), 'h264');
+});
+
+test('a smaller quality is asked for: the film is made 480p on the server and the list says so', async () => {
+  await post('/api/downloads?profile=p1', { type: 'movie', id: '1005', ext: 'mp4', title: 'Liten', q: '480' });
+  const x = await until(async () => { const i = await find('movie-1005'); return i && (i.status === 'done' || i.status === 'error') && i; });
+  assert.equal(x.status, 'done', x.err);
+  assert.equal(x.q, '480');
+  const pr = require('child_process').spawnSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=codec_name,height', '-of', 'csv=p=0', path.join(dlDir(), 'movie-1005.mp4')]);
+  const [codec, height] = String(pr.stdout).trim().split(',');
+  assert.equal(codec, 'h264');
+  assert.ok(+height <= 480, 'height ' + height);
+  await post('/api/downloads/movie-1005/delete');
+  await until(async () => !(await find('movie-1005')));
 });
 
 test('the finished file is served with Range (seeking) and can be saved with a name', async () => {

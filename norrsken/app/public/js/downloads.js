@@ -32,8 +32,28 @@
   };
 
   /** Queue items ({type, id, ext, title, sub, img}). Resolves when the server has them. */
-  dl.add = function (list) {
-    return NS.api.post('api/downloads' + NS.pq(), { items: list }).then(function (r) {
+  /*
+   * The quality to save in, asked each time (the last choice first): the original as the provider sends it (4K stays
+   * 4K), or made smaller on the server – a film in 720p is about a fifth of the size, enough for an iPad on a flight.
+   */
+  var QL = { orig: 'Original', '1080': '1080p', '720': '720p', '480': '480p' };
+  dl.qLabel = function (q) { return QL[q || 'orig'] || 'Original'; };
+  dl.askQuality = function (n) {
+    var last = NS.store.get('dlQ', 'orig');
+    var opts = [
+      { label: 'Original – bästa bilden (4K om filmen är i 4K)', value: 'orig' },
+      { label: '1080p – Full HD, ca 3,5 GB/timme', value: '1080' },
+      { label: '720p – HD, ca 1,8 GB/timme', value: '720' },
+      { label: '480p – minst, ca 0,8 GB/timme', value: '480' }];
+    opts.forEach(function (o) { o.on = o.value === last; o.sel = o.value === last; });
+    return NS.menu('Ladda ner i vilken kvalitet?', opts, n > 1 ? n + ' avsnitt · mindre än original görs om av servern, det tar längre tid' : 'Mindre än original görs om av servern, det tar längre tid').then(function (q) {
+      if (q) NS.store.set('dlQ', q);
+      return q;
+    });
+  };
+  dl.add = function (list, q) {
+    if (q === undefined) return dl.askQuality(list.length).then(function (qq) { return qq ? dl.add(list, qq) : null; });
+    return NS.api.post('api/downloads' + NS.pq(), { items: list, q: q }).then(function (r) {
       NS.toast(list.length > 1 ? list.length + ' nedladdningar köade' : 'Laddar ner', 'save');
       return dl.refresh().then(function () { return r; });
     }).catch(function (e) { NS.toast(e.message || 'Kunde inte ladda ner', 'info'); });
@@ -54,8 +74,8 @@
 
   dl.fmtBytes = function (n) { return n >= 1e9 ? (n / 1e9).toFixed(1) + ' GB' : Math.max(1, Math.round(n / 1e6)) + ' MB'; };
   dl.label = function (x) {
-    if (x.status === 'done') return 'Nedladdad · ' + dl.fmtBytes(x.bytes);
-    if (x.status === 'downloading') return 'Laddar ner ' + Math.round(x.pct) + '%' + (x.bytes ? ' · ' + dl.fmtBytes(x.bytes) : '');
+    if (x.status === 'done') return 'Nedladdad · ' + dl.qLabel(x.q) + ' · ' + dl.fmtBytes(x.bytes);
+    if (x.status === 'downloading') return (x.q && x.q !== 'orig' ? 'Gör om till ' + dl.qLabel(x.q) + ' ' : 'Laddar ner ') + Math.round(x.pct) + '%' + (x.bytes ? ' · ' + dl.fmtBytes(x.bytes) : '');
     if (x.status === 'queued') return dl.wait === 'match' ? 'Väntar – matchen spelas in just nu' : 'Väntar – startar när ingen tittar';
     return x.err || 'Misslyckades';
   };

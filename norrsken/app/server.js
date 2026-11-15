@@ -1693,7 +1693,7 @@ route('POST', '/api/downloads', async (req, res, q) => {
     const id = x && String(x.id == null ? '' : x.id);
     if (!id || (type !== 'movie' && type !== 'episode')) continue;
     if (prof.kids && !catalog.allowed(type, id, prof)) continue; // kids profiles: only what their library shows
-    try { out.push(downloads.add({ type, id, ext: x.ext, title: x.title, sub: x.sub, img: x.img, at })); } catch (e) { return bad(res, e.message, 400); }
+    try { out.push(downloads.add({ type, id, ext: x.ext, title: x.title, sub: x.sub, img: x.img, at, q: b.q || x.q })); } catch (e) { return bad(res, e.message, 400); }
   }
   if (!out.length) return bad(res, 'Inget att ladda ner', 400);
   ok(res, { items: out });
