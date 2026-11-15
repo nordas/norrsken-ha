@@ -2668,8 +2668,8 @@
     this.video.addEventListener('play', sync);
     this.video.addEventListener('pause', sync);
     /*
-     * Live TV with a finger: swipe up on the picture for the channel list, left or right for the next or previous
-     * channel – no going back to the guide. Swiping down closes the list.
+     * Live TV with a finger: swipe up on the picture for the channel list – no going back to the guide. Swiping down
+     * closes the list. (No sideways swipe: it changed channel by mistake.)
      */
     if (this.live) {
       var sx = 0, sy = 0, st = 0, from = null;
@@ -2686,8 +2686,7 @@
         var t = e.changedTouches[0], dx = t.clientX - sx, dy = t.clientY - sy;
         if (onPanel) { if (dy > 90 && Math.abs(dy) > Math.abs(dx) * 1.5 && self.panel === 'channels') { var L = self.chList; if (!L || L.scrollTop <= 0) self.closePanel(); } return; }
         if (self.panel) return;
-        if (dy < -70 && Math.abs(dy) > Math.abs(dx) * 1.5) { self.openChannels(); return; }
-        if (Math.abs(dx) > 80 && Math.abs(dx) > Math.abs(dy) * 1.8) { self.zap(dx < 0 ? 1 : -1); self.showOsd(); }
+        if (dy < -70 && Math.abs(dy) > Math.abs(dx) * 1.5) self.openChannels();
       }, { passive: true });
     }
     // tap anywhere: show/hide controls; double tap on the left or right third: 10 s back or on (as in the big apps)
