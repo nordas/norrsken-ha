@@ -58,7 +58,13 @@ const STAGE_MAX = () => ofShm(0.8, (+process.env.NSK_STAGE_MAX_MB || 300) * 1e6)
 const TC_GRACE_MS = +process.env.NSK_TC_GRACE_MS || 120e3; // the Time Capsule may be away this long, then the recording stops
 const KEEP_MS = 24 * 3600e3; // hard: nothing is kept longer, here or on the Time Capsule
 const KEEP_MATCH_DIR_MS = KEEP_MS;
-const IDLE_MS = 3 * 60e3; // the player checks in every 30 s, also while paused
+const IDLE_MS = 3 * 60e3; // live through the server (nothing recorded): nobody has checked in for 3 min, nobody watches
+/*
+ * A real pause waits for its viewer much longer: a locked iPhone (or a TV gone to standby) stops checking in, and
+ * coming back an hour later must find the pause where it was. It still ends at its own length, and any new stream
+ * ends it at once (one connection).
+ */
+const PAUSE_IDLE_MS = (+process.env.NSK_PAUSE_IDLE_MIN || 90) * 60e3;
 const MIN_FREE = 1.5e9; // leave room on the disk: Home Assistant needs it more than we do
 const stageMin = () => ofShm(0.4, 200e6); // and in memory
 const sessions = new Map();
@@ -635,7 +641,7 @@ setInterval(() => {
   const now = Date.now();
   for (const s of [...sessions.values()]) {
     if (now - s.started > KEEP_MS) { stop(s, 'ett dygn gånget'); continue; } // hard: never longer, match or pause
-    if (!s.match && now - s.last > IDLE_MS) stop(s, 'ingen tittar');
+    if (!s.match && now - s.last > (s.ring ? IDLE_MS : PAUSE_IDLE_MS)) stop(s, 'ingen tittar');
   }
 }, 20e3).unref();
 // and on the Time Capsule: every hour, whatever no running recording owns goes (a crash or a reboot left it behind)
