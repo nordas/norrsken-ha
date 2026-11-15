@@ -694,6 +694,8 @@ function sportNow(prof, st, base = '') {
   const r = matchRecs.get(m.team.id + '|' + m.s);
   const rec = r ? recInfo(r, base) : null;
   // not recorded yet because something else plays (the provider gives one connection): say so instead of nothing
+  // over and not recorded: nothing to watch – no card for it (a night rerun on a foreign channel showed as "Slut")
+  if (!rec && (m.state === 'ended' || Date.now() > m.e)) return null;
   const waits = !rec && Date.now() - (matchWait.get(m.team.id + '|' + m.s) || 0) < 90e3;
   // both teams' colours and short names, for the match card (no crests: those are the clubs' own)
   const side = (n) => matchSide(n, m, base);
@@ -728,7 +730,7 @@ function matchSide(n, m, base) {
     return { id: m.team.id, n: 'Sverige', col: m.team.col, ab: 'SWE', img, flag: 'SE' };
   }
   // the other side of a national team's match: a country – its team's crest when uploaded, else its flag
-  if (n && m.team && m.team.group === 'Landslag') { const c = sport.countryOf(n); if (c) return { n, col: null, ab: c.ab, img: crestUrl(crests.nationKey(n), base), flag: c.flag }; }
+  if (n && m.team && m.team.group === 'Landslag') { const c = sport.countryOf(n); if (c) return { n: c.sv || n, col: null, ab: c.ab, img: crestUrl(crests.nationKey(n), base), flag: c.flag }; }
   const foot = m.kind && m.kind.sport === 'Fotboll';
   const pool = sport.TEAMS.filter(x => x.sport !== 'nation' && (x.sport === 'football') === foot);
   const t = n && pool.find(x => x.re.test(n));

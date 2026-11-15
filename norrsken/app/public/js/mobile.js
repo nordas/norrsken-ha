@@ -465,7 +465,11 @@
   MBrowse.prototype.hero = function (it) {
     var art = h('div', { class: 'm-hero-art' });
     var img = it.img || it.bd;
-    if (img) art.appendChild(NS.pic(img, 'm-img'));
+    // a small picture (many providers send 300 px posters) is never blown up to fill the card: it is shown sharp at
+    // its own size over a soft blur of itself
+    if (img) art.appendChild(NS.pic(img, 'm-img', null, function (im) {
+      if (im.naturalWidth && im.naturalWidth < 560) { art.classList.add('lowres'); art.insertBefore(h('span', { class: 'm-hero-blur', style: 'background-image:url("' + im.src.replace(/"/g, '%22') + '")' }), im); }
+    }));
     else art.style.background = NS.fallbackBg(it.n);
     this.ambient.follow(it);
     var inl = NS.inList(it.k);

@@ -624,3 +624,75 @@ html.m .matchpage .mp-comp { padding: 3px 7px; border-radius: 6px; }
 html.m .matchpage .mp-comp img { height: 20px; max-width: 80px; }
 html.m .matchpage .mp-mcomp img { height: 16px; max-width: 56px; }
 html.m .osd .tshift b::after { font-size: 13px; }
+
+/* ===== iPhone start page (2026-11-15) ===== */
+/* the match card: each team its crest over its whole name, centred, as TV4 Play – no cut names, nothing overlapping */
+.m-sport .m-vs { margin-top: 16px; display: grid; grid-template-columns: 1fr auto 1fr; align-items: start; gap: 10px; }
+.m-sport .m-vs-t { flex-direction: column; gap: 10px; text-align: center; min-width: 0; }
+.m-sport .m-vs-t b { font-size: 19px; line-height: 1.15; font-weight: 800; letter-spacing: -0.01em; white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+.m-sport .m-vs-b { width: 64px; height: 64px; font-size: 15px; }
+.m-sport .m-vs-b.img { overflow: hidden; }
+.m-sport .m-vs-b.img > * { display: block; width: 100%; height: 100%; object-fit: contain; }
+.m-sport .m-vs-x { align-self: start; margin-top: 18px; font-size: 20px; }
+.m-sport .m-sport-meta { margin-top: 16px; justify-content: center; text-align: center; flex-wrap: wrap; }
+.m-sport .m-sport-top { justify-content: flex-start; }
+/* a low-resolution poster in the big card */
+.m-hero-art.lowres .m-hero-blur { position: absolute; inset: -30px; background-size: cover; background-position: center; filter: blur(28px) brightness(.55) saturate(1.2); }
+.m-hero-art.lowres .m-img { position: absolute; inset: auto; left: 50%; top: 42%; width: auto; height: auto; max-width: 62%; max-height: 62%; transform: translate(-50%, -50%); border-radius: 10px; box-shadow: 0 12px 40px rgba(0,0,0,.6); object-fit: contain; }
+.m-sport .m-sport-logo { display: none; } /* the channel's name is on the line: a tiny logo tile only clipped */
+
+/* ===== The player on a phone or tablet, remade (2026-11-15): picture first, three big controls in the middle,
+   one thin bar, at most five quiet buttons under it – as TV4 Play and Netflix ===== */
+.player.touch .osd .top { height: 150px; background: linear-gradient(180deg, rgba(0,0,0,.72), rgba(0,0,0,0)); }
+.player.touch .osd .bottom { height: 240px; background: linear-gradient(0deg, rgba(0,0,0,.88) 0%, rgba(0,0,0,.6) 40%, rgba(0,0,0,0) 100%); }
+/* top: back, title, AirPlay as an icon (no pill with words) */
+.player.touch .osd .ttl { left: 60px; right: 110px; top: calc(14px + env(safe-area-inset-top)); }
+.player.touch .osd .ttl b { font-size: 17px; font-weight: 700; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+.player.touch .osd .ttl span { font-size: 13px; color: rgba(255,255,255,.7); }
+.player.touch .tair.tv { width: 44px; padding: 0; background: none; justify-content: center; font-size: 23px; }
+.player.touch .tair.tv span { display: none; }
+/* middle: 10 s back, play, 10 s on – large, on glass */
+.player.touch .tmid { gap: 38px; }
+.player.touch .tmid .tbtn { width: 60px; height: 60px; font-size: 30px; background: rgba(20,20,22,.38); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); }
+.player.touch .tmid .tplay { width: 84px; height: 84px; font-size: 42px; background: rgba(20,20,22,.5); }
+.player.touch .tmid .tbtn:active { transform: scale(.94); background: rgba(255,255,255,.22); }
+.player.touch.buffering .tmid .tplay { opacity: 0; } /* the spinner is there instead: never both on top of each other */
+/* the bar: thin and white, the knob small; the time bubble only while dragging and never off the screen's edge */
+.player.touch .osd .bar { left: 20px; right: 20px; bottom: calc(86px + env(safe-area-inset-bottom)); }
+.player.touch .osd .bar .rail2 { border-radius: 2px; background: rgba(255,255,255,.26); }
+.player.touch .osd .bar .played { background: #fff; }
+.player.touch .osd .bar .knob { width: 14px; height: 14px; margin: -7px 0 0 -7px; background: #fff; box-shadow: 0 1px 6px rgba(0,0,0,.5); }
+.player.touch .osd .bar.scrub .knob { transform: scale(1.5); }
+.player.touch .osd .bar .bubble, .player.touch .osd .bar.focus .bubble { display: none; left: clamp(26px, var(--p, 50%), calc(100% - 26px)) !important; bottom: 34px; font-size: 14px; padding: 4px 9px; border-radius: 8px; }
+.player.touch .osd .bar.scrub .bubble { display: block; }
+.player.touch .osd .times { left: 20px; right: 20px; bottom: calc(64px + env(safe-area-inset-bottom)); font-size: 12px; font-weight: 600; color: rgba(255,255,255,.75); font-variant-numeric: tabular-nums; }
+/* under the bar: icon over a short word, evenly spread, no boxes */
+html.m .player.touch .osd .obtns, .player.touch .osd .obtns { left: 8px; right: 8px; bottom: calc(6px + env(safe-area-inset-bottom)); gap: 0; justify-content: space-around; overflow: visible; }
+html.m .player.touch .osd .obtns .btn, .player.touch .osd .obtns .btn { flex: 1 1 0; max-width: 96px; width: auto; height: auto; padding: 6px 2px; border: 0; border-radius: 12px; background: none; box-shadow: none; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font-size: 11px; font-weight: 600; color: rgba(255,255,255,.9); white-space: nowrap; transform: none; }
+html.m .player.touch .osd .obtns .btn svg, .player.touch .osd .obtns .btn svg { width: 22px; height: 22px; font-size: 22px; }
+.player.touch .osd .obtns .btn.focus { background: none; color: rgba(255,255,255,.9); }
+.player.touch .osd .obtns .btn:active { background: rgba(255,255,255,.14); }
+html .player.touch.lshift .osd .lctl.tl { justify-content: space-around; padding: 0 8px; }
+html .player.touch .osd .lctl.tl .btn { flex: 1 1 0; max-width: 96px; }
+/* live: channel and programme above the bar, name small, programme clear */
+.player.touch .osd .chan .clogo { display: none; }
+.player.touch .osd .chan .cname { font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: rgba(255,255,255,.7); }
+.player.touch .osd .chan .cnow { font-size: 20px; font-weight: 800; letter-spacing: -.01em; }
+.player.touch .osd .chan .cnext { display: none; }
+/* panels (settings, sound and text, channels): compact rows, a tick for the chosen one – no white slab */
+.player.touch .panel-side { background: rgba(16,16,18,.94); -webkit-backdrop-filter: blur(24px); backdrop-filter: blur(24px); }
+.player.touch .panel-side .ph { font-size: 16px; font-weight: 700; height: 48px; }
+.player.touch .tracks { overflow-y: auto; bottom: 0; padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
+.player.touch .tracks h3 { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: rgba(255,255,255,.5); margin: 18px 0 4px 12px; }
+.player.touch .tracks .ti { height: auto; min-height: 44px; padding: 8px 12px; font-size: 15px; font-weight: 500; border-radius: 10px; gap: 10px; color: #fff; }
+.player.touch .tracks .ti.focus { background: none; color: #fff; }
+.player.touch .tracks .ti.focus .chk { color: var(--accent, #4da3ff); }
+.player.touch .tracks .ti .chk { color: var(--accent, #4da3ff); }
+.player.touch .tracks .ti:active { background: rgba(255,255,255,.1); }
+.player.touch .tracks .ti small { display: block; font-size: 12px; font-weight: 400; color: rgba(255,255,255,.55); margin-top: 1px; }
+/* portrait phone: the panel is a sheet from the bottom, not a strip down the side */
+@media (orientation: portrait) and (max-width: 640px) {
+  .player.touch .panel-side.right { top: auto; left: 0; right: 0; bottom: 0; width: auto; height: 62vh; padding-top: 6px; border-radius: 18px 18px 0 0; transform: translateY(100%); box-shadow: 0 -10px 40px rgba(0,0,0,.5); }
+  .player.touch .panel-side.right.on { transform: translateY(0); }
+  .player.touch .panel-side.right .tracks { position: absolute; top: 56px; left: 8px; right: 8px; bottom: 0; }
+}

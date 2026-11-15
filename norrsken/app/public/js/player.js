@@ -1011,7 +1011,7 @@
     if (this.osdOn) {
       this.playedEl.style.width = pct + '%';
       this.knob.style.left = pct + '%';
-      this.bubble.style.left = pct + '%';
+      this.bubble.style.left = pct + '%'; this.bubble.style.setProperty('--p', pct + '%');
       this.bubble.textContent = NS.fmtTime(c);
       this.timesL.textContent = NS.fmtTime(c);
       this.timesR.textContent = d ? '−' + NS.fmtTime(d - c) : '';
@@ -1316,6 +1316,8 @@
       var short = { pp: this.video.paused ? 'Spela' : 'Paus', rw: '−10 s', ff: '+10 s', subs: 'Text', audio: 'Ljud', next: 'Nästa', restart: 'Början', live: 'Live', settings: 'Mer' };
       b.forEach(function (x) { if (short[x.id]) x.label = short[x.id]; });
     }
+    // a touch screen has play and 10 s back/on in the middle of the picture: the row under the bar is for the rest
+    if (NS.touch) b = b.filter(function (x) { return x.id !== 'pp' && x.id !== 'rw' && x.id !== 'ff'; });
     this.btns = b;
     this.obtns.innerHTML = '';
     this.btnEls = b.map(function (x, i) {
@@ -1929,7 +1931,7 @@
   Player.prototype.lShow = function (t, len) {
     len = len || this.recLen() || 1;
     var pct = Math.min(100, Math.max(0, t / len * 100));
-    this.lPlayed.style.width = pct + '%'; this.lKnob.style.left = pct + '%'; this.lBubble.style.left = pct + '%';
+    this.lPlayed.style.width = pct + '%'; this.lKnob.style.left = pct + '%'; this.lBubble.style.left = pct + '%'; this.lBubble.style.setProperty('--p', pct + '%');
     this.lBubble.textContent = NS.fmtTime(t);
     // the clock time of that point in the recording, as on TV4 Play
     this.ltA.textContent = NS.fmtClock(this.tshift ? this.tshift.at + t * 1000 : Date.now());
@@ -2609,10 +2611,10 @@
       var tb = function (icon, label, fn) { return h('button', { class: 'btn', onclick: function (e) { e.stopPropagation(); fn(); self.showOsd(); } }, [NS.icon(icon), label]); };
       this.lSetB.lastChild.textContent = 'Mer';
       this.lctl.innerHTML = '';
-      [rw, ff,
-        tb('chans', 'Kanaler', function () { self.openChannels(); }),
+      // five at most: jumping 10 s is a double tap on the picture (and the bar), sound and subtitles are one panel
+      [tb('chans', 'Kanaler', function () { self.openChannels(); }),
         tb('guide', 'Tv-guide', function () { if (NS.mOpenLive) NS.mOpenLive(self.cat); else self.exit(); }),
-        this.lAudB, this.lSubB,
+        tb('sub', 'Ljud & text', function () { self.openTracks(); }),
         this.item.arc ? tb('restart', 'Starta om', function () { self.restartProgramme(); }) : null,
         this.lSetB].forEach(function (b) { if (b) self.lctl.appendChild(b); });
       this.lctl.classList.add('tl');

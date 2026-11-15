@@ -119,7 +119,10 @@ const COUNTRIES = [
 function countryOf(name) {
   const n = String(name || '').trim();
   const c = COUNTRIES.find(x => x[2].test(n));
-  return c ? { flag: c[0], ab: c[1] } : null;
+  if (!c) return null;
+  // the country's Swedish name (the first one in its pattern): "Bosnia-Herzegovina" is shown as Bosnien
+  const sv = c[2].source.replace(/^\^\(/, '').split('|')[0].replace(/\\./g, '').replace(/[()?]/g, '');
+  return { flag: c[0], ab: c[1], sv: sv === 'usa' ? 'USA' : sv.replace(/(^|\s)(\S)/g, (x, a, b) => a + b.toUpperCase()) };
 }
 /** A side's name made comparable across languages and channels: "Bosnien-Hercegovina" = "Bosnia-Herzegovina". */
 function sideKey(n) {
