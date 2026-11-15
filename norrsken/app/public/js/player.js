@@ -2110,8 +2110,9 @@
     var L = this.chList;
     if (!L) return;
     L.innerHTML = '';
-    var VIS = 8;
     var items = this.chItems || [];
+    if (NS.touch) return this.paintChannelsTouch(L, items);
+    var VIS = 8;
     var first = Math.max(0, Math.min(this.chI - 3, items.length - VIS));
     var ids = [];
     for (var i = first; i < Math.min(items.length, first + VIS); i++) {
@@ -2132,6 +2133,50 @@
     }
     if (!items.length) L.appendChild(h('div', { class: 'ci', style: 'top:0;color:var(--frost)' }, [h('div', { class: 'spinner' }), 'Hämtar kanaler…']));
     if (ids.length) NS.needEpg(ids);
+  };
+  /**
+   * A finger: the whole list to scroll (not eight rows moved by a remote), the channel playing marked and scrolled to,
+   * the programme on each one fetched as it comes into view. A tap plays it.
+   */
+  Player.prototype.paintChannelsTouch = function (L, items) {
+    var self = this;
+    L.classList.add('tlist');
+    if (!items.length) { L.appendChild(h('div', { class: 'ci', style: 'position:static;color:var(--frost)' }, [h('div', { class: 'spinner' }), 'Hämtar kanaler…'])); return; }
+    var rows = [];
+    items.slice(0, 600).forEach(function (it, i) {
+      var lg = h('div', { class: 'cl' });
+      if (it.img) lg.appendChild(NS.img(it.img));
+      var cs = h('div', { class: 'cs' });
+      var pr = h('div', { class: 'cprog' });
+      var row = h('div', { class: 'ci' + (it.id === self.item.id ? ' cur' : '') }, [h('div', { class: 'cn', text: it.num ? String(it.num) : '' }), lg, h('div', { class: 'ct' }, [h('div', { class: 'cname', text: it.n }), cs, pr])]);
+      row.addEventListener('click', function () { self.chI = i; self.pickChannel(); });
+      row._it = it; row._cs = cs; row._pr = pr;
+      rows.push(row);
+      L.appendChild(row);
+    });
+    var fill = function () {
+      var top = L.scrollTop, bot = top + L.clientHeight + 300, want = [];
+      rows.forEach(function (row) {
+        if (row.offsetTop + row.offsetHeight < top - 200 || row.offsetTop > bot) return;
+        var e = NS.epgFor(row._it.id);
+        if (e && e.now) {
+          row._cs.textContent = NS.fmtClock(e.now.s) + '  ' + e.now.t;
+          var pct = Math.min(100, Math.max(0, (Date.now() - e.now.s) / (e.now.e - e.now.s) * 100));
+          row._pr.innerHTML = ''; row._pr.appendChild(NS.progEl(pct));
+        } else want.push(row._it.id);
+      });
+      if (want.length) NS.needEpg(want.slice(0, 40));
+    };
+    var ft = 0;
+    var fillSoon = function () { clearTimeout(ft); ft = setTimeout(fill, 120); };
+    L.addEventListener('scroll', fillSoon, { passive: true });
+    var onEpg = function () { if (self.chList !== L) document.removeEventListener('nsk-epg', onEpg); else fillSoon(); };
+    document.addEventListener('nsk-epg', onEpg);
+    var cur = rows.find(function (r) { return r.classList.contains('cur'); });
+    requestAnimationFrame(function () {
+      if (cur) L.scrollTop = Math.max(0, cur.offsetTop - L.clientHeight / 3);
+      fill();
+    });
   };
   Player.prototype.pickChannel = function () {
     var it = this.chItems[this.chI];
@@ -2622,6 +2667,29 @@
     var sync = function () { self.tPlay.innerHTML = ''; self.tPlay.appendChild(NS.icon(self.video.paused ? 'play' : 'pause')); };
     this.video.addEventListener('play', sync);
     this.video.addEventListener('pause', sync);
+    /*
+     * Live TV with a finger: swipe up on the picture for the channel list, left or right for the next or previous
+     * channel – no going back to the guide. Swiping down closes the list.
+     */
+    if (this.live) {
+      var sx = 0, sy = 0, st = 0, from = null;
+      el.addEventListener('touchstart', function (e) {
+        var t = e.touches[0];
+        from = e.target; sx = t.clientX; sy = t.clientY; st = Date.now();
+      }, { passive: true });
+      el.addEventListener('touchend', function (e) {
+        if (!from || e.changedTouches.length !== 1) return;
+        var onPanel = from.closest && from.closest('.panel-side');
+        var onCtl = from.closest && from.closest('.bar, .tsrow, .lctl, .obtns, .nextup, .perror');
+        from = null;
+        if (onCtl || Date.now() - st > 700) return;
+        var t = e.changedTouches[0], dx = t.clientX - sx, dy = t.clientY - sy;
+        if (onPanel) { if (dy > 90 && Math.abs(dy) > Math.abs(dx) * 1.5 && self.panel === 'channels') { var L = self.chList; if (!L || L.scrollTop <= 0) self.closePanel(); } return; }
+        if (self.panel) return;
+        if (dy < -70 && Math.abs(dy) > Math.abs(dx) * 1.5) { self.openChannels(); return; }
+        if (Math.abs(dx) > 80 && Math.abs(dx) > Math.abs(dy) * 1.8) { self.zap(dx < 0 ? 1 : -1); self.showOsd(); }
+      }, { passive: true });
+    }
     // tap anywhere: show/hide controls; double tap on the left or right third: 10 s back or on (as in the big apps)
     var lastTap = 0, lastSide = 0;
     el.addEventListener('click', function (e) {

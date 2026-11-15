@@ -720,3 +720,22 @@ html .player.touch .osd .lctl.tl .btn { flex: 1 1 0; max-width: 96px; }
 }
 .player.touch .tmid .tbtn { font-size: 42px; }
 .player.touch .tmid .tplay { font-size: 64px; }
+
+/* live TV channel list on a touch screen: a list to scroll with a finger (2026-11-15) */
+.player.touch .chlist.tlist { position: absolute; top: 56px; left: 0; right: 0; bottom: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 0 8px calc(16px + env(safe-area-inset-bottom)); }
+.player.touch .chlist.tlist .ci { position: relative; top: auto; left: auto; right: auto; height: 64px; display: flex; align-items: center; gap: 12px; padding: 0 10px; border-radius: 12px; background: none; color: #fff; }
+.player.touch .chlist.tlist .ci:active { background: rgba(255,255,255,.1); }
+.player.touch .chlist.tlist .ci.cur { background: rgba(255,255,255,.12); }
+.player.touch .chlist.tlist .ci.cur .cname::after { content: ' · spelas nu'; color: var(--red, #e5242b); font-weight: 700; font-size: 12px; }
+.player.touch .chlist.tlist .ct { flex: 1; min-width: 0; }
+.player.touch .chlist.tlist .cname { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.player.touch .chlist.tlist .cs { font-size: 12px; color: rgba(255,255,255,.6); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+.player.touch .chlist.tlist .cprog { margin-top: 5px; max-width: 160px; }
+.player.touch .chlist.tlist .cl { width: 56px; height: 34px; flex: none; }
+.player.touch .chlist.tlist .cn { width: 26px; flex: none; text-align: right; font-size: 13px; color: rgba(255,255,255,.55); }
+/* portrait phone: the channel list is a sheet from the bottom, the picture stays in view above it */
+@media (orientation: portrait) and (max-width: 640px) {
+  .player.touch .panel-side:not(.right) { top: auto; left: 0; right: 0; bottom: 0; width: auto; height: 66vh; padding-top: 6px; border-radius: 18px 18px 0 0; transform: translateY(100%); box-shadow: 0 -10px 40px rgba(0,0,0,.5); }
+  .player.touch .panel-side:not(.right).on { transform: translateY(0); }
+  .player.touch .panel-side:not(.right)::before { content: ''; position: absolute; top: 7px; left: 50%; width: 40px; height: 5px; margin-left: -20px; border-radius: 3px; background: rgba(255,255,255,.3); }
+}
