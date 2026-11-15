@@ -48,7 +48,7 @@ function configure(d) { deps = Object.assign(deps, d); load(); }
 /** What the app shows. */
 function view(it) {
   const r = run.get(it.id);
-  return { id: it.id, type: it.type, mid: it.mid, ext: it.ext, title: it.title, sub: it.sub, img: it.img, status: it.status, pct: Math.round((it.pct || 0) * 1000) / 10, q: it.q || 'orig', bytes: it.bytes || 0, dur: it.dur || 0, err: it.err || '', created: it.created, done: it.done || 0, active: !!r, file: it.status === 'done' ? it.id + '/' + encodeURIComponent((it.title || 'film').replace(/[\\/:*?"<>|]+/g, ' ').trim() || 'film') + '.mp4' : '' };
+  return { id: it.id, type: it.type, mid: it.mid, ext: it.ext, title: it.title, sub: it.sub, img: it.img, status: it.status, pct: Math.round((it.pct || 0) * 1000) / 10, q: it.q || 'orig', speed: it.speed || 0, enc: it.enc || '', bytes: it.bytes || 0, dur: it.dur || 0, err: it.err || '', created: it.created, done: it.done || 0, active: !!r, file: it.status === 'done' ? it.id + '/' + encodeURIComponent((it.title || 'film').replace(/[\\/:*?"<>|]+/g, ' ').trim() || 'film') + '.mp4' : '' };
 }
 // newest batch first; inside a batch (a season) in the order it was queued
 function list() { load(); return [...items.values()].sort((a, b) => (b.created - a.created) || (a.ord || 0) - (b.ord || 0)).map(view); }
@@ -65,8 +65,20 @@ function fileOf(it) { return path.join(it.dir || dir(), it.id + '.mp4'); }
 let seq = 0;
 // the qualities one can save in: the original as the provider sends it, or made smaller on the server (H.264, plays
 // everywhere, also offline on an iPad): height, quality and the most it may take per second
-const QUALITY = { '1080': { h: 1080, crf: 21, max: '8M' }, '720': { h: 720, crf: 22, max: '4M' }, '480': { h: 480, crf: 23, max: '1800k' } };
-const qOf = (q) => (QUALITY[String(q)] ? String(q) : 'orig');
+/*
+ * Made for iPhone and iPad: H.265 (HEVC), which the phone plays in hardware and which needs about half the bits of
+ * H.264 for the same picture. CRF keeps the quality steady (quiet scenes take little, sport takes more); the cap only
+ * stops a few busy minutes from growing the file. Rough size per hour: 1080p ~1.2 GB, 720p ~0.6 GB, 540p ~0.35 GB.
+ * 10-bit sources (HDR) stay 10-bit with their colour tags, so HDR is still HDR on the iPad.
+ */
+const QUALITY = {
+  '1080': { h: 1080, crf: 23, max: 5e6 },
+  '720': { h: 720, crf: 24, max: 2.6e6 },
+  '540': { h: 540, crf: 25, max: 1.5e6 }
+};
+QUALITY['480'] = QUALITY['540']; // the old name
+const qOf = (q) => (QUALITY[String(q)] ? (String(q) === '480' ? '540' : String(q)) : 'orig');
+const X265_PRESET = process.env.NSK_X265_PRESET || 'faster';
 function add({ type, id, ext, title, sub, img, at, q }) {
   load();
   if (type !== 'movie' && type !== 'episode') throw new Error('Bara filmer och avsnitt kan laddas ner');
@@ -129,21 +141,28 @@ async function start(it) {
   try { info = deps.probe ? await deps.probe(src.primary, deps.ua()) : null; } catch (e) { /* download anyway, copy everything */ }
   if (r.stopped) { run.delete(it.id); return; }
   const want = QUALITY[it.q || 'orig'];
-  // made smaller: only when the original is bigger than asked (a 720p film asked as 1080p is kept as it is), and
-  // always when the picture is in a format Apple can't play from a file
-  const enc = (want && (!info || !info.height || info.height > want.h + 40)) ? want : (info && info.video && !COPY_VIDEO.has(info.video) ? QUALITY['1080'] : null);
+  /*
+   * Made again only when it pays: the original is copied (no second generation of compression) when it is already no
+   * bigger than asked – the right size and not much more than the cap per second. Always made again when Apple can't
+   * play its picture from a file.
+   */
+  const fits = !!(want && info && info.height && info.height <= want.h + 40 && COPY_VIDEO.has(info.video) && (!info.br || info.br <= want.max * 1.4));
+  const enc = want ? (fits ? null : want) : (info && info.video && !COPY_VIDEO.has(info.video) ? QUALITY['1080'] : null);
+  it.enc = enc ? 'hevc' : '';
   it.dur = (info && info.dur) || 0;
-  const estimate = enc && info && info.dur ? parseFloat(enc.max) * (/M$/.test(enc.max) ? 1e6 : 1e3) / 8 * info.dur : info && info.br && info.dur ? info.br / 8 * info.dur : 0;
+  const estimate = enc && info && info.dur ? enc.max * 0.6 / 8 * info.dur : info && info.br && info.dur ? info.br / 8 * info.dur : 0;
   const free = storage.freeBytes(dir()).free;
   if (free && free - estimate < MIN_FREE) { run.delete(it.id); it.status = 'error'; it.err = 'För lite ledigt utrymme på lagringsdisken'; save(); return; }
   const out = path.join(dir(), it.id + '.part.mp4');
   const args = ['-hide_banner', '-loglevel', 'error', '-nostats', '-progress', 'pipe:1', '-user_agent', deps.ua(), '-rw_timeout', '30000000'];
   if (!/\.m3u8?(\?|$)/i.test(src.primary)) args.push('-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5');
-  args.push('-fflags', '+genpts+discardcorrupt', '-i', src.primary, '-map', '0:v:0', '-sn', '-dn');
+  args.push('-fflags', '+genpts+discardcorrupt', '-i', src.primary, '-map', '0:v:0', '-dn');
   if (enc) {
-    const mx = enc.max, buf = (parseFloat(mx) * 2) + mx.replace(/[\d.]/g, '');
-    // scaled down to the height asked for, never made bigger than it is
-    args.push('-vf', "scale=-2:'min(ih," + enc.h + ")':flags=bicubic,format=yuv420p", '-c:v', 'libx264', '-preset', 'veryfast', '-profile:v', 'high', '-crf', String(enc.crf), '-maxrate', mx, '-bufsize', buf);
+    const ten = /10le|10be|p010/.test((info && info.pix) || '');
+    // scaled down to the height asked for (never made bigger), a good scaler, 10-bit kept for HDR
+    args.push('-vf', "scale=-2:'min(ih," + enc.h + ")':flags=lanczos,format=" + (ten ? 'yuv420p10le' : 'yuv420p'),
+      '-c:v', 'libx265', '-preset', X265_PRESET, '-crf', String(enc.crf), '-tag:v', 'hvc1',
+      '-x265-params', 'log-level=error:vbv-maxrate=' + Math.round(enc.max / 1000) + ':vbv-bufsize=' + Math.round(enc.max * 2 / 1000) + (ten ? ':profile=main10' : ''));
   } else {
     args.push('-c:v', 'copy');
     if (info && info.video === 'hevc') args.push('-tag:v', 'hvc1'); // Apple needs this tag to play H.265 from MP4
@@ -152,11 +171,15 @@ async function start(it) {
   if (audio.length) {
     audio.forEach((a, n) => {
       args.push('-map', '0:a:' + a.i);
-      if (enc) args.push('-c:a:' + n, 'aac', '-b:a:' + n, '192k', '-ac:a:' + n, '2'); // smaller: stereo AAC, plays on anything
+      if (enc) args.push('-c:a:' + n, 'aac', '-b:a:' + n, '160k', '-ac:a:' + n, '2'); // phone/iPad: stereo AAC, plays everywhere
       else if (COPY_AUDIO.has(a.codec)) args.push('-c:a:' + n, 'copy');
       else args.push('-c:a:' + n, 'eac3', '-b:a:' + n, '640k', '-ac:a:' + n, String(Math.min(6, a.ch || 2)));
     });
   } else args.push('-map', '0:a:0?', '-c:a', 'copy');
+  // text subtitles go into the file (an iPad without the server still has them); picture subtitles can't go in an MP4
+  const subs = ((info && info.subs) || []).filter(x => x.text).slice(0, 6);
+  if (subs.length) subs.forEach((x, n) => args.push('-map', '0:s:' + x.i, '-c:s:' + n, 'mov_text'));
+  else args.push('-sn');
   args.push('-movflags', '+faststart', '-f', 'mp4', '-y', out);
   const proc = r.proc = spawn(FF, args);
   let err = '';
@@ -169,6 +192,8 @@ async function start(it) {
       const line = buf.slice(0, i); buf = buf.slice(i + 1);
       const m = /^out_time_(?:us|ms)=(\d+)/.exec(line);
       if (m && it.dur) it.pct = Math.min(0.99, +m[1] / 1e6 / it.dur);
+      const sp = /^speed=\s*([\d.]+)x/.exec(line);
+      if (sp) { it.speed = +sp[1]; if (enc && Date.now() - (r.spLog || 0) > 300e3) { r.spLog = Date.now(); console.log('[nedladdning]', it.title, 'görs om i', it.speed + '× realtid'); } }
       const s = /^total_size=(\d+)/.exec(line);
       if (s) it.bytes = +s[1];
     }

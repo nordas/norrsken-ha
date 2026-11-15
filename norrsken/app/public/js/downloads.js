@@ -36,17 +36,18 @@
    * The quality to save in, asked each time (the last choice first): the original as the provider sends it (4K stays
    * 4K), or made smaller on the server – a film in 720p is about a fifth of the size, enough for an iPad on a flight.
    */
-  var QL = { orig: 'Original', '1080': '1080p', '720': '720p', '480': '480p' };
+  var QL = { orig: 'Original', '1080': '1080p', '720': '720p', '540': '540p', '480': '540p' };
   dl.qLabel = function (q) { return QL[q || 'orig'] || 'Original'; };
   dl.askQuality = function (n) {
-    var last = NS.store.get('dlQ', 'orig');
+    var last = NS.store.get('dlQ', '1080');
+    if (last === '480') last = '540';
     var opts = [
-      { label: 'Original – bästa bilden (4K om filmen är i 4K)', value: 'orig' },
-      { label: '1080p – Full HD, ca 3,5 GB/timme', value: '1080' },
-      { label: '720p – HD, ca 1,8 GB/timme', value: '720' },
-      { label: '480p – minst, ca 0,8 GB/timme', value: '480' }];
+      { label: 'Hög · 1080p – ca 1,2 GB/timme (rekommenderas)', value: '1080' },
+      { label: 'Medel · 720p – ca 0,6 GB/timme', value: '720' },
+      { label: 'Sparsam · 540p – ca 0,35 GB/timme', value: '540' },
+      { label: 'Original – som leverantören skickar (4K: ca 8–15 GB/timme)', value: 'orig' }];
     opts.forEach(function (o) { o.on = o.value === last; o.sel = o.value === last; });
-    return NS.menu('Ladda ner i vilken kvalitet?', opts, n > 1 ? n + ' avsnitt · mindre än original görs om av servern, det tar längre tid' : 'Mindre än original görs om av servern, det tar längre tid').then(function (q) {
+    return NS.menu('Ladda ner i vilken kvalitet?', opts, (n > 1 ? n + ' avsnitt · ' : '') + 'Görs om till H.265 för iPhone/iPad: halva storleken mot vanligt med nästan samma bild. Det tar en stund per film.').then(function (q) {
       if (q) NS.store.set('dlQ', q);
       return q;
     });
@@ -72,10 +73,17 @@
     return { type: ep ? 'episode' : 'movie', id: e.id || it.id, ext: e.ext || it.ext || '', series: it.sid || '', title: ep ? (it.sn ? it.sn + ' – ' : '') + (it.se ? 'S' + it.se : '') + (it.ep ? 'E' + it.ep + ' ' : ' ') + it.n : it.n, sub: ep ? '' : [it.y, it.dur ? NS.fmtDur(it.dur) : ''].filter(Boolean).join(' · '), img: it.img || '' };
   };
 
+  // time left for a film being made smaller (from how fast the server goes)
+  function remain(x) {
+    var sec = x.dur ? x.dur * (1 - x.pct / 100) / x.speed : 0;
+    if (!sec) return '';
+    var m = Math.round(sec / 60);
+    return m < 60 ? 'ca ' + Math.max(1, m) + ' min kvar' : 'ca ' + (m / 60).toFixed(1).replace('.', ',') + ' tim kvar';
+  }
   dl.fmtBytes = function (n) { return n >= 1e9 ? (n / 1e9).toFixed(1) + ' GB' : Math.max(1, Math.round(n / 1e6)) + ' MB'; };
   dl.label = function (x) {
     if (x.status === 'done') return 'Nedladdad · ' + dl.qLabel(x.q) + ' · ' + dl.fmtBytes(x.bytes);
-    if (x.status === 'downloading') return (x.q && x.q !== 'orig' ? 'Gör om till ' + dl.qLabel(x.q) + ' ' : 'Laddar ner ') + Math.round(x.pct) + '%' + (x.bytes ? ' · ' + dl.fmtBytes(x.bytes) : '');
+    if (x.status === 'downloading') return (x.enc ? 'Gör om till ' + dl.qLabel(x.q) + ' ' : 'Laddar ner ') + Math.round(x.pct) + '%' + (x.enc && x.speed && x.pct < 99 ? ' · ' + remain(x) : '') + (x.bytes ? ' · ' + dl.fmtBytes(x.bytes) : '');
     if (x.status === 'queued') return dl.wait === 'match' ? 'Väntar – matchen spelas in just nu' : 'Väntar – startar när ingen tittar';
     return x.err || 'Misslyckades';
   };

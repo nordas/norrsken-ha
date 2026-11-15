@@ -81,25 +81,28 @@ test('sound a phone cannot play (DTS) becomes E-AC-3, picture is still copied', 
   assert.deepEqual(probe(path.join(dlDir(), 'movie-1004.mp4')).sort(), ['eac3:audio', 'h264:video']);
 });
 
-test('a picture format Apple cannot play from a file is made into H.264 instead of refused', async () => {
+test('a picture format Apple cannot play from a file is made into H.265 for iPhone/iPad instead of refused', async () => {
   await post('/api/downloads?profile=p1', { type: 'movie', id: '1003', ext: 'mkv', title: 'VP9-film' });
   const x = await until(async () => { const i = await find('movie-1003'); return i && (i.status === 'done' || i.status === 'error') && i; });
   assert.equal(x.status, 'done', x.err);
   const pr = require('child_process').spawnSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=codec_name', '-of', 'csv=p=0', path.join(dlDir(), 'movie-1003.mp4')]);
-  assert.equal(String(pr.stdout).trim(), 'h264');
+  assert.equal(String(pr.stdout).trim(), 'hevc');
+  const tag = require('child_process').spawnSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=codec_tag_string', '-of', 'csv=p=0', path.join(dlDir(), 'movie-1003.mp4')]);
+  assert.equal(String(tag.stdout).trim(), 'hvc1', 'tagged so Apple plays it');
 });
 
-test('a smaller quality is asked for: the film is made 480p on the server and the list says so', async () => {
-  await post('/api/downloads?profile=p1', { type: 'movie', id: '1005', ext: 'mp4', title: 'Liten', q: '480' });
-  const x = await until(async () => { const i = await find('movie-1005'); return i && (i.status === 'done' || i.status === 'error') && i; });
+test('a smaller quality is asked for: a film that already fits is copied, not compressed twice, and the list says which', async () => {
+  await post('/api/downloads?profile=p1', { type: 'movie', id: '1006', ext: 'mp4', title: 'Liten', q: '480' });
+  const x = await until(async () => { const i = await find('movie-1006'); return i && (i.status === 'done' || i.status === 'error') && i; });
   assert.equal(x.status, 'done', x.err);
-  assert.equal(x.q, '480');
-  const pr = require('child_process').spawnSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=codec_name,height', '-of', 'csv=p=0', path.join(dlDir(), 'movie-1005.mp4')]);
+  assert.equal(x.q, '540', 'the old 480 is 540 now');
+  assert.equal(x.enc, '', 'a 360p film is already smaller than 540p: copied as it is');
+  const pr = require('child_process').spawnSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=codec_name,height', '-of', 'csv=p=0', path.join(dlDir(), 'movie-1006.mp4')]);
   const [codec, height] = String(pr.stdout).trim().split(',');
   assert.equal(codec, 'h264');
-  assert.ok(+height <= 480, 'height ' + height);
-  await post('/api/downloads/movie-1005/delete');
-  await until(async () => !(await find('movie-1005')));
+  assert.ok(+height <= 540, 'height ' + height);
+  await post('/api/downloads/movie-1006/delete');
+  await until(async () => !(await find('movie-1006')));
 });
 
 test('the finished file is served with Range (seeking) and can be saved with a name', async () => {
