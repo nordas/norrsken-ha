@@ -879,3 +879,21 @@ test('crest file names: Tre Kronor, Blågult and "<sport>_<herr|dam>_se" are Swe
   assert.equal(c.keyForFile('Fjärås.png').label, 'Fjärås', 'the name as it was written');
   for (const f of ['Brynäs hockey se.png', 'Linköping SE basket.png']) assert.ok(!/^sverige|tre-kronor/.test(c.keyForFile(f).key), f + ' is a club, not Sweden');
 });
+
+test('older Safari (iPads on iOS 12–14) gets fallbacks in the CSS: inset written out, ratios and flex gaps under html.noar/nogap', () => {
+  const c = require('../lib/csscompat');
+  const out = c.transform('.a{position:absolute;inset:0}.b{aspect-ratio:2/3}.c{display:flex;gap:8px}.d{aspect-ratio:auto;height:40px}@media (min-width:5px){.e{width:clamp(10px,5vw,40px)}}');
+  assert.match(out, /\.a\{position:absolute;top:0;right:0;bottom:0;left:0;inset:0\}/);
+  assert.match(out, /html\.noar \.b::before\{[^}]*padding-top:150%/);
+  assert.match(out, /html\.noar \.d::before\{display:none\}/);
+  assert.doesNotMatch(out, /html\.noar \.d\{height/, 'an explicit height is never overridden');
+  assert.match(out, /html\.nogap \.c>\*\+\*\{margin-left:8px\}/);
+  assert.match(out, /@media \(min-width:5px\)\{\.e\{width:5vw;width:clamp\(10px,5vw,40px\)\}/);
+  // the real styles keep every rule they had
+  const fs = require('fs');
+  for (const f of ['public/css/app.css', 'public/css/mobile.css']) {
+    const a = fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
+    const n = (x) => (x.replace(/\/\*[\s\S]*?\*\//g, '').match(/\{/g) || []).length;
+    assert.ok(n(c.transform(a)) >= n(a), f);
+  }
+});

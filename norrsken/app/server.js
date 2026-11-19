@@ -2212,6 +2212,20 @@ function serveStatic(req, res, pathname) {
       'Cache-Control': /\/(vendor|fonts)\//.test(file) ? 'public, max-age=604800' : 'no-cache',
     };
     if (req.headers['if-modified-since'] === mtime) { res.writeHead(304, headers); return res.end(); }
+    // styles go out with fallbacks for older Safari added (old iPads: no aspect-ratio, inset or flex gap) – see csscompat
+    if (/\.css$/.test(file) && st.size < 2e6) {
+      const key = 'css|' + file + '|' + st.mtimeMs;
+      let c = gzCache.get(key);
+      if (!c) {
+        try { const body = Buffer.from(require('./lib/csscompat').transform(fs.readFileSync(file, 'utf8'))); c = { body, gz: require('zlib').gzipSync(body, { level: 6 }) }; } catch (e) { console.log('[css] kunde inte göra reservregler för', path.basename(file) + ':', e.message); c = null; }
+        if (c) { if (gzCache.size > 60) gzCache.clear(); gzCache.set(key, c); }
+      }
+      if (c) {
+        const b = res._gz ? c.gz : c.body;
+        res.writeHead(200, { ...headers, ...(res._gz ? { 'Content-Encoding': 'gzip' } : {}), Vary: 'Accept-Encoding', 'Content-Length': b.length });
+        return res.end(req.method === 'HEAD' ? undefined : b);
+      }
+    }
     // scripts and styles compressed (1.2 MB of them → about a quarter), kept in memory per file version
     if (res._gz && /\.(js|css|html|svg)$/.test(file) && st.size < 5e6) {
       const key = file + '|' + st.mtimeMs;

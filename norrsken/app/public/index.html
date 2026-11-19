@@ -6,6 +6,15 @@
 <title>Norrsken</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%230c111c'/%3E%3Cpath d='M3 17c3-8 6-11 9-11s6 3 9 11' fill='none' stroke='%234ff0b4' stroke-width='2.4' stroke-linecap='round'/%3E%3Cpath d='M6 19c2-5 4-7 6-7s4 2 6 7' fill='none' stroke='%238f7bff' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E">
 <link rel="preload" href="fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+<script>
+/* older Safari (iPads that stopped at iOS 12–14): mark what it lacks, the styles carry fallbacks for it */
+(function () { var d = document.documentElement, c = '';
+  try { if (!(window.CSS && CSS.supports && CSS.supports('aspect-ratio', '1 / 1'))) c += ' noar'; } catch (e) { c += ' noar'; }
+  try { var f = document.createElement('div'); f.style.cssText = 'display:flex;flex-direction:column;row-gap:1px;position:absolute;visibility:hidden';
+    f.appendChild(document.createElement('div')); f.appendChild(document.createElement('div')); d.appendChild(f);
+    if (f.scrollHeight !== 1) c += ' nogap'; d.removeChild(f); } catch (e) { c += ' nogap'; }
+  d.className += c; })();
+</script>
 <link rel="stylesheet" href="css/app.css">
 <link rel="stylesheet" href="css/mobile.css">
 </head>
