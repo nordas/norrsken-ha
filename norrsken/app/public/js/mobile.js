@@ -425,7 +425,7 @@
         : h('span', { class: 'm-vs-b' + (ini.length > 3 ? ' sm' : ''), style: 'background:' + c1 + ';box-shadow:inset 0 0 0 3px ' + c2, text: ini });
       return h('div', { class: 'm-vs-t' }, [b, h('b', { text: t.n })]);
     };
-    var stopB = rec && m.rec.recording ? h('button', { class: 'm-btn ghost', onclick: function (e) { e.stopPropagation(); NS.stopMatchRec(null, function () { stopB.remove(); }); } }, [NS.icon('x'), 'Avbryt inspelning']) : null;
+    var stopB = rec && m.rec.recording ? h('button', { class: 'm-btn ghost m-btn-ic', title: 'Avbryt inspelning', 'aria-label': 'Avbryt inspelning', onclick: function (e) { e.stopPropagation(); NS.stopMatchRec(null, function () { stopB.remove(); }); } }, [NS.icon('x')]) : null;
     var oc = m.sides && m.sides.map(function (x) { return x.col && x.col[0]; }).filter(function (x) { return x && x.toLowerCase() !== c.toLowerCase(); })[0];
     var el = h('section', { class: 'm-sport' + (live ? ' live' : ''), style: 'background:radial-gradient(90% 140% at 100% 0%, ' + c + 'bb 0%, ' + c + '22 55%, transparent 80%)' + (oc ? ', radial-gradient(80% 130% at 0% 100%, ' + oc + '88 0%, ' + oc + '18 55%, transparent 80%)' : '') + ', #121318' }, [
       h('div', { class: 'm-sport-top' }, [live ? h('span', { class: 'live-pill', text: 'Live nu' }) : h('span', { class: 'soon-pill', text: m.state === 'ended' ? 'Slut' : 'Börjar ' + NS.fmtClock(m.s) }), h('span', { text: m.label || m.team.name })]),

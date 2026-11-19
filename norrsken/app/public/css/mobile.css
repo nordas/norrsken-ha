@@ -739,3 +739,10 @@ html .player.touch .osd .lctl.tl .btn { flex: 1 1 0; max-width: 96px; }
   .player.touch .panel-side:not(.right).on { transform: translateY(0); }
   .player.touch .panel-side:not(.right)::before { content: ''; position: absolute; top: 7px; left: 50%; width: 40px; height: 5px; margin-left: -20px; border-radius: 3px; background: rgba(255,255,255,.3); }
 }
+/* the match card's buttons: one line each, never wrapped – the main one widest, cancelling the recording a round icon */
+html.m .m-sport-btns .m-btn { white-space: nowrap; min-width: 0; padding-left: 14px; padding-right: 14px; font-size: 16px; }
+html.m .m-sport-btns .m-btn:first-child { flex: 1.4 1 0; }
+html.m .m-sport-btns .m-btn.ghost { flex: 1 1 0; }
+html.m .m-sport-btns .m-btn.m-btn-ic { flex: 0 0 48px; width: 48px; padding: 0; justify-content: center; }
+html.m .m-sport-btns .m-btn svg { flex: none; }
+@media (max-width: 360px) { html.m .m-sport-btns { gap: 8px; } html.m .m-sport-btns .m-btn { font-size: 15px; padding-left: 8px; padding-right: 8px; gap: 6px; } html.m .m-sport-btns .m-btn.ghost:not(.m-btn-ic) svg { display: none; } html.m .m-sport-btns .m-btn.m-btn-ic { flex-basis: 44px; width: 44px; } }
