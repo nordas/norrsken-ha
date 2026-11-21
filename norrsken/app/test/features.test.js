@@ -416,14 +416,18 @@ test('match: the favourite\'s match is recorded from the start, kept for a day, 
   assert.match(rec.url, /\/mrec\/\w+\/index\.m3u8$/, 'one playlist for the whole match (all its parts)');
   // while it runs, a pause on another channel waits; the same channel pauses into the recording
   assert.equal(rec.recording, true, 'the match recording runs');
-  const other = await post('/api/pause/start?profile=p1', { id: '111' });
+  const other = await post('/api/pause/start?profile=p1', { id: '108' });
   assert.equal(other.status, 409, JSON.stringify(other.json));
   const same = await post('/api/pause/start?profile=p1', { id: rec.chId });
   assert.equal(same.json && same.json.id, rec.id);
   // the server refuses another stream itself too (not only the app's question)
   assert.ok((await get('/api/matchrec')).json.active, 'still recording');
-  const st = await get('/api/stream/live/111?profile=p1');
+  const st = await get('/api/stream/live/108?profile=p1');
   assert.equal(st.status, 409, JSON.stringify(st.json));
+  // another channel that shows the same match (the guide's, while the recorder took a different one) plays the recording
+  const sm = await get('/api/stream/live/111?profile=p1');
+  assert.equal(sm.status, 200, JSON.stringify(sm.json));
+  assert.equal(sm.json.rec && sm.json.rec.id, rec.id);
   // the same channel: the recording, never a second connection to the provider
   const sc = await get('/api/stream/live/' + encodeURIComponent(rec.chId) + '?profile=p1');
   assert.equal(sc.status, 200, JSON.stringify(sc.json));
