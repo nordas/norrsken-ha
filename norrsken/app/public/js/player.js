@@ -329,9 +329,9 @@
   Player.prototype.play = function (item, start) {
     var self = this;
     if (this.tshift && (!this.tshift.match || item.id !== this.tshift.chId)) this.endTshift();
-    // a finished match recording is a file on the server: a reload (stall, "Försök igen") plays it again from where it
+    // a match recording is on the server's disk (finished or still growing): a reload (stall, "Försök igen") plays it again from where it
     // was – it must not ask for the channel, which the provider's one connection may be busy with another match
-    if (this.live && this.tshift && this.tshift.mode === 'rec' && this.tshift.match && this.tshift.done && this.tshift.url && item.id === this.tshift.chId) {
+    if (this.live && this.tshift && this.tshift.mode === 'rec' && this.tshift.match && this.tshift.url && item.id === this.tshift.chId) {
       this.hideError();
       this.buffering(true);
       this.startSource(this.tshift.pos || 0);
