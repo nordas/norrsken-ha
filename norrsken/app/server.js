@@ -1407,11 +1407,20 @@ function takeConnection(why) {
   proxy.abortAll();
 }
 
+/** Does this live channel show the match that is being recorded – the channel it records from, or another one with the
+ *  same match (the guide's Viaplay channel while the recorder took the Premier League one)? Then it plays the recording. */
+function showsRec(r, id) {
+  if (String(r.chId) === String(id)) return true;
+  try {
+    const m = recList(Date.now()).find(x => x.team.id + '|' + x.s === r.key);
+    return !!m && (m.chans || [m.ch]).concat(m.alt || []).some(c => String(c.id) === String(id));
+  } catch (e) { return false; }
+}
 function matchRecBusy(type, id, archive) {
   const ms = tsbuf.matchSession();
   if (!ms) return '';
   const r = [...matchRecs.values()].find(x => x.sessId === ms.id);
-  if (r && type === 'live' && r.chId === id && !archive) return '';
+  if (r && type === 'live' && showsRec(r, id) && !archive) return '';
   return 'Matchen ' + (r ? r.title + ' ' : '') + 'spelas in. Stoppa inspelningen först (leverantören skickar bara en kanal åt gången).';
 }
 
@@ -1420,7 +1429,7 @@ function sameChannelRec(id, base) {
   const ms = tsbuf.matchSession();
   if (!ms) return null;
   const r = [...matchRecs.values()].find(x => x.sessId === ms.id);
-  if (!r || String(r.chId) !== String(id)) return null;
+  if (!r || !showsRec(r, id)) return null;
   return { id: ms.id, url: base + '/mrec/' + r.mid + '/index.m3u8', edge: true };
 }
 
@@ -1613,7 +1622,10 @@ route('GET', '/api/matchrec', (req, res) => {
   const base = ingressBase(req);
   const recs = [...matchRecs.values()].map(r => recInfo(r, base)).filter(Boolean);
   const on = recs.find(x => x.recording) || null;
-  ok(res, { active: on ? { id: on.id, chId: on.chId, chName: on.ch, title: on.title } : null, recs });
+  const run = on ? [...matchRecs.values()].find(r => r.mid && on.url && on.url.includes('/mrec/' + r.mid + '/')) : null;
+  let chIds = [];
+  if (run) { try { const m = recList(Date.now()).find(x => x.team.id + '|' + x.s === run.key); if (m) chIds = (m.chans || [m.ch]).concat(m.alt || []).map(c => String(c.id)); } catch (e) { /* only the recorded channel */ } }
+  ok(res, { active: on ? { id: on.id, chId: on.chId, chIds, chName: on.ch, title: on.title } : null, recs });
 });
 /** Record this match too (any followed team's): { team, s } – it waits for the one already recording. */
 route('POST', '/api/matchrec/queue', async (req, res) => {
@@ -1656,7 +1668,7 @@ route('POST', '/api/pause/start', async (req, res, q) => {
   const ms = tsbuf.matchSession();
   if (ms) {
     const r = [...matchRecs.values()].find(x => x.sessId === ms.id);
-    if (r && String(r.chId) === id) return ok(res, { id: ms.id, url: ingressBase(req) + '/mrec/' + r.mid + '/index.m3u8', max: ms.maxMin, match: true });
+    if (r && showsRec(r, id)) return ok(res, { id: ms.id, url: ingressBase(req) + '/mrec/' + r.mid + '/index.m3u8', max: ms.maxMin, match: true });
     return bad(res, 'Matchinspelningen pågår på ' + (r ? r.chName : 'en annan kanal') + '. Avbryt den först.', 409);
   }
   // pausing the favourite's match channel shortly before or during the match: the pause is the match recording

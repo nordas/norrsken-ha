@@ -36,7 +36,7 @@
     NS.api.get('api/matchrec' + NS.pq()).then(function (r) {
       var a = r && r.active;
       if (!a) { go(); return; }
-      if (item.t === 'live' && a.chId === item.id) {
+      if (item.t === 'live' && (a.chId === item.id || (a.chIds || []).indexOf(String(item.id)) >= 0)) {
         // the channel being recorded: watch the recording at its live edge (one connection, and it can be paused)
         var rec = (r.recs || []).find(function (x) { return x.id === a.id; });
         if (rec && rec.url) {
