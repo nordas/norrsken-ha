@@ -1489,7 +1489,8 @@ function matchRecTick() {
     // the next match asked for
     if (had && now > matchEnd(m) + MATCH_TAIL_MS) {
       const hs = tsbuf.get(had.sessId);
-      if (hs && !hs.done && !hs.dead) { tsbuf.giveUp(hs, 'matchen är slut'); console.log('[match]', m.title, 'är slut – inspelningen är klar'); }
+      if (hs && !hs.done && !hs.dead) { tsbuf.giveUp(hs, 'matchen är slut'); hs.full = true; /* finished as planned: its playlist ends (ENDLIST), a player or the TV does not wait for more */ console.log('[match]', m.title, 'är slut – inspelningen är klar'); }
+      if (hs && hs.done && !hs.dead) hs.full = true; // (also one brought back after a restart)
       continue;
     }
     if (now < matchStart(m) - MATCH_LEAD_MS || now > matchEnd(m) + MATCH_TAIL_MS) continue;

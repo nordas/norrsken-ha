@@ -1855,7 +1855,16 @@
       // the match is over and the recording finished: live is the channel itself again
       // (not while another match is being recorded: the provider's one connection is that one's, so the channel will
       // not play – stay on the finished recording, at its end)
-      if (a && !a.recording) { ts.done = true; if (!r.active) { self.endTshift(); self.startSource(0); return; } }
+      if (a && !a.recording) {
+        ts.done = true;
+        var asked = ts.askedLive; ts.askedLive = false;
+        if (asked && !r.active) { self.endTshift(); self.startSource(0); return; } // "Gå till live" pressed
+        // a reload (AirPlay connecting, a stall) never leaves a finished recording for the channel: it plays on from
+        // where it was (the start when it is opened)
+        ts.playing = true;
+        self.startRec(ts.pos || 0);
+        return;
+      }
       // a few seconds back from the newest piece: the playlist may be a little behind what the server has written
       // 20 s back from the newest piece: closer than that the picture waits for every new piece (it stopped every ~12 s)
       ts.pos = a ? Math.max(0, a.sec - 20) : 0;
@@ -1880,7 +1889,7 @@
   /** ▶▶ / "Gå till live": back to the live broadcast. */
   Player.prototype.goLive = function () {
     if (!this.live) { if (this.item.t === 'catchup') this.toLive(); return; }
-    if (this.tshift && this.tshift.match) { this.tshift.edge = true; this.startSource(0); this.showOsd(); NS.toast('Live', 'live'); return; }
+    if (this.tshift && this.tshift.match) { this.tshift.edge = true; this.tshift.askedLive = true; this.startSource(0); this.showOsd(); NS.toast('Live', 'live'); return; }
     if (this.tshift && this.tshift.ios && this.tshift.url) { this.tshift.edge = true; this.tshift.playing = true; this.startRec(0); this.showOsd(); NS.toast('Live', 'live'); return; }
     this.endTshift();
     this.startSource(0);
