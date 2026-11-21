@@ -697,10 +697,11 @@ function sportNow(prof, st, base = '') {
   // the match recording (if any) is looked up fresh every time: it grows while we look.
   // A match whose broadcast is over but whose recording is there (or still running to the final whistle) comes first:
   // it is what there is to watch, even when another match has started since.
-  const recorded = hit.list.find(x => x.state === 'ended' && matchRecs.has(x.team.id + '|' + x.s) && Date.now() < x.e + 12 * 3600e3);
+  const recorded = hit.list.find(x => x.state === 'ended' && recFor(x) && Date.now() < x.e + 12 * 3600e3);
+  if (!recorded && !hit.list.some(x => recFor(x))) { const orphan = orphanRecCards(hit.list, base)[0]; if (orphan) return orphan; }
   const m = recorded || hit.list[0] || null;
   if (!m) return m;
-  const r = matchRecs.get(m.team.id + '|' + m.s);
+  const r = recFor(m);
   const rec = r ? recInfo(r, base) : null;
   // not recorded yet because something else plays (the provider gives one connection): say so instead of nothing
   // over and not recorded: nothing to watch – no card for it (a night rerun on a foreign channel showed as "Slut")
@@ -776,10 +777,11 @@ function upcomingMatches(prof, st, base = '') {
   }
   // (a match over but recorded stays in the list: the recording is there to watch)
   let done = [];
-  try { done = sport.todayAll(ids, sportChannels(prof), catalog.epg).filter(x => x.state === 'ended' && matchRecs.has(x.team.id + '|' + x.s) && Date.now() < x.e + 12 * 3600e3); } catch (e) { /* the list without them */ }
+  try { done = sport.todayAll(ids, sportChannels(prof), catalog.epg).filter(x => x.state === 'ended' && recFor(x) && Date.now() < x.e + 12 * 3600e3); } catch (e) { /* the list without them */ }
+  done = done.concat(orphanRecCards(hit.list.concat(done), base));
   return done.concat(hit.list.filter(m => !done.some(d => d.team.id === m.team.id && d.s === m.s))).map(m => ({
     team: m.team, label: m.label, state: Date.now() >= m.s ? 'live' : 'soon', title: m.title, s: m.s, e: m.e, ch: m.ch, chName: m.chName, chans: m.chans.slice(0, 6), foreign: !!m.foreign,
-    arena: m.arena || '', compImg: compImg(m.kind && m.kind.comp, base), d: matchDesc(m), autoRec: autoRecs(m), rec: (() => { const r = matchRecs.get(m.team.id + '|' + m.s); return r ? recInfo(r, base) : null; })(),
+    arena: m.arena || '', compImg: compImg(m.kind && m.kind.comp, base), d: matchDesc(m), autoRec: autoRecs(m), rec: m.rec || (() => { const r = recFor(m); return r ? recInfo(r, base) : null; })(),
     sides: m.home && m.away ? [matchSide(m.home, m, base), matchSide(m.away, m, base)] : null,
   }));
 }
@@ -1441,6 +1443,36 @@ function recInfo(r, base) {
   if (!s) return null;
   const sec = recParts(r).reduce((n, x) => n + tsbuf.length(x), 0);
   return { id: s.id, url: base + '/mrec/' + r.mid + '/index.m3u8', sec: Math.round(sec), recording: !s.done && !s.dead, title: r.title, ch: r.chName, chId: r.chId, s: r.s, e: r.e, parts: recParts(r).length };
+}
+/** The recording of this match: its own key, or the same team's recording that started within three hours of it (the
+ *  guide's start time shifts when it is read again). */
+function recFor(m) {
+  const exact = matchRecs.get(m.team.id + '|' + m.s);
+  if (exact) return exact;
+  for (const r of matchRecs.values()) if (r.key.split('|')[0] === m.team.id && Math.abs(r.s - m.s) < 3 * 3600e3) return r;
+  return null;
+}
+/** A match recording the guide no longer lists (or lists at another time): a card from the recording itself. */
+function recCard(r, base) {
+  const t = sport.team(String(r.key).split('|')[0]);
+  const rec = recInfo(r, base);
+  if (!t || !rec) return null;
+  const ch = catalog.get('live', r.chId) || { id: r.chId, n: r.chName, cat: '', t: 'live', k: 'l:' + r.chId };
+  const parts = String(r.title).split(' – ');
+  const kind = { sport: t.sport === 'football' ? 'Fotboll' : 'Ishockey', comp: '' };
+  const m = { team: { id: t.id, name: t.name, short: t.short, col: t.col, group: t.group || '' }, kind, label: kind.sport, state: 'ended', title: r.title, s: r.s, e: r.e, ch, chName: r.chName, chans: [ch], foreign: false, arena: '', home: parts[0] || '', away: parts[1] || '', d: '' };
+  return Object.assign(m, { rec, compImg: '', autoRec: false, recWait: '', sides: m.home && m.away ? [matchSide(m.home, m, base), matchSide(m.away, m, base)] : null });
+}
+/** Recordings under 12 hours old that none of the listed matches claims: cards of their own. */
+function orphanRecCards(list, base) {
+  const out = [];
+  for (const r of matchRecs.values()) {
+    if (Date.now() > r.e + 12 * 3600e3) continue;
+    if (list.some(m => recFor(m) === r)) continue;
+    const c = recCard(r, base);
+    if (c) out.push(c);
+  }
+  return out;
 }
 route('GET', '/mrec/:mid/index.m3u8', async (req, res, q, p) => {
   const r = [...matchRecs.values()].find(x => x.mid === p.mid);
