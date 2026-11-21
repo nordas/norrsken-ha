@@ -931,3 +931,18 @@ test('a club game the text calls the women\'s (SDHL, dam) is not the team either
   assert.deepEqual(got.filter(t => /Djurg/.test(t)), []);
   assert.ok(got.some(t => /Brynäs/.test(t)));
 });
+
+test('the league list writes å ä ö as hex references (&#xE5;): the game is still found, and the puck drop read', async () => {
+  const sw = require('../lib/swehockey');
+  const html = '<table><tr><td><a href="/ScheduleAndResults/Overview/2">SHL</a></td><td></td></tr>' +
+    '<tr><td>15:15</td><td>Djurg&#xE5;rdens IF - Lule&#xE5; HF</td></tr></table>';
+  const g = sw.parse(html);
+  assert.equal(g[0].home, 'Djurgårdens IF');
+  assert.equal(g[0].away, 'Luleå HF');
+  sw._setFetcher(async () => html);
+  await sw.load('2026-11-21');
+  const m = { s: Date.parse('2026-11-21T15:00:00+01:00') };
+  assert.equal(sw.verdict(m, /lule[åa]/i, /djurg[åa]rden/i), 'shl');
+  assert.equal(m.puck, Date.parse('2026-11-21T15:15:00+01:00'));
+  sw._setFetcher(null);
+});

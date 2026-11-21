@@ -684,17 +684,20 @@ function sportNow(prof, st, base = '') {
   const key = prof.id + '|' + tid.join(',') + '|' + catalog.epg.at;
   let hit = sportCache.get(key);
   if (!hit || Date.now() - hit.at >= 60e3) {
-    let m = null;
+    let list = [];
     try {
-      m = sport.findMatch(tid, sportChannels(prof), catalog.epg);
-      if (m) m.chans = m.chans.slice(0, 12);
+      list = sport.todayAll(tid, sportChannels(prof), catalog.epg);
+      for (const x of list) x.chans = x.chans.slice(0, 12);
     } catch (e) { console.error('[sport]', e.message); }
-    hit = { at: Date.now(), m };
+    hit = { at: Date.now(), list };
     sportCache.set(key, hit);
     if (sportCache.size > 50) sportCache.clear();
   }
-  // the match recording (if any) is looked up fresh every time: it grows while we look
-  const m = hit.m;
+  // the match recording (if any) is looked up fresh every time: it grows while we look.
+  // A match whose broadcast is over but whose recording is there (or still running to the final whistle) comes first:
+  // it is what there is to watch, even when another match has started since.
+  const recorded = hit.list.find(x => x.state === 'ended' && matchRecs.has(x.team.id + '|' + x.s) && Date.now() < x.e + 12 * 3600e3);
+  const m = recorded || hit.list[0] || null;
   if (!m) return m;
   const r = matchRecs.get(m.team.id + '|' + m.s);
   const rec = r ? recInfo(r, base) : null;
@@ -770,7 +773,10 @@ function upcomingMatches(prof, st, base = '') {
     sportCache.set(key, hit);
     if (sportCache.size > 50) sportCache.clear();
   }
-  return hit.list.map(m => ({
+  // (a match over but recorded stays in the list: the recording is there to watch)
+  let done = [];
+  try { done = sport.todayAll(ids, sportChannels(prof), catalog.epg).filter(x => x.state === 'ended' && matchRecs.has(x.team.id + '|' + x.s) && Date.now() < x.e + 12 * 3600e3); } catch (e) { /* the list without them */ }
+  return done.concat(hit.list.filter(m => !done.some(d => d.team.id === m.team.id && d.s === m.s))).map(m => ({
     team: m.team, label: m.label, state: Date.now() >= m.s ? 'live' : 'soon', title: m.title, s: m.s, e: m.e, ch: m.ch, chName: m.chName, chans: m.chans.slice(0, 6), foreign: !!m.foreign,
     arena: m.arena || '', compImg: compImg(m.kind && m.kind.comp, base), d: matchDesc(m), autoRec: autoRecs(m), rec: (() => { const r = matchRecs.get(m.team.id + '|' + m.s); return r ? recInfo(r, base) : null; })(),
     sides: m.home && m.away ? [matchSide(m.home, m, base), matchSide(m.away, m, base)] : null,

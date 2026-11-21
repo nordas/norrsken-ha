@@ -28,7 +28,13 @@ function stockholmDate(t) {
   return p.y + '-' + pad(p.mo) + '-' + pad(p.d); // YYYY-MM-DD
 }
 
-const strip = (s) => String(s).replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&#(\d+);/g, (x, n) => String.fromCharCode(+n)).replace(/\s+/g, ' ').trim();
+const NAMED = { nbsp: ' ', amp: '&', quot: '"', apos: "'", lt: '<', gt: '>', aring: 'å', Aring: 'Å', auml: 'ä', Auml: 'Ä', ouml: 'ö', Ouml: 'Ö', eacute: 'é', Eacute: 'É', uuml: 'ü', Uuml: 'Ü' };
+// the site writes å ä ö as hex references (&#xE5;), others as decimal or by name
+const strip = (s) => String(s).replace(/<[^>]*>/g, ' ')
+  .replace(/&#x([0-9a-f]+);/gi, (x, h) => String.fromCharCode(parseInt(h, 16)))
+  .replace(/&#(\d+);/g, (x, n) => String.fromCharCode(+n))
+  .replace(/&([a-z]+);/gi, (x, n) => (n in NAMED ? NAMED[n] : x))
+  .replace(/\s+/g, ' ').trim();
 
 /** The page's table: a row with only a league's name opens a league, a row with a time and "A - B" is a game in it. */
 function parse(html) {
