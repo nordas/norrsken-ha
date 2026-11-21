@@ -494,18 +494,20 @@ async function fileReady(id, name) {
   if (!p) {
     // the piece asked for comes first, alone (a TV gives up after ~10 s: it must not wait for the next seven too);
     // the next ones are read one after another behind it, each waiting only for itself when it is asked for
-    const one = (n) => (async () => {
-      let r = await smb.getMany(s.dir, m.dir, [n]);
-      if (!r.ok && !fs.existsSync(path.join(s.dir, n))) r = await smb.getMany(s.dir, m.dir, [n]); // once more
+    // a newer request (a seek) goes first in the queue and makes the older read-ahead stand down
+    const gen = m.gen = (m.gen || 0) + 1;
+    const one = (n, first) => (async () => {
+      let r = await smb.getMany(s.dir, m.dir, [n], first);
+      if (!r.ok && !fs.existsSync(path.join(s.dir, n))) r = await smb.getMany(s.dir, m.dir, [n], first); // once more
       // fetched back: it stays LOCAL_FOR_MS for the player, then leaves the buffer again (evict)
       m.fetchedAt.set(n, Date.now());
       return r;
     })().finally(() => { m.fetching.delete(n); });
-    p = one(name);
+    p = one(name, true);
     m.fetching.set(name, p);
     let prev = p;
     for (const n of want.slice(1)) {
-      const q = prev.catch(() => {}).then(() => (fs.existsSync(path.join(s.dir, n)) ? null : one(n)));
+      const q = prev.catch(() => {}).then(() => (fs.existsSync(path.join(s.dir, n)) || m.gen !== gen ? null : one(n, false)));
       m.fetching.set(n, q);
       q.finally(() => { if (m.fetching.get(n) === q) m.fetching.delete(n); }).catch(() => {});
       prev = q;

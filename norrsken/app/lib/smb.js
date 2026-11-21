@@ -101,7 +101,7 @@ function run(cmd, opts, old) {
         .catch(() => ({ ok: false, out: '', err: 'Kunde inte prata med Time Capsule' }))
         .then((r) => { running--; if (waiting.length) waiting.shift()(); resolve(r); });
     };
-    if (running < MAX_AT_ONCE) go(); else waiting.push(go);
+    if (running < MAX_AT_ONCE) go(); else if (opts && opts.first) waiting.unshift(go); else waiting.push(go); // a piece somebody waits for goes before the rest
   });
 }
 function run1(cmd, { cwd, timeout = 120000, ignore } = {}, old) {
@@ -157,11 +157,11 @@ function rmdirAll(dir) {
 }
 
 /** Fetch several files of one folder into `cwd` in one go (one login: the Time Capsule is slow to log in). */
-function getMany(cwd, dir, names) {
+function getMany(cwd, dir, names, first) {
   if (!SAFE_PATH.test(dir) || !names.length || !names.every(n => SAFE_NAME.test(n))) return Promise.resolve({ ok: false, err: 'Ogiltigt namn' });
   const fsm = require('fs');
   const pth = require('path');
-  return exec('cd "' + dir + '"; ' + names.map(n => 'get "' + n + '" "' + n + '.fetch"').join('; '), { cwd, timeout: 3 * 60e3 }).then((r) => {
+  return exec('cd "' + dir + '"; ' + names.map(n => 'get "' + n + '" "' + n + '.fetch"').join('; '), { cwd, timeout: 3 * 60e3, first: !!first }).then((r) => {
     let all = true;
     for (const n of names) {
       try { fsm.renameSync(pth.join(cwd, n + '.fetch'), pth.join(cwd, n)); } catch (_) { all = false; }
