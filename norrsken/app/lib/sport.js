@@ -323,6 +323,8 @@ const OTHER_SPORTS = [
   [/skidskytte|biathlon/i, 'Skidskytte'], [/l[äa]ngdskid|l[äa]ngd(åkning|akning)|cross[- ]?country|tour de ski/i, 'Längdskidor'],
 ];
 const GENDER_DAM = /\b(dam|damer|damerna|damlandslag(et)?|damkronorna|damallsvenskan|elitettan|women'?s?|female|kvinnor|flickor)\b/i;
+// a club's women's team: never the club followed (Luleå HF/MSSK in SDHL is not Luleå Hockey in SHL)
+const WOMEN_CLUB = /\b(sdhl|mssk|dam|damer|damerna|damlag(et)?|damallsvenskan|elitettan|women'?s?|wsl|female|kvinnor|flickor|ladies)\b/i;
 const GENDER_HERR = /\b(herr|herrar|herrarna|herrlandslag(et)?|men'?s|m[äa]n)\b/i;
 const AGE_RE = /\b(?:j-?(?:18|20)|u-?(?:15|16|17|18|19|20|21|23))\b|\bjunior(?:er|landslag(?:et)?)?\b|\bpojklandslag(?:et)?\b|\bflicklandslag(?:et)?\b/i;
 const COMPS = [
@@ -379,13 +381,14 @@ function teamFollow(fav) {
     return {
       id: fav.id, name: fav.name, short: fav.short, col: fav.col, maxLen: 4 * 3600e3, vs: fav, sport: 'Fotboll',
       // every match the club plays, whatever the league or cup: its name on one side of "A – B", and not another sport
-      ok: (t, d, chn) => fav.re.test(t) && !!matchup(t, fav) && !HOCKEY.test(t + ' ' + chn) && !OTHER_SPORT.test(t + ' ' + d) && !/\bnba\b|\bnhl\b|\bnfl\b/i.test(t + ' ' + chn),
+      ok: (t, d, chn) => fav.re.test(t) && !!matchup(t, fav) && !HOCKEY.test(t + ' ' + chn) && !OTHER_SPORT.test(t + ' ' + d) && !/\bnba\b|\bnhl\b|\bnfl\b/i.test(t + ' ' + chn) && !WOMEN_CLUB.test(t + ' ' + d + ' ' + chn),
     };
   }
   return {
     id: fav.id, name: fav.name, short: fav.short, col: fav.col, maxLen: 5 * 3600e3, vs: fav, sport: 'Ishockey',
     ok: (t, d, chn) => {
       if (!fav.re.test(t)) return false;
+      if (WOMEN_CLUB.test(t + ' ' + d + ' ' + chn)) return false; // the club's women's team (SDHL) is not the team followed
       // "Luleå HF - Färjestad BK" has no hockey word in it: two known hockey clubs in the title is hockey enough
       const other = TEAMS.some(x => x !== fav && x.sport === 'hockey' && x.re.test(t));
       return other || HOCKEY.test(t + ' ' + d + ' ' + chn);
@@ -466,9 +469,23 @@ function collect(follows, channels, epg, now, days = 1) {
       alt: best.chans.filter(c => !chans.includes(c)).sort((a, b) => channelScore(b.n, b.region) - channelScore(a.n, a.region)), // other countries' broadcasts: only for a recording whose Swedish channel will not start
       arena: arenaOf(best, f),
       foreign, // only a foreign broadcast is known so far (the Swedish one usually shows up hours before the match)
+      _f: f, _mu: best.mu,
     };
+  }).filter((m) => {
+    // a club hockey game the league list puts somewhere else than SHL (the club's women in SDHL, its juniors): not
+    // the team followed – not shown, never recorded
+    const f = m._f, mu = m._mu;
+    delete m._f; delete m._mu;
+    if (!veto || f.sport !== 'Ishockey' || f.nation || !f.vs || !mu) return true;
+    const otherName = sideKey(mu.home) === sideKey(f.vs.short || f.vs.name) || f.vs.re.test(mu.home) ? mu.away : mu.home;
+    const otherTeam = TEAMS.find(x => x !== f.vs && x.sport === 'hockey' && x.re.test(otherName));
+    const word = String(otherName).split(/\s+/)[0].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const v = veto(m, f.vs.re, otherTeam ? otherTeam.re : new RegExp(word, 'i'));
+    return v !== 'other';
   });
 }
+let veto = null; // (match, team's pattern, opponent's pattern) → 'shl' | 'other' | null – set by the server (swehockey)
+function setVeto(fn) { veto = fn; }
 
 /*
  * Where the home team plays. The guide's own text wins ("Ishockey från Löfbergs Arena där …"); otherwise the home
@@ -524,4 +541,4 @@ function findMatch(teamIdValue, channels, epg, opts = {}) {
   return todayAll(teamIdValue, channels, epg, opts)[0] || null;
 }
 
-module.exports = { countryOf, sideKey, NATION_DEFAULT, regionOf, classify, TEAMS, teamId, teamIds, upcoming, recToday, team, list, matchup, findMatch, matchesToday, todayAll, channelScore, stockholmDay, stockholmTime, eventOf };
+module.exports = { setVeto, WOMEN_CLUB, countryOf, sideKey, NATION_DEFAULT, regionOf, classify, TEAMS, teamId, teamIds, upcoming, recToday, team, list, matchup, findMatch, matchesToday, todayAll, channelScore, stockholmDay, stockholmTime, eventOf };

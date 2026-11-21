@@ -897,3 +897,37 @@ test('older Safari (iPads on iOS 12–14) gets fallbacks in the CSS: inset writt
     assert.ok(n(c.transform(a)) >= n(a), f);
   }
 });
+
+test('the SHL team only: a game the league list puts in SDHL (the club\'s women) is neither shown nor recorded', async () => {
+  const sw = require('../lib/swehockey');
+  const sp = require('../lib/sport');
+  const html = '<table><tr><th>Group / Time</th><th>Game</th></tr>' +
+    '<tr><td><a href="/ScheduleAndResults/Overview/1">SDHL</a></td><td></td></tr>' +
+    '<tr><td>13:00</td><td>Djurgårdens IF - Luleå HF</td><td></td><td>Hovet</td></tr>' +
+    '<tr><td><a href="/ScheduleAndResults/Overview/2">SHL</a></td><td></td></tr>' +
+    '<tr><td>18:00</td><td>Frölunda HC - Luleå HF</td><td></td><td>Scandinavium</td></tr></table>';
+  const games = sw.parse(html);
+  assert.deepEqual(games.map(g => g.group + ' ' + g.time + ' ' + g.home + '–' + g.away), ['SDHL 13:00 Djurgårdens IF–Luleå HF', 'SHL 18:00 Frölunda HC–Luleå HF']);
+  sw._setFetcher(async () => html);
+  const day = Date.parse('2026-11-21T12:00:00+01:00');
+  await sw.load(sw.stockholmDate(day));
+  sp.setVeto((m, a, b) => sw.verdict(m, a, b));
+  const at = (h) => Date.parse('2026-11-21T' + h + ':00+01:00');
+  const chans = [{ id: 1, n: 'TV4 Play', epg: 'e1', region: 'se' }, { id: 2, n: 'TV4 Hockey', epg: 'e2', region: 'se' }];
+  const epg = { map: new Map([['e1', [[at('13:00'), at('15:30'), 'Djurgården - Luleå', 'Ishockey: Djurgården möter Luleå.']]], ['e2', [[at('18:00'), at('20:30'), 'Frölunda - Luleå', 'Ishockey']]]]) };
+  const got = sp.recToday('lulea', false, chans, epg, { now: at('12:00') }).map(m => m.title);
+  sp.setVeto(null);
+  sw._setFetcher(null);
+  assert.ok(!got.some(t => /Djurg/.test(t)), 'the women\'s game is not the team: ' + JSON.stringify(got));
+  assert.ok(got.some(t => /Frölunda/.test(t)), 'the SHL game is: ' + JSON.stringify(got));
+});
+
+test('a club game the text calls the women\'s (SDHL, dam) is not the team either, even without the league list', () => {
+  const sp = require('../lib/sport');
+  const at = (h) => Date.parse('2026-11-21T' + h + ':00+01:00');
+  const chans = [{ id: 1, n: 'TV4 Sport', epg: 'c1', region: 'se' }];
+  const epg = { map: new Map([['c1', [[at('13:00'), at('15:30'), 'Djurgården - Luleå', 'Ishockey: SDHL. Djurgården möter Luleå.'], [at('18:00'), at('20:30'), 'Brynäs - Luleå', 'Ishockey: SHL.']]]]) };
+  const got = sp.recToday('lulea', false, chans, epg, { now: at('12:00') }).map(m => m.title);
+  assert.deepEqual(got.filter(t => /Djurg/.test(t)), []);
+  assert.ok(got.some(t => /Brynäs/.test(t)));
+});

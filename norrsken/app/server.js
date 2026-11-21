@@ -14,6 +14,11 @@ const { Proxy } = require('./lib/proxy');
 const ff = require('./lib/ffmpeg');
 const qr = require('./lib/qr');
 const sport = require('./lib/sport');
+// the league each hockey game is in, from Svenska Ishockeyförbundet's list of the day's games: a club's women (SDHL) or
+// juniors never pass as the SHL team followed (see lib/swehockey.js)
+const swehockey = require('./lib/swehockey');
+sport.setVeto((m, re1, re2) => swehockey.verdict(m, re1, re2));
+if (process.env.NSK_SWEHOCKEY !== '0') swehockey.start();
 const tsbuf = require('./lib/tsbuf');
 const storage = require('./lib/storage');
 const downloads = require('./lib/downloads');
