@@ -329,6 +329,14 @@
   Player.prototype.play = function (item, start) {
     var self = this;
     if (this.tshift && (!this.tshift.match || item.id !== this.tshift.chId)) this.endTshift();
+    // a finished match recording is a file on the server: a reload (stall, "Försök igen") plays it again from where it
+    // was – it must not ask for the channel, which the provider's one connection may be busy with another match
+    if (this.live && this.tshift && this.tshift.mode === 'rec' && this.tshift.match && this.tshift.done && this.tshift.url && item.id === this.tshift.chId) {
+      this.hideError();
+      this.buffering(true);
+      this.startSource(this.tshift.pos || 0);
+      return;
+    }
     this.iosLiveOff = false;
     this.downloaded = false; // until the server says this one plays from its disk
     this.item = item;
@@ -1845,7 +1853,9 @@
       var a = (r.recs || []).find(function (x) { return x.id === ts.id; });
       if (self.tshift !== ts) return;
       // the match is over and the recording finished: live is the channel itself again
-      if (a && !a.recording) { ts.done = true; self.endTshift(); self.startSource(0); return; }
+      // (not while another match is being recorded: the provider's one connection is that one's, so the channel will
+      // not play – stay on the finished recording, at its end)
+      if (a && !a.recording) { ts.done = true; if (!r.active) { self.endTshift(); self.startSource(0); return; } }
       // a few seconds back from the newest piece: the playlist may be a little behind what the server has written
       // 20 s back from the newest piece: closer than that the picture waits for every new piece (it stopped every ~12 s)
       ts.pos = a ? Math.max(0, a.sec - 20) : 0;
