@@ -1724,6 +1724,16 @@ route('GET', '/pause/:id/live.m3u8', (req, res, q, p) => {
 route('GET', '/pause/:id/:name', async (req, res, q, p) => {
   const f = await tsbuf.fileReady(p.id, p.name);
   if (!f) return bad(res, 'slut', 404);
+  // HEVC from a provider is written by ffmpeg as "hev1"; Apple's players and the AirPlay TVs want "hvc1" (the picture
+  // is missing, only the sound plays): the start file says hvc1, the video itself is the same
+  if (p.name === 'init.mp4') {
+    try {
+      const b = fs.readFileSync(f);
+      for (let i = b.indexOf('hev1'); i >= 0; i = b.indexOf('hev1', i + 4)) b.write('hvc1', i, 'latin1');
+      res.writeHead(200, { 'Content-Type': 'video/mp4', 'Content-Length': b.length, 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' });
+      return res.end(b);
+    } catch (e) { return bad(res, 'saknas', 404); }
+  }
   fs.stat(f, (err, st) => {
     if (err) return bad(res, 'saknas', 404);
     res.writeHead(200, { 'Content-Type': p.name.endsWith('.mp4') ? 'video/mp4' : 'video/iso.segment', 'Content-Length': st.size, 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' });

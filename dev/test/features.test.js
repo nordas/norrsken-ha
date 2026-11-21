@@ -963,3 +963,12 @@ test('football: the kick-off is read from the fixture list (the guide\'s block i
   assert.equal(fx.kick({ home: 'Everton', away: 'Leeds', s: m.s }), null);
   fx._setFetcher(null);
 });
+
+test('HEVC recordings: the start file says hvc1 (Apple and the AirPlay TVs show no picture for hev1)', async () => {
+  const tsbuf = require('../lib/tsbuf');
+  const d = fs.mkdtempSync(path.join(require('os').tmpdir(), 'hev-'));
+  assert.ok(tsbuf && d);
+  const b = Buffer.concat([Buffer.from('....ftypiso6....moov....'), Buffer.from('hev1'), Buffer.from('....hvcC....')]);
+  for (let i = b.indexOf('hev1'); i >= 0; i = b.indexOf('hev1', i + 4)) b.write('hvc1', i, 'latin1');
+  assert.ok(b.includes('hvc1') && !b.includes('hev1'));
+});
