@@ -492,14 +492,24 @@ async function fileReady(id, name) {
   if (num) for (let k = 1; k <= 7; k++) { const nx = 'p' + String(+num[1] + k).padStart(5, '0') + '.m4s'; if (m.up.has(nx) && !fs.existsSync(path.join(s.dir, nx)) && !m.fetching.has(nx)) want.push(nx); }
   let p = m.fetching.get(name);
   if (!p) {
-    p = (async () => {
-      let r = await smb.getMany(s.dir, m.dir, want);
-      if (!r.ok && !fs.existsSync(f)) r = await smb.getMany(s.dir, m.dir, [name]); // once more, the piece itself
+    // the piece asked for comes first, alone (a TV gives up after ~10 s: it must not wait for the next seven too);
+    // the next ones are read one after another behind it, each waiting only for itself when it is asked for
+    const one = (n) => (async () => {
+      let r = await smb.getMany(s.dir, m.dir, [n]);
+      if (!r.ok && !fs.existsSync(path.join(s.dir, n))) r = await smb.getMany(s.dir, m.dir, [n]); // once more
       // fetched back: it stays LOCAL_FOR_MS for the player, then leaves the buffer again (evict)
-      for (const n of want) m.fetchedAt.set(n, Date.now());
+      m.fetchedAt.set(n, Date.now());
       return r;
-    })().finally(() => { for (const n of want) m.fetching.delete(n); });
-    for (const n of want) m.fetching.set(n, p);
+    })().finally(() => { m.fetching.delete(n); });
+    p = one(name);
+    m.fetching.set(name, p);
+    let prev = p;
+    for (const n of want.slice(1)) {
+      const q = prev.catch(() => {}).then(() => (fs.existsSync(path.join(s.dir, n)) ? null : one(n)));
+      m.fetching.set(n, q);
+      q.finally(() => { if (m.fetching.get(n) === q) m.fetching.delete(n); }).catch(() => {});
+      prev = q;
+    }
   }
   await p;
   return fs.existsSync(f) ? f : null;
