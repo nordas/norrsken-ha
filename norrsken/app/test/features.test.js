@@ -950,3 +950,16 @@ test('the league list writes å ä ö as hex references (&#xE5;): the game is st
   assert.equal(m.puck, Date.parse('2026-11-21T15:15:00+01:00'));
   sw._setFetcher(null);
 });
+
+test('football: the kick-off is read from the fixture list (the guide\'s block includes the studio), the match ends after it', async () => {
+  const fx = require('../lib/fixtures');
+  const json = JSON.stringify({ events: [{ date: '2026-11-21T17:30Z', competitions: [{ competitors: [{ team: { displayName: 'Newcastle United' } }, { team: { displayName: 'Arsenal' } }] }] }, { date: '2026-11-21T15:00Z', competitions: [{ competitors: [{ team: { displayName: 'Chelsea' } }, { team: { displayName: 'Fulham' } }] }] }] });
+  fx._setFetcher(async () => json);
+  const m = { home: 'Newcastle', away: 'Arsenal', s: Date.parse('2026-11-21T17:25:00+01:00') };
+  fx.kick(m); // starts reading
+  await new Promise(r => setTimeout(r, 50));
+  assert.equal(fx.kick(m), Date.parse('2026-11-21T17:30:00Z'));
+  assert.equal(m.kick, Date.parse('2026-11-21T17:30:00Z'));
+  assert.equal(fx.kick({ home: 'Everton', away: 'Leeds', s: m.s }), null);
+  fx._setFetcher(null);
+});

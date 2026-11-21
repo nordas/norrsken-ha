@@ -17,6 +17,7 @@ const sport = require('./lib/sport');
 // the league each hockey game is in, from Svenska Ishockeyförbundet's list of the day's games: a club's women (SDHL) or
 // juniors never pass as the SHL team followed (see lib/swehockey.js)
 const swehockey = require('./lib/swehockey');
+const fixtures = require('./lib/fixtures'); // football kick-off times (see matchEnd)
 sport.setVeto((m, re1, re2) => swehockey.verdict(m, re1, re2));
 if (process.env.NSK_SWEHOCKEY !== '0') swehockey.start();
 const tsbuf = require('./lib/tsbuf');
@@ -1331,8 +1332,10 @@ function saveQueue() { try { fs.writeFileSync(QUEUE_FILE, JSON.stringify(matchQu
  * shootout fit in 2 h 50 min after it. (The guide's window is four hours, a guess.) Football: the guide's end.
  */
 const HOCKEY_LEN = 170 * 60e3;
+const FOOTBALL_LEN = 140 * 60e3; // 90 min, the break, stoppage time and the whistle; the studio show after it is not recorded
 function matchEnd(m) {
   if (m.puck) return Math.min(m.e, m.puck + HOCKEY_LEN); // only a hockey game has a puck drop
+  if (m.kick) return Math.min(m.e, m.kick + FOOTBALL_LEN); // a football match, its kick-off read from the fixture list
   return m.e;
 }
 // start: the earliest anyone says – the league's puck drop less a quarter, or the broadcast
@@ -1466,6 +1469,7 @@ function recList(now) {
     const m = sport.recToday(q.team, false, chans, catalog.epg, { now }).find(x => x.team.id === q.team && Math.abs(x.s - q.s) < 3 * 3600e3);
     if (m) { m.queued = true; list.push(m); }
   }
+  for (const m of list) if (m.kind && m.kind.sport === 'Fotboll' && !m.puck && process.env.NSK_SWEHOCKEY !== '0') { try { fixtures.kick(m); } catch (e) { /* the guide's end */ } }
   return list;
 }
 function matchRecTick() {
