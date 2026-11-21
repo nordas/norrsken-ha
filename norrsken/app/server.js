@@ -1312,6 +1312,25 @@ const MATCH_TEAM = 'lulea';
 const MATCH_LEAD_MS = 5 * 60e3; // start a little before the puck drops
 const MATCH_TAIL_MS = 10 * 60e3; // and go on a little after the final whistle
 const KEEP_MATCH_MS = 24 * 3600e3;
+/*
+ * Other matches to record, asked for (Arsenal's tonight): team|start. They wait their turn – the provider gives one
+ * connection, so the one already recording finishes first.
+ */
+const QUEUE_FILE = path.join(DATA_DIR, 'matchqueue.json');
+let matchQueue = [];
+try { matchQueue = JSON.parse(fs.readFileSync(QUEUE_FILE, 'utf8')).filter(q => q && Date.now() - q.s < KEEP_MATCH_MS); } catch (_) { matchQueue = []; }
+function saveQueue() { try { fs.writeFileSync(QUEUE_FILE, JSON.stringify(matchQueue)); } catch (e) { console.error('[match] kunde inte spara kön:', e.message); } }
+/*
+ * When a hockey match is over: the league list says when the puck drops; regular time, intermissions, overtime and a
+ * shootout fit in 2 h 50 min after it. (The guide's window is four hours, a guess.) Football: the guide's end.
+ */
+const HOCKEY_LEN = 170 * 60e3;
+function matchEnd(m) {
+  if (m.puck) return Math.min(m.e, m.puck + HOCKEY_LEN); // only a hockey game has a puck drop
+  return m.e;
+}
+// start: the earliest anyone says – the league's puck drop less a quarter, or the broadcast
+function matchStart(m) { return m.puck ? Math.min(m.s, m.puck - 15 * 60e3) : m.s; }
 const matchRecs = new Map(); // team|start → { key, mid, s, e, title, chId, chName, sessId, parts }
 const MATCH_FILE = path.join(DATA_DIR, 'matchrecs.json');
 /** The match recordings survive a restart of the add-on (an update in the middle of a match must not lose its start). */
@@ -1424,7 +1443,15 @@ route('GET', '/mrec/:mid/live.m3u8', (req, res, q, p) => {
 /** Records every match of the favourite team (Luleå Hockey) from just before it starts until the end, if it's on a channel we have. */
 /** What records by itself today: Luleå's matches, and the skiing world cups when that is switched on. Nothing else. */
 function recList(now) {
-  return sport.recToday(MATCH_TEAM, (store.config.options || {}).skiRec === true, sportChannels(store.profile('')), catalog.epg, { now });
+  const chans = sportChannels(store.profile(''));
+  const list = sport.recToday(MATCH_TEAM, (store.config.options || {}).skiRec === true, chans, catalog.epg, { now });
+  // the asked-for ones, after (the provider's one connection goes to the one already on first)
+  for (const q of matchQueue) {
+    if (list.some(m => m.team.id + '|' + m.s === q.key)) continue;
+    const m = sport.recToday(q.team, false, chans, catalog.epg, { now }).find(x => x.team.id === q.team && Math.abs(x.s - q.s) < 3 * 3600e3);
+    if (m) { m.queued = true; list.push(m); }
+  }
+  return list;
 }
 function matchRecTick() {
   if (!catalog.ready() || !matchRecReady) return;
@@ -1438,9 +1465,16 @@ function matchRecTick() {
   try { list = recList(now); } catch (e) { return; }
   for (const m of list) {
     const key = m.team.id + '|' + m.s;
-    if (now < m.s - MATCH_LEAD_MS || now > m.e + MATCH_TAIL_MS) continue;
-    if (matchStopped.has(key)) continue; // the viewer said stop
     const had = matchRecs.get(key);
+    // over (hockey: the time after the puck drop): the recording is finished and kept – the connection is free for
+    // the next match asked for
+    if (had && now > matchEnd(m) + MATCH_TAIL_MS) {
+      const hs = tsbuf.get(had.sessId);
+      if (hs && !hs.done && !hs.dead) { tsbuf.giveUp(hs, 'matchen är slut'); console.log('[match]', m.title, 'är slut – inspelningen är klar'); }
+      continue;
+    }
+    if (now < matchStart(m) - MATCH_LEAD_MS || now > matchEnd(m) + MATCH_TAIL_MS) continue;
+    if (matchStopped.has(key)) continue; // the viewer said stop
     if (had) {
       // still recording, or finished as planned: nothing to do; it stopped early (provider dropped it): go on
       const hs = tsbuf.get(had.sessId);
@@ -1474,7 +1508,7 @@ function matchRecTick() {
     const maxConn = (catalog.data && catalog.data.maxConn) || 1;
     if (maxConn <= 2 && (ff.activeSessions() > 0 || tsbuf.pauseActive() > 0 || proxy.activeCount() > 0 || Date.now() - lastStreamAt < 3 * 60e3)) {
       // skiing never cuts off what someone is watching: it is recorded when the connection is free (or when they watch it)
-      if (m.team.id !== MATCH_TEAM) { matchWait.set(key, now); continue; }
+      if (m.team.id !== MATCH_TEAM && !m.queued) { matchWait.set(key, now); continue; }
       if (now - (matchWaitLog || 0) > 5 * 60e3) { matchWaitLog = now; console.log('[match]', m.title, 'börjar – matchinspelningen tar leverantörens anslutning före annat tittande'); }
       matchWait.set(key, now);
       takeConnection('matchinspelning');
@@ -1493,7 +1527,7 @@ function startMatchRec(m, key, had, ch, now = Date.now()) {
   if (!src || !src.primary) throw new Error('kanalen saknas: ' + (ch.n || ch.id));
   downloads.yieldTo('matchinspelning');
   const chName = (m.chans && m.chans[0] === ch && m.chName) || ch.n;
-  const sess = tsbuf.start(src.primary, { ua: catalog.ua(), maxMin: Math.ceil((m.e + MATCH_TAIL_MS - now) / 60e3), ch: m.title + ' på ' + chName, match: true });
+  const sess = tsbuf.start(src.primary, { ua: catalog.ua(), maxMin: Math.ceil((matchEnd(m) + MATCH_TAIL_MS - now) / 60e3), ch: m.title + ' på ' + chName, match: true });
   if (had) {
     console.log('[match] inspelningen av', m.title, 'avbröts – startar om');
     const prev = tsbuf.get(had.sessId);
@@ -1520,7 +1554,7 @@ function dueMatch(chId, now = Date.now(), aheadMs = 0) {
     if (!ch) continue;
     const key = m.team.id + '|' + m.s;
     if (matchStopped.has(key)) continue;
-    if (now < m.s - MATCH_LEAD_MS - aheadMs || now > m.e + MATCH_TAIL_MS) continue;
+    if (now < matchStart(m) - MATCH_LEAD_MS - aheadMs || now > matchEnd(m) + MATCH_TAIL_MS) continue;
     const had = matchRecs.get(key);
     if (had) {
       const hs = tsbuf.get(had.sessId);
@@ -1575,6 +1609,16 @@ route('GET', '/api/matchrec', (req, res) => {
   const on = recs.find(x => x.recording) || null;
   ok(res, { active: on ? { id: on.id, chId: on.chId, chName: on.ch, title: on.title } : null, recs });
 });
+/** Record this match too (any followed team's): { team, s } – it waits for the one already recording. */
+route('POST', '/api/matchrec/queue', async (req, res) => {
+  const b = await readBody(req);
+  const team = String(b.team || ''), s0 = +b.s || 0;
+  if (!sport.team(team) || !s0) return bad(res, 'Vilken match?', 400);
+  const key = team + '|' + s0;
+  if (!matchQueue.some(q => q.key === key)) { matchQueue.push({ key, team, s: s0, at: Date.now() }); saveQueue(); console.log('[match] ska spela in', team, new Date(s0).toISOString(), 'när anslutningen är ledig'); }
+  ok(res, { ok: true, queue: matchQueue });
+});
+
 route('POST', '/api/matchrec/stop', (req, res) => {
   let n = 0;
   for (const [k, r] of matchRecs) {

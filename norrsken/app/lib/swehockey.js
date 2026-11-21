@@ -83,7 +83,8 @@ function start() {
 }
 
 const SHL_GROUP = /(^|[^a-z])shl([^a-z]|$)/i; // "SHL", "SM-slutspel SHL", "SHL Kvalserie" – not "SDHL"
-function verdict(m, re1, re2) {
+/** The game in the day's list that this broadcast shows: { group, time, home, away } or null. */
+function find(m, re1, re2) {
   const c = cache.get(stockholmDate(m.s));
   if (!c || !c.games) return null;
   let meet = c.games.filter(g => (re1.test(g.home) && re2.test(g.away)) || (re2.test(g.home) && re1.test(g.away)));
@@ -93,8 +94,17 @@ function verdict(m, re1, re2) {
   const at = +hm[0] * 60 + +hm[1];
   const near = meet.filter(g => { const t = g.time.split(':'); return Math.abs(+t[0] * 60 + +t[1] - at) <= 75; });
   if (near.length) meet = near;
-  if (meet.some(g => SHL_GROUP.test(g.group) && !/sdhl/i.test(g.group))) return 'shl';
-  return 'other';
+  return meet.find(g => SHL_GROUP.test(g.group) && !/sdhl/i.test(g.group)) || meet[0];
+}
+function verdict(m, re1, re2) {
+  const g = find(m, re1, re2);
+  if (!g) return null;
+  // when the puck drops (the broadcast's start is a guess from the guide): the recording ends a set time after it
+  const [hh, mm] = g.time.split(':').map(Number);
+  const day = Date.parse(stockholmDate(m.s) + 'T00:00:00Z');
+  const off = new Date(m.s).getTime() - Date.parse(new Date(m.s).toLocaleString('sv-SE', { timeZone: 'Europe/Stockholm' }).replace(' ', 'T') + 'Z');
+  m.puck = day + (hh * 60 + mm) * 60e3 + off;
+  return SHL_GROUP.test(g.group) && !/sdhl/i.test(g.group) ? 'shl' : 'other';
 }
 
-module.exports = { parse, load, start, verdict, stockholmDate, _setFetcher: (f) => { fetcher = f; cache.clear(); } };
+module.exports = { parse, load, start, verdict, find, stockholmDate, _setFetcher: (f) => { fetcher = f; cache.clear(); } };
