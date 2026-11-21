@@ -15,8 +15,17 @@ const DAY_MS = 86400e3;
 const cache = new Map(); // 'YYYY-MM-DD' → { at, games: [{ group, time, home, away }] }
 let fetcher = null; // tests put their own
 
+// the clock in Stockholm, by parts: the add-on's Node may lack the Swedish locale ('sv-SE' then gives "11/21/2026")
+const STHLM = new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Stockholm', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' });
+function sthlm(t) {
+  const p = {};
+  for (const x of STHLM.formatToParts(new Date(t))) p[x.type] = x.value;
+  return { y: +p.year, mo: +p.month, d: +p.day, h: +p.hour % 24, mi: +p.minute, s: +p.second };
+}
+const pad = (n) => String(n).padStart(2, '0');
 function stockholmDate(t) {
-  return new Date(t).toLocaleDateString('sv-SE', { timeZone: 'Europe/Stockholm' }); // YYYY-MM-DD
+  const p = sthlm(t);
+  return p.y + '-' + pad(p.mo) + '-' + pad(p.d); // YYYY-MM-DD
 }
 
 const strip = (s) => String(s).replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&#(\d+);/g, (x, n) => String.fromCharCode(+n)).replace(/\s+/g, ' ').trim();
@@ -90,8 +99,8 @@ function find(m, re1, re2) {
   let meet = c.games.filter(g => (re1.test(g.home) && re2.test(g.away)) || (re2.test(g.home) && re1.test(g.away)));
   if (!meet.length) return null;
   // the men and the women of the same two clubs can meet the same day: the game nearest the broadcast's start counts
-  const hm = new Date(m.s).toLocaleTimeString('sv-SE', { timeZone: 'Europe/Stockholm', hour: '2-digit', minute: '2-digit' }).split(':');
-  const at = +hm[0] * 60 + +hm[1];
+  const hm = sthlm(m.s);
+  const at = hm.h * 60 + hm.mi;
   const near = meet.filter(g => { const t = g.time.split(':'); return Math.abs(+t[0] * 60 + +t[1] - at) <= 75; });
   if (near.length) meet = near;
   return meet.find(g => SHL_GROUP.test(g.group) && !/sdhl/i.test(g.group)) || meet[0];
@@ -102,7 +111,8 @@ function verdict(m, re1, re2) {
   // when the puck drops (the broadcast's start is a guess from the guide): the recording ends a set time after it
   const [hh, mm] = g.time.split(':').map(Number);
   const day = Date.parse(stockholmDate(m.s) + 'T00:00:00Z');
-  const off = new Date(m.s).getTime() - Date.parse(new Date(m.s).toLocaleString('sv-SE', { timeZone: 'Europe/Stockholm' }).replace(' ', 'T') + 'Z');
+  const w = sthlm(m.s);
+  const off = new Date(m.s).getTime() - Date.UTC(w.y, w.mo - 1, w.d, w.h, w.mi, w.s);
   m.puck = day + (hh * 60 + mm) * 60e3 + off;
   return SHL_GROUP.test(g.group) && !/sdhl/i.test(g.group) ? 'shl' : 'other';
 }
