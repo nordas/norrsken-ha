@@ -57,8 +57,8 @@ const RING_SEC = 2; // live through memory: short pieces, so a channel starts in
 const RING = () => Math.max(8, Math.min(40, Math.floor(ofShm(0.5, 80e6) / 2e6))); // live without the Time Capsule: this many pieces (up to 80 s) in memory, no more
 const STAGE_MAX = () => ofShm(0.8, (+process.env.NSK_STAGE_MAX_MB || 300) * 1e6); // the buffer of one recording never grows past this
 const TC_GRACE_MS = +process.env.NSK_TC_GRACE_MS || 120e3; // the Time Capsule may be away this long, then the recording stops
-const KEEP_MS = 24 * 3600e3; // hard: nothing is kept longer, here or on the Time Capsule
-const KEEP_MATCH_DIR_MS = KEEP_MS;
+const KEEP_MS = 24 * 3600e3; // a pause: nothing is kept longer, here or on the Time Capsule
+const KEEP_MATCH_DIR_MS = (+process.env.NSK_MATCH_KEEP_DAYS || 7) * 86400e3; // a match recording: a week (to watch later)
 const IDLE_MS = 3 * 60e3; // live through the server (nothing recorded): nobody has checked in for 3 min, nobody watches
 /*
  * A real pause waits for its viewer much longer: a locked iPhone (or a TV gone to standby) stops checking in, and
@@ -655,7 +655,7 @@ function length(s) {
 setInterval(() => {
   const now = Date.now();
   for (const s of [...sessions.values()]) {
-    if (now - s.started > KEEP_MS) { stop(s, 'ett dygn gånget'); continue; } // hard: never longer, match or pause
+    if (now - s.started > (s.match ? KEEP_MATCH_DIR_MS : KEEP_MS)) { stop(s, s.match ? 'en vecka gången' : 'ett dygn gånget'); continue; } // hard: never longer
     if (!s.match && now - s.last > (s.ring ? IDLE_MS : PAUSE_IDLE_MS)) stop(s, 'ingen tittar');
   }
 }, 20e3).unref();
@@ -693,4 +693,4 @@ function _forget(id) {
   fs.rmSync(s.dir, { recursive: true, force: true });
 }
 
-module.exports = { giveUp, stageInfo: () => ({ dir: tcMode() ? stageRoot() : rootDir(), mem: tcMode(), shmMb: Math.round(shmTotal() / 1e6), freeMb: (f => isFinite(f) ? Math.round(f / 1e6) : null)(freeBytes(fs.existsSync(rootDir()) ? rootDir() : path.dirname(rootDir()))) }), livePlaylist, _forget, wakeTC, sweepRemote, recoverTC, protect, recording, preflight, list, restore, playlistMulti, _hideLinks: hideLinks, start, get, stop, stopAll, stopPauses, matchSession, playlist, file, fileReady, length, active, pauseActive, cleanStart, rootDir };
+module.exports = { _keep: () => ({ pause: KEEP_MS, match: KEEP_MATCH_DIR_MS }), giveUp, stageInfo: () => ({ dir: tcMode() ? stageRoot() : rootDir(), mem: tcMode(), shmMb: Math.round(shmTotal() / 1e6), freeMb: (f => isFinite(f) ? Math.round(f / 1e6) : null)(freeBytes(fs.existsSync(rootDir()) ? rootDir() : path.dirname(rootDir()))) }), livePlaylist, _forget, wakeTC, sweepRemote, recoverTC, protect, recording, preflight, list, restore, playlistMulti, _hideLinks: hideLinks, start, get, stop, stopAll, stopPauses, matchSession, playlist, file, fileReady, length, active, pauseActive, cleanStart, rootDir };

@@ -250,3 +250,9 @@ test('a channel that answers 4XX at first is asked again (the provider still cou
   assert.equal(r.session, false, 'the provider connection is free for the next channel');
   assert.equal(r.timers, false, 'no timer of it lives on');
 });
+
+test('a match recording is kept a week (to watch later); a pause a day', () => {
+  const tsbuf = require('../lib/tsbuf');
+  assert.equal(tsbuf._keep().match, 7 * 86400e3);
+  assert.equal(tsbuf._keep().pause, 86400e3);
+});

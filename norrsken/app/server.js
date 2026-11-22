@@ -698,7 +698,7 @@ function sportNow(prof, st, base = '') {
   // A match whose broadcast is over but whose recording is there (or still running to the final whistle) comes first:
   // it is what there is to watch, even when another match has started since.
   const recorded = hit.list.find(x => x.state === 'ended' && recFor(x) && Date.now() < x.e + 12 * 3600e3);
-  if (!recorded && !hit.list.some(x => recFor(x))) { const orphan = orphanRecCards(hit.list, base)[0]; if (orphan) return orphan; }
+  if (!recorded && !hit.list.some(x => recFor(x))) { const orphan = orphanRecCards(hit.list, base).find(c => Date.now() < c.e + 12 * 3600e3); if (orphan) return orphan; }
   const m = recorded || hit.list[0] || null;
   if (!m) return m;
   const r = recFor(m);
@@ -777,7 +777,7 @@ function upcomingMatches(prof, st, base = '') {
   }
   // (a match over but recorded stays in the list: the recording is there to watch)
   let done = [];
-  try { done = sport.todayAll(ids, sportChannels(prof), catalog.epg).filter(x => x.state === 'ended' && recFor(x) && Date.now() < x.e + 12 * 3600e3); } catch (e) { /* the list without them */ }
+  try { done = sport.todayAll(ids, sportChannels(prof), catalog.epg).filter(x => x.state === 'ended' && recFor(x) && Date.now() < x.s + REC_KEEP_MS); } catch (e) { /* the list without them */ }
   done = done.concat(orphanRecCards(hit.list.concat(done), base));
   return done.concat(hit.list.filter(m => !done.some(d => d.team.id === m.team.id && d.s === m.s))).map(m => ({
     team: m.team, label: m.label, state: Date.now() >= m.s ? 'live' : 'soon', title: m.title, s: m.s, e: m.e, ch: m.ch, chName: m.chName, chans: m.chans.slice(0, 6), foreign: !!m.foreign,
@@ -1321,6 +1321,7 @@ const MATCH_TEAM = 'lulea';
 const MATCH_LEAD_MS = 5 * 60e3; // start a little before the puck drops
 const MATCH_TAIL_MS = 10 * 60e3; // and go on a little after the final whistle
 const KEEP_MATCH_MS = 24 * 3600e3;
+const REC_KEEP_MS = (+process.env.NSK_MATCH_KEEP_DAYS || 7) * 86400e3; // a finished match recording: a week
 /*
  * Other matches to record, asked for (Arsenal's tonight): team|start. They wait their turn – the provider gives one
  * connection, so the one already recording finishes first.
@@ -1354,7 +1355,7 @@ function matchRecIdsOnFile() {
     const j = JSON.parse(fs.readFileSync(MATCH_FILE, 'utf8'));
     const list = Array.isArray(j) ? j : (j.recs || []);
     const ids = [];
-    for (const r of list) if (r && Date.now() - r.s < KEEP_MATCH_MS) ids.push(...(r.parts || []), r.sessId);
+    for (const r of list) if (r && Date.now() - r.s < REC_KEEP_MS) ids.push(...(r.parts || []), r.sessId);
     return ids.filter(Boolean);
   } catch (_) { return []; }
 }
@@ -1371,7 +1372,7 @@ function loadMatchRecs(keptIds) {
   } catch (_) { return; }
   const kept = new Set(keptIds);
   for (const r of list) {
-    if (!r || !r.key || Date.now() - r.s > KEEP_MATCH_MS) continue;
+    if (!r || !r.key || Date.now() - r.s > REC_KEEP_MS) continue;
     const parts = [...(r.parts || []), r.sessId].filter(id => kept.has(id));
     if (!parts.length) continue;
     r.sessId = parts[parts.length - 1];
@@ -1467,7 +1468,7 @@ function recCard(r, base) {
 function orphanRecCards(list, base) {
   const out = [];
   for (const r of matchRecs.values()) {
-    if (Date.now() > r.e + 12 * 3600e3) continue;
+    if (Date.now() > r.s + REC_KEEP_MS) continue;
     if (list.some(m => recFor(m) === r)) continue;
     const c = recCard(r, base);
     if (c) out.push(c);
@@ -1509,7 +1510,7 @@ function matchRecTick() {
   const now = Date.now();
   for (const [k, t] of matchStopped) if (now - t > KEEP_MATCH_MS) matchStopped.delete(k);
   for (const [k, r] of matchRecs) {
-    if (now - r.s > KEEP_MATCH_MS) { for (const id of [r.sessId].concat(r.parts || [])) { const s = tsbuf.get(id); if (s) tsbuf.stop(s, 'ett dygn gånget'); } matchRecs.delete(k); saveMatchRecs(); }
+    if (now - r.s > REC_KEEP_MS) { for (const id of [r.sessId].concat(r.parts || [])) { const s = tsbuf.get(id); if (s) tsbuf.stop(s, 'en vecka gången'); } matchRecs.delete(k); saveMatchRecs(); }
   }
   if ((store.config.options || {}).matchRec === false) return;
   let list = [];

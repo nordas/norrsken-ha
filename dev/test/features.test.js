@@ -723,6 +723,11 @@ test('sport: several favourite teams, Premier League clubs in every competition,
   // recorded by itself: Luleå only; the skiing world cup when switched on; never a football club
   assert.deepEqual(sport.recToday('lulea', false, ch, epg, { now }).map(m => m.team.id), ['lulea']);
   assert.deepEqual(sport.recToday('lulea', true, ch, epg, { now }).map(m => m.team.id).sort(), ['langd', 'lulea']);
+  // a documentary about a biathlete is not a race, even when its text speaks of the world cup
+  const doc = { map: new Map([['b', [[now + 2 * h, now + 3 * h, 'Mitt liv som skidskytt', 'Om livet i världscupen i skidskytte.']]]]) };
+  assert.deepEqual(sport.recToday('lulea', true, ch, doc, { now }).map(m => m.team.id), []);
+  const race = { map: new Map([['b', [[now + 2 * h, now + 3 * h, 'Skidskytte: Världscupen, sprint herrar', '']]]]) };
+  assert.deepEqual(sport.recToday('lulea', true, ch, race, { now }).map(m => m.team.id), ['skidskytte']);
   // the profile keeps a list; the old single value follows along
   await post('/api/state/p1/prefs', { teams: ['lulea', 'arsenal', 'nonsense'] });
   let s = (await get('/api/state/p1')).json;
@@ -742,7 +747,7 @@ test('sport: a Swedish channel always before another country\'s; one match on se
   const sport = require('../lib/sport');
   const now = Date.UTC(2026, 10, 14, 6);
   const mk = (n, region) => ({ id: n, n, region, epg: '' });
-  const ch = [mk('[Vgtv] (14/11) 17:50 Luleå vs Färjestad', 'foreign'), mk('[Svensk] (14/11) 11:10 U14P: Luleå HF  Vs Piteå HC', 'se'), mk('[Svensk] (14/11) 12:00 J20: Luleå HF - Skellefteå AIK', 'se')];
+  const ch = [mk('[Vgtv] (14/11) 17:50 Luleå vs Färjestad', 'foreign'), mk('[Svensk] (14/11) 11:10 U14P: Luleå HF  Vs Piteå HC', 'se'), mk('[Svensk] (14/11) 12:00 J20: Luleå HF - Skellefteå AIK', 'se'), mk('[Svensk] (14/11) 12:15 U18H: IF Björklöven Vs Luleå HF', 'se')];
   let up = sport.upcoming(['lulea'], ch, { map: new Map() }, { now });
   assert.equal(up.length, 1);
   assert.equal(up[0].foreign, true); // only the Norwegian one is known so far: said, not hidden

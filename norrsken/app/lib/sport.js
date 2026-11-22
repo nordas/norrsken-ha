@@ -296,11 +296,14 @@ const EVENT_LEN = 4 * 3600e3; // the name only says when it starts: a hockey bro
 /* What the start page follows besides the favourite team: Sweden (hockey or football) and the skiing world cups. */
 const SWE_NAMES = 'sverige|sweden|tre kronor|damkronorna|juniorkronorna|småkronorna|bl[åa]gult|damlandslaget|herrlandslaget';
 const SWE_SIDE = new RegExp('(^|[:\\s])(' + SWE_NAMES + ')\\s+[-–—]\\s+\\S|\\S\\s+[-–—]\\s+(' + SWE_NAMES + ')(\\s|$|[,(])', 'i');
-const JUNIOR = /\bjvm\b|junior-?vm|\bu-?(?:18|19|20|21)\b|\bj-?(?:18|20)\b|\bjunior/i;
+const JUNIOR = /\bjvm\b|junior-?vm|\bu-?(?:18|19|20|21)[hdpfj]?\b|\bj-?(?:18|20)[hd]?\b|\bjunior/i;
 const FOOTBALL = /fotboll|football|soccer|landskamp|vm-kval|em-kval|nations league|\bvm\b|\bem\b|\bos\b|fifa|uefa/i;
-const YOUTH = /\b(u\d{2}[pfdj]?|j\d{2}|junior|ungdom|damjunior)\b/i;
+const YOUTH = /\b(u\d{2}[pfdjh]?|j\d{2}[hd]?|junior|ungdom|damjunior)\b/i; // U18H: the boys' U18, not the club
 const OTHER_SPORT = /handboll|bandy|innebandy|basket|volley|curling|tennis|padel|rugby|friidrott|simning|e-?sport|golf|dart/i;
 const WORLD_CUP = /v[äa]rldscup|world cup|tour de ski/i;
+/* A race, by its title (a documentary about a skier says "världscupen" only in its description). */
+const RACE_T = /skidskytte|biathlon|l[äa]ngdskid|l[äa]ngd(åkning|akning)|cross[- ]?country|v[äa]rldscup|world cup|tour de ski|sprint|distans|jaktstart|masstart|stafett|skiathlon|\d+\s?km\b|individuell/i;
+const NOT_RACE = /mitt liv|dokument[äa]r|portr[äa]tt|\bavsnitt\b|bakom kulisserna|\bserie\b/i;
 const FOLLOW = {
   sverige: {
     id: 'sverige', name: 'Sverige', short: 'Sverige', col: ['#005293', '#fecb00'], maxLen: 5 * 3600e3, vs: BY_ID.get('tre-kronor'),
@@ -308,11 +311,11 @@ const FOLLOW = {
   },
   langd: {
     id: 'langd', name: 'Längdskidor', short: 'Längd', col: ['#1d6fb8', '#ffffff'], maxLen: 6 * 3600e3,
-    ok: (t, d) => /l[äa]ngdskid|l[äa]ngd(åkning|akning)|\bl[äa]ngd\b|cross[- ]?country|tour de ski/i.test(t + ' ' + d) && WORLD_CUP.test(t + ' ' + d) && !/skidskytte|biathlon/i.test(t),
+    ok: (t, d) => /l[äa]ngdskid|l[äa]ngd(åkning|akning)|\bl[äa]ngd\b|cross[- ]?country|tour de ski/i.test(t + ' ' + d) && WORLD_CUP.test(t + ' ' + d) && !/skidskytte|biathlon/i.test(t) && RACE_T.test(t) && !NOT_RACE.test(t),
   },
   skidskytte: {
     id: 'skidskytte', name: 'Skidskytte', short: 'Skidskytte', col: ['#0a7a5a', '#ffffff'], maxLen: 6 * 3600e3,
-    ok: (t, d) => /skidskytte|biathlon/i.test(t + ' ' + d) && WORLD_CUP.test(t + ' ' + d),
+    ok: (t, d) => /skidskytte|biathlon/i.test(t + ' ' + d) && WORLD_CUP.test(t + ' ' + d) && RACE_T.test(t) && !NOT_RACE.test(t),
   },
 };
 
@@ -326,7 +329,7 @@ const GENDER_DAM = /\b(dam|damer|damerna|damlandslag(et)?|damkronorna|damallsven
 // a club's women's team: never the club followed (Luleå HF/MSSK in SDHL is not Luleå Hockey in SHL)
 const WOMEN_CLUB = /\b(sdhl|mssk|dam|damer|damerna|damlag(et)?|damallsvenskan|elitettan|women'?s?|wsl|female|kvinnor|flickor|ladies)\b/i;
 const GENDER_HERR = /\b(herr|herrar|herrarna|herrlandslag(et)?|men'?s|m[äa]n)\b/i;
-const AGE_RE = /\b(?:j-?(?:18|20)|u-?(?:15|16|17|18|19|20|21|23))\b|\bjunior(?:er|landslag(?:et)?)?\b|\bpojklandslag(?:et)?\b|\bflicklandslag(?:et)?\b/i;
+const AGE_RE = /\b(?:j-?(?:18|20)[hd]?|u-?(?:15|16|17|18|19|20|21|23)[hdpfj]?)\b|\bjunior(?:er|landslag(?:et)?)?\b|\bpojklandslag(?:et)?\b|\bflicklandslag(?:et)?\b/i;
 const COMPS = [
   [/\bshl\b/i, 'SHL'], [/hockeyallsvenskan/i, 'Hockeyallsvenskan'], [/\bchl\b|champions hockey/i, 'CHL'],
   [/premier league/i, 'Premier League'], [/fa[- ]?cup/i, 'FA-cupen'], [/carabao|efl cup|league cup|ligacupen/i, 'Ligacupen'], [/community shield/i, 'Community Shield'],
